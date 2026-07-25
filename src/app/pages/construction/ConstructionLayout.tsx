@@ -1,12 +1,12 @@
-import { Outlet } from "react-router";
+import { Outlet, useLocation } from "react-router";
 import { AppHeader } from "../../components/AppHeader";
 import { CollapsibleSidebar } from "../../components/CollapsibleSidebar";
 import type { SidebarSection } from "../../components/CollapsibleSidebar";
 import {
   LayoutDashboard, FolderKanban, Users, BarChart3, Settings,
   Calendar, FileText, Truck, AlertTriangle, GitCompare,
-  Clock, CheckSquare, ShieldCheck, Briefcase,
-  MessageSquare, Wallet, ClipboardList, ListTodo,
+  Clock, CheckSquare, ShieldCheck, FileSpreadsheet, Briefcase,
+  DollarSign, MessageSquare, Wallet, ClipboardList, ListTodo,
 } from "lucide-react";
 
 export function ConstructionLayout() {
@@ -21,7 +21,7 @@ export function ConstructionLayout() {
     {
       label: "Projects",
       items: [
-        { label: "All Projects", href: "/apps/construction/projects", icon: <FolderKanban className="w-4 h-4" />, end: true },
+        { label: "All Projects", href: "/apps/construction", icon: <FolderKanban className="w-4 h-4" />, end: true },
       ],
     },
     {
@@ -69,18 +69,23 @@ export function ConstructionLayout() {
   ];
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
+    <div className="h-screen flex flex-col overflow-hidden" style={{ backgroundColor: "#F7F8FA" }}>
       <AppHeader currentApp="construction" appColor="bg-amber-600" />
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+        <aside
+          className="w-56 flex-shrink-0 overflow-y-auto flex flex-col"
+          style={{ backgroundColor: "#1C2333" }}
+        >
           <CollapsibleSidebar
             sections={baseSections}
-            activeClass="bg-amber-50 text-amber-700 font-medium [&_svg]:text-amber-600"
-            baseClass="text-gray-600 hover:bg-gray-50 hover:text-gray-900 [&_svg]:text-gray-400"
+            activeClass="bg-amber-500/10 text-amber-400 font-medium [&_svg]:text-amber-400"
+            baseClass="text-slate-400 hover:bg-slate-800 hover:text-slate-200 [&_svg]:text-slate-500"
           />
         </aside>
-        <main className="flex-1 overflow-y-auto p-6 min-w-0">
-          <Outlet />
+        <main className="flex-1 overflow-y-auto min-w-0" style={{ backgroundColor: "#F7F8FA" }}>
+          <div className="p-6">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

@@ -1,12 +1,8 @@
 import { useParams, useNavigate } from "react-router";
 import { ArrowLeft, MapPin, Calendar, Users, DollarSign, Building2, FileText, AlertTriangle, CheckSquare, Clock, Truck } from "lucide-react";
-import { useState, useEffect } from "react";
-import type { Task, Vendor, DailyReport, Issue } from "./types";
-import { getProjectById, fmtCurrency, fmtDate, ragColor, ragLabel } from "./mockData";
-import { listConstructionTasks } from "../../api/construction-tasks";
-import { listVendors } from "../../api/vendors";
-import { listDailyReports } from "../../api/daily-reports";
-import { listIssues } from "../../api/construction-issues";
+import { useState } from "react";
+import type { Project } from "./types";
+import { getProjectById, getTasksByProject, getVendorsByProject, getReportsByProject, getIssuesByProject, fmtCurrency, fmtDate, ragColor, ragLabel } from "./mockData";
 import { ProcessGuidance } from "../../components/ProcessGuidance";
 
 const RAG_HEX: Record<string, { dot: string; bg: string; text: string }> = {
@@ -23,38 +19,6 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
 export function ProjectOverviewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [projectTasks, setProjectTasks] = useState<Task[]>([]);
-  const [projectVendors, setProjectVendors] = useState<Vendor[]>([]);
-  const [projectReports, setProjectReports] = useState<DailyReport[]>([]);
-  const [projectIssues, setProjectIssues] = useState<Issue[]>([]);
-
-  useEffect(() => {
-    if (!id) return;
-    let active = true;
-    listConstructionTasks(id)
-      .then((d) => {
-        if (active) setProjectTasks(d);
-      })
-      .catch(() => {});
-    listVendors(id)
-      .then((d) => {
-        if (active) setProjectVendors(d);
-      })
-      .catch(() => {});
-    listDailyReports(id)
-      .then((d) => {
-        if (active) setProjectReports(d);
-      })
-      .catch(() => {});
-    listIssues(id)
-      .then((d) => {
-        if (active) setProjectIssues(d);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [id]);
 
   if (!id) {
     return (
@@ -63,7 +27,7 @@ export function ProjectOverviewPage() {
           <AlertTriangle className="w-12 h-12 text-amber-400 mx-auto mb-3" />
           <p className="text-gray-500">Project ID is missing.</p>
           <button
-            onClick={() => navigate("/apps/construction/projects")}
+            onClick={() => navigate("/apps/construction")}
             className="mt-4 text-blue-600 hover:underline text-sm"
           >
             Back to Projects
@@ -94,6 +58,11 @@ export function ProjectOverviewPage() {
       </div>
     );
   }
+
+  const projectTasks = getTasksByProject(id);
+  const projectVendors = getVendorsByProject(id);
+  const projectReports = getReportsByProject(id);
+  const projectIssues = getIssuesByProject(id);
 
   const workPackageCount = projectTasks.filter(t => t.level === 4).length;
   const avgPercentComplete = projectTasks.length > 0
@@ -142,7 +111,7 @@ export function ProjectOverviewPage() {
   }
   if (project.structure && project.structure.length > 0) {
     const total = project.structure.length;
-    const innerTotal = project.structure.reduce((s, item) => s + Number(item.attributes?.floors ?? item.attributes?.segments ?? item.attributes?.bays ?? item.attributes?.rooms ?? item.attributes?.span ?? 0), 0);
+    const innerTotal = project.structure.reduce((s, item) => s + (item.attributes?.floors ?? item.attributes?.segments ?? item.attributes?.bays ?? item.attributes?.rooms ?? item.attributes?.span ?? 0), 0);
     keyInfoRows.splice(3, 0, { label: "Structure", value: `${total} item${total > 1 ? "s" : ""}${innerTotal > 0 ? ` (${innerTotal} sub-units)` : ""}` });
   }
   keyInfoRows.push({ label: "Cluster", value: project.clusterId });

@@ -1,24 +1,10 @@
-import { useState, useEffect } from "react";
-import {
-  getChartAccounts,
-  createChartAccount,
-  updateChartAccount,
-  deleteChartAccount,
-} from "../../api/finance-extras";
-import {
-  Plus,
-  Search,
-  Edit,
-  Trash2,
-  ChevronRight,
-  BookOpen,
-  X,
-  Save,
-} from "lucide-react";
+import { useState } from "react";
+import { Plus, Search, Edit, Trash2, ChevronRight, BookOpen, X, Save, Download } from "lucide-react";
+import { useFinance } from "../../stores/financeStore";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
-import type { Account, AccountType } from "./types";
+import type { AccountType } from "./types";
 import { ACCOUNT_TYPES } from "./types";
 
 const typeColors: Record<AccountType, string> = {
@@ -31,13 +17,7 @@ const typeColors: Record<AccountType, string> = {
 
 const ALL_TYPES: Array<AccountType | "All"> = ["All", ...ACCOUNT_TYPES];
 
-const emptyForm = {
-  code: "",
-  name: "",
-  type: "Assets" as AccountType,
-  parentId: "" as string | null,
-  description: "",
-};
+const emptyForm = { code: "", name: "", type: "Assets" as AccountType, parentId: "" as string | null, description: "" };
 
 const fmt = (n: number) => {
   const abs = `${Math.abs(n).toLocaleString()}`;
@@ -45,29 +25,8 @@ const fmt = (n: number) => {
 };
 
 export function ChartOfAccountsPage() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const { accounts, setAccounts, getAccountBalance, getDescendantIds } = useFinance();
   const { logChange } = useChangelog();
-
-  function loadAccounts() {
-    return getChartAccounts()
-      .then((data) =>
-        setAccounts(
-          data.map((a) => ({
-            id: a.id,
-            code: a.code,
-            name: a.name,
-            type: a.type as AccountType,
-            parentId: a.parentId ?? null,
-            description: a.description ?? "",
-            balance: a.balance ?? 0,
-          })),
-        ),
-      );
-  }
-
-  useEffect(() => {
-    loadAccounts().catch(console.error);
-  }, []);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<AccountType | "All">("All");
   const [showModal, setShowModal] = useState(false);
@@ -77,12 +36,7 @@ export function ChartOfAccountsPage() {
 
   const filtered = accounts.filter((a) => {
     if (typeFilter !== "All" && a.type !== typeFilter) return false;
-    if (
-      search &&
-      !a.name.toLowerCase().includes(search.toLowerCase()) &&
-      !a.code.includes(search)
-    )
-      return false;
+    if (search && !a.name.toLowerCase().includes(search.toLowerCase()) && !a.code.includes(search)) return false;
     return true;
   });
 
@@ -92,7 +46,7 @@ export function ChartOfAccountsPage() {
     setShowModal(true);
   }
 
-  function openEdit(a: Account) {
+  function openEdit(a: typeof accounts[0]) {
     setForm({ code: a.code, name: a.name, type: a.type, parentId: a.parentId ?? "", description: a.description });
     setEditId(a.id);
     setShowModal(true);
@@ -100,35 +54,13 @@ export function ChartOfAccountsPage() {
 
   function saveAccount() {
     if (!form.code.trim() || !form.name.trim()) return;
-    const payload = {
-      code: form.code,
-      name: form.name,
-      type: form.type,
-      parentId: form.parentId || undefined,
-      description: form.description,
-    };
     if (editId) {
-      updateChartAccount(editId, payload)
-        .then(() => {
-          logChange({ module: "Finance", action: "Updated", entityType: "Account", entityId: editId, summary: `Account ${form.code} ${form.name} updated`, performedBy: "Current User" });
-          return loadAccounts();
-        })
-        .catch((err) => {
-          console.error(err);
-          // Fall back to local update so the UI stays responsive.
-          setAccounts((prev) => prev.map((a) => a.id === editId ? { ...a, ...form, parentId: form.parentId || null } : a));
-        });
+      setAccounts((prev) => prev.map((a) => a.id === editId ? { ...a, ...form, parentId: form.parentId || null } : a));
+      logChange({ module: "Finance", action: "Updated", entityType: "Account", entityId: editId, summary: `Account ${form.code} ${form.name} updated`, performedBy: "Sola Adeleke" });
     } else {
-      createChartAccount(payload)
-        .then((created: any) => {
-          logChange({ module: "Finance", action: "Created", entityType: "Account", entityId: created?.id ?? form.code, summary: `Account ${form.code} ${form.name} created`, performedBy: "Current User" });
-          return loadAccounts();
-        })
-        .catch((err) => {
-          console.error(err);
-          const newAcc: Account = { id: `a${Date.now()}`, ...form, parentId: form.parentId || null };
-          setAccounts((prev) => [...prev, newAcc]);
-        });
+      const newAcc = { id: `a${Date.now()}`, ...form, parentId: form.parentId || null };
+      setAccounts((prev) => [...prev, newAcc]);
+      logChange({ module: "Finance", action: "Created", entityType: "Account", entityId: newAcc.id, summary: `Account ${newAcc.code} ${newAcc.name} created`, performedBy: "Sola Adeleke" });
     }
     setShowModal(false);
   }
@@ -136,15 +68,8 @@ export function ChartOfAccountsPage() {
   function confirmDelete() {
     if (!deleteId) return;
     const del = accounts.find(a => a.id === deleteId);
-    deleteChartAccount(deleteId)
-      .then(() => {
-        if (del) logChange({ module: "Finance", action: "Deleted", entityType: "Account", entityId: deleteId, summary: `Account ${del.code} ${del.name} and children deleted`, performedBy: "Current User" });
-        return loadAccounts();
-      })
-      .catch((err) => {
-        console.error(err);
-        setAccounts((prev) => prev.filter((a) => a.id !== deleteId && a.parentId !== deleteId));
-      });
+    setAccounts((prev) => prev.filter((a) => a.id !== deleteId && a.parentId !== deleteId));
+    if (del) logChange({ module: "Finance", action: "Deleted", entityType: "Account", entityId: deleteId, summary: `Account ${del.code} ${del.name} and children deleted`, performedBy: "Sola Adeleke" });
     setDeleteId(null);
   }
 
@@ -158,7 +83,7 @@ export function ChartOfAccountsPage() {
 
   function handleExport() {
     exportCSV("chart-of-accounts", ["Code", "Name", "Type", "Balance", "Description"],
-      accounts.map((a) => [a.code, a.name, a.type, String(a.balance ?? 0), a.description]));
+      accounts.map((a) => [a.code, a.name, a.type, getAccountBalance(a.id), a.description]));
   }
 
   const columns: Column<typeof accounts[0]>[] = [
@@ -176,7 +101,7 @@ export function ChartOfAccountsPage() {
       <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${typeColors[a.type]}`}>{a.type}</span>
     ), sortable: true, filterable: true },
     { key: "balance", label: "Amount (₦)", render: a => {
-      const bal = a.balance ?? 0;
+      const bal = getAccountBalance(a.id);
       return <span className={`text-sm font-mono font-semibold ${bal >= 0 ? "text-gray-900" : "text-red-600"}`}>{fmt(bal)}</span>;
     }, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
     { key: "description", label: "Description", render: a => <span className="text-sm text-gray-500">{a.description}</span>, sortable: false, filterable: false },
@@ -192,12 +117,8 @@ export function ChartOfAccountsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">
-            Chart of Accounts
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Define and manage all financial accounts used in the system
-          </p>
+          <h1 className="text-xl font-semibold text-gray-900">Chart of Accounts</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Define and manage all financial accounts used in the system</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={handleExport} className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Export CSV</button>
@@ -210,20 +131,11 @@ export function ChartOfAccountsPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-5 gap-3">
         {ACCOUNT_TYPES.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTypeFilter(typeFilter === t ? "All" : t)}
-            className={`p-3 rounded-xl border text-left transition-all ${typeFilter === t ? "border-emerald-300 bg-emerald-50" : "border-gray-200 bg-white hover:border-gray-300"}`}
-          >
+          <button key={t} onClick={() => setTypeFilter(typeFilter === t ? "All" : t)}
+            className={`p-3 rounded-xl border text-left transition-all ${typeFilter === t ? "border-emerald-300 bg-emerald-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
             <p className="text-xs text-gray-500 font-medium">{t}</p>
-            <p className="text-xl font-bold text-gray-900 mt-0.5">
-              {countByType(t)}
-            </p>
-            <span
-              className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium mt-1 ${typeColors[t]}`}
-            >
-              {t}
-            </span>
+            <p className="text-xl font-bold text-gray-900 mt-0.5">{countByType(t)}</p>
+            <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium mt-1 ${typeColors[t]}`}>{t}</span>
           </button>
         ))}
       </div>
@@ -232,22 +144,11 @@ export function ChartOfAccountsPage() {
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search accounts..."
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search accounts..." className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
         </div>
         <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1">
           {ALL_TYPES.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(t)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${typeFilter === t ? "bg-emerald-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}
-            >
-              {t}
-            </button>
+            <button key={t} onClick={() => setTypeFilter(t)} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${typeFilter === t ? "bg-emerald-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>{t}</button>
           ))}
         </div>
       </div>
@@ -268,89 +169,39 @@ export function ChartOfAccountsPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-emerald-600" />
-                <h2 className="text-sm font-semibold text-gray-900">
-                  {editId ? "Edit Account" : "New Account"}
-                </h2>
+                <h2 className="text-sm font-semibold text-gray-900">{editId ? "Edit Account" : "New Account"}</h2>
               </div>
               <button onClick={() => setShowModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-400" /></button>
             </div>
             <div className="px-6 py-5 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                    Account Code *
-                  </label>
-                  <input
-                    value={form.code}
-                    onChange={(e) => setForm({ ...form, code: e.target.value })}
-                    placeholder="e.g. 1100"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Account Code *</label>
+                  <input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. 1100" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                    Account Type *
-                  </label>
-                  <select
-                    value={form.type}
-                    onChange={(e) =>
-                      setForm({ ...form, type: e.target.value as AccountType })
-                    }
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    {ACCOUNT_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Account Type *</label>
+                  <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as AccountType })} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Account Name *
-                </label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Cash & Bank"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Account Name *</label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Cash & Bank" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Parent Account
-                </label>
-                <select
-                  value={form.parentId ?? ""}
-                  onChange={(e) =>
-                    setForm({ ...form, parentId: e.target.value || null })
-                  }
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Parent Account</label>
+                <select value={form.parentId ?? ""} onChange={(e) => setForm({ ...form, parentId: e.target.value || null })} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
                   <option value="">None (Top-level)</option>
-                  {accounts
-                    .filter((a) => a.id !== editId)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} – {a.name}
-                      </option>
-                    ))}
+                  {accounts.filter((a) => a.id !== editId).map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} – {a.name}</option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm({ ...form, description: e.target.value })
-                  }
-                  rows={2}
-                  placeholder="Brief description of this account"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
-                />
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Description</label>
+                <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Brief description of this account" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" />
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
@@ -370,26 +221,11 @@ export function ChartOfAccountsPage() {
             <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
               <Trash2 className="w-5 h-5 text-red-600" />
             </div>
-            <h3 className="text-sm font-semibold text-gray-900 mb-1">
-              Delete Account?
-            </h3>
-            <p className="text-sm text-gray-500 mb-5">
-              This will also delete all child accounts under it. This action
-              cannot be undone.
-            </p>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Delete Account?</h3>
+            <p className="text-sm text-gray-500 mb-5">This will also delete all child accounts under it. This action cannot be undone.</p>
             <div className="flex gap-2">
-              <button
-                onClick={() => setDeleteId(null)}
-                className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                Delete
-              </button>
+              <button onClick={() => setDeleteId(null)} className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={confirmDelete} className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
             </div>
           </div>
         </div>

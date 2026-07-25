@@ -4,12 +4,6 @@ import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../..
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
-import { apiFetch } from "../../api/client";
-import {
-  formatCurrencyByGeneralSettings,
-  formatDateByGeneralSettings,
-  formatNumberByGeneralSettings,
-} from "../../utils/generalSettings";
 
 type ReportType = "Trial Balance" | "Balance Sheet" | "Income Statement" | "Cash Flow" | "Budget vs Actual";
 
@@ -50,37 +44,22 @@ interface BSRow {
   isSection: boolean;
 }
 
-interface ReportRow {
-  label: string;
-  value: string;
-  sub?: string;
-  positive?: boolean;
-}
+const CASHFLOW_DATA: CashFlowRow[] = [
+  { label: "Operating Cash Flow", value: "+$1,394,800", positive: true as const },
+  { label: "Investing Activities", value: "−$240,000", positive: false as const },
+  { label: "Financing Activities", value: "−$120,000", positive: false as const },
+  { label: "Net Cash Movement", value: "+$1,034,800", positive: true as const },
+  { label: "Opening Balance", value: "$2,800,000" },
+  { label: "Closing Balance", value: "$3,834,800", positive: true as const },
+];
 
-interface ApiReportRow {
-  label: string;
-  amount: number;
-  format?: "currency" | "count" | "percent";
-  sub?: string;
-  positive?: boolean;
-}
-
-function toDisplayRow(row: ApiReportRow): ReportRow {
-  let value: string;
-  switch (row.format) {
-    case "count":
-      value = formatNumberByGeneralSettings(row.amount);
-      break;
-    case "percent":
-      value = `${formatNumberByGeneralSettings(row.amount)}%`;
-      break;
-    case "currency":
-    default:
-      value = formatCurrencyByGeneralSettings(row.amount);
-      break;
-  }
-  return { label: row.label, value, sub: row.sub, positive: row.positive };
-}
+const BUDGET_DATA: BudgetRow[] = [
+  { label: "Lekki Tower A", value: "65% utilised", sub: "$8.1M of $12.5M" },
+  { label: "Riverside Residential", value: "42% utilised", sub: "$3.4M of $8.2M" },
+  { label: "Mall Renovation", value: "105% OVER BUDGET", sub: "$19.3M of $18.4M", positive: false as const },
+  { label: "Industrial Warehouse", value: "15% utilised", sub: "$0.9M of $5.8M" },
+  { label: "Airport Road Bridge", value: "45% utilised", sub: "$14.4M of $32M" },
+];
 
 const fmt = (n: number) => `₦${n.toLocaleString()}`;
 
@@ -139,23 +118,7 @@ export function FinanceReportsPage() {
   const totalDebits = tb.reduce((s, r) => s + r.debit, 0);
   const totalCredits = tb.reduce((s, r) => s + r.credit, 0);
 
-  const [reportData, setReportData] = useState<Record<string, ReportRow[]>>({});
-
-  useEffect(() => {
-    const fy = fiscalYears.find((f) => f.id === selectedFyId);
-    const qs = fy
-      ? `?from=${encodeURIComponent(fy.startDate)}&to=${encodeURIComponent(fy.endDate)}`
-      : "";
-    apiFetch<Record<string, ApiReportRow[]>>(`/finance-reports${qs}`)
-      .then((data) => {
-        const mapped: Record<string, ReportRow[]> = {};
-        for (const [key, rows] of Object.entries(data ?? {})) {
-          if (Array.isArray(rows)) mapped[key] = rows.map(toDisplayRow);
-        }
-        setReportData(mapped);
-      })
-      .catch(() => setReportData({}));
-  }, [selectedFyId, fiscalYears]);
+  const active = templates.find((t) => t.id === selectedReport)!;
 
   useEffect(() => {
     logChange({
@@ -223,19 +186,15 @@ export function FinanceReportsPage() {
 
   function exportCF() {
     const headers = ["Metric", "Value"];
-    const rows = cashflowRows.map(r => [r.label, r.value]);
+    const rows = CASHFLOW_DATA.map(r => [r.label, r.value]);
     exportCSV("cash-flow", headers, rows);
   }
 
   function exportBudget() {
     const headers = ["Project", "Utilisation", "Details"];
-    const rows = budgetRows.map(r => [r.label, r.value, r.sub ?? ""]);
+    const rows = BUDGET_DATA.map(r => [r.label, r.value, r.sub ?? ""]);
     exportCSV("budget-vs-actual", headers, rows);
   }
-
-  const active = templates.find((t) => t.id === selectedReport) ?? templates[0];
-  const cashflowRows = reportData["cashflow"] ?? [];
-  const budgetRows = reportData["budget"] ?? [];
 
   return (
     <div className="space-y-6">
@@ -261,9 +220,7 @@ export function FinanceReportsPage() {
             className={`p-4 rounded-xl border text-left transition-all ${selectedReport === t.id ? "border-emerald-300 bg-emerald-50 shadow-sm" : "border-gray-200 bg-white hover:border-gray-300"}`}>
             <div className={`w-9 h-9 rounded-lg ${t.bg} flex items-center justify-center mb-3 ${t.color}`}>{t.icon}</div>
             <p className="text-xs font-semibold text-gray-900">{t.type}</p>
-            <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-              {t.description}
-            </p>
+            <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{t.description}</p>
           </button>
         ))}
       </div>
@@ -362,7 +319,7 @@ export function FinanceReportsPage() {
               <div className="bg-gray-50 px-6 py-3"><p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cash Flow Statement</p></div>
               <DataTable
                 columns={cfColumns}
-                data={cashflowRows}
+                data={CASHFLOW_DATA}
                 keyExtractor={r => `cf-${r.label}`}
                 searchFields={[r => r.label]}
                 headerExtra={
@@ -379,7 +336,7 @@ export function FinanceReportsPage() {
               <div className="bg-gray-50 px-6 py-3"><p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Budget vs Actual</p></div>
               <DataTable
                 columns={budgetColumns}
-                data={budgetRows}
+                data={BUDGET_DATA}
                 keyExtractor={r => `budget-${r.label}`}
                 searchFields={[r => r.label]}
                 headerExtra={
@@ -393,10 +350,7 @@ export function FinanceReportsPage() {
 
           <div className="mt-4 p-4 bg-gray-50 rounded-xl">
             <p className="text-xs text-gray-500">
-              <strong>Generated:</strong>{" "}
-              {formatDateByGeneralSettings(new Date())} ·{" "}
-              <strong>Source:</strong> BuildOS Finance Module ·{" "}
-              <strong>Period:</strong> {selectedFy?.label ?? "All years"} · All figures in NGN.
+              <strong>Generated:</strong> {new Date().toLocaleDateString()} · <strong>Source:</strong> BuildOS Finance Module · <strong>Period:</strong> {selectedFy?.label ?? "All years"} · All figures in NGN.
             </p>
           </div>
         </div>

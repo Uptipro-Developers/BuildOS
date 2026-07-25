@@ -1,14 +1,7 @@
-import { Plus, Edit, Trash2, Ruler, Download } from "lucide-react";
-import { useEffect, useState } from "react";
-import { DataTable, type Column } from "../../components/DataTable";
+import { Plus, Edit, Trash2, Ruler } from "lucide-react";
+import { useState } from "react";
+import { DataTable } from "../../components/DataTable";
 import { CreatableSelect } from "../../components/CreatableSelect";
-import { exportCSV } from "../../utils/exportCSV";
-import {
-  getUnits,
-  createUnit,
-  updateUnit,
-  deleteUnit,
-} from "../../api/admin-extras";
 
 interface Unit {
   id: string;
@@ -22,7 +15,6 @@ interface Unit {
 export function UnitsOfMeasurementPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Unit | null>(null);
   const [categoryOptions, setCategoryOptions] = useState([
     { label: "Length", value: "Length" },
     { label: "Weight", value: "Weight" },
@@ -31,13 +23,72 @@ export function UnitsOfMeasurementPage() {
     { label: "Custom", value: "Custom" },
   ]);
 
-  const [units, setUnits] = useState<Unit[]>([]);
-
-  useEffect(() => {
-    getUnits()
-      .then((data) => setUnits(data as Unit[]))
-      .catch(() => setUnits([]));
-  }, []);
+  const [units, setUnits] = useState<Unit[]>([
+    {
+      id: "1",
+      name: "Meter",
+      abbreviation: "m",
+      category: "Length",
+      baseUnit: "Meter",
+      conversionFactor: 1,
+    },
+    {
+      id: "2",
+      name: "Centimeter",
+      abbreviation: "cm",
+      category: "Length",
+      baseUnit: "Meter",
+      conversionFactor: 0.01,
+    },
+    {
+      id: "3",
+      name: "Foot",
+      abbreviation: "ft",
+      category: "Length",
+      baseUnit: "Meter",
+      conversionFactor: 0.3048,
+    },
+    {
+      id: "4",
+      name: "Kilogram",
+      abbreviation: "kg",
+      category: "Weight",
+      baseUnit: "Kilogram",
+      conversionFactor: 1,
+    },
+    {
+      id: "5",
+      name: "Ton",
+      abbreviation: "ton",
+      category: "Weight",
+      baseUnit: "Kilogram",
+      conversionFactor: 1000,
+    },
+    {
+      id: "6",
+      name: "Bag (Cement)",
+      abbreviation: "bag",
+      category: "Custom",
+      baseUnit: "Kilogram",
+      conversionFactor: 50,
+    },
+    {
+      id: "7",
+      name: "Cubic Meter",
+      abbreviation: "m³",
+      category: "Volume",
+      baseUnit: "Cubic Meter",
+      conversionFactor: 1,
+    },
+    {
+      id: "8",
+      name: "Liter",
+      abbreviation: "L",
+      category: "Volume",
+      baseUnit: "Cubic Meter",
+      conversionFactor: 0.001,
+    },
+  ]);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -47,14 +98,11 @@ export function UnitsOfMeasurementPage() {
     conversionFactor: 1,
   });
 
-  const columns: Column<Unit>[] = [
+  const columns = [
     {
       key: "name",
       label: "Name",
       sortable: true,
-      render: (row: Unit) => (
-        <span className="text-sm text-gray-900">{row.name}</span>
-      ),
     },
     {
       key: "abbreviation",
@@ -92,9 +140,6 @@ export function UnitsOfMeasurementPage() {
       key: "baseUnit",
       label: "Base Unit",
       sortable: true,
-      render: (row: Unit) => (
-        <span className="text-sm text-gray-700">{row.baseUnit}</span>
-      ),
     },
     {
       key: "conversionFactor",
@@ -146,41 +191,22 @@ export function UnitsOfMeasurementPage() {
   };
 
   const handleDelete = (id: string) => {
-    const target = units.find((u) => u.id === id) ?? null;
-    setDeleteTarget(target);
+    if (confirm("Are you sure you want to delete this unit?")) {
+      setUnits((prev) => prev.filter((u) => u.id !== id));
+    }
   };
 
-  const handleSave = async () => {
-    const payload = {
-      name: formData.name,
-      abbreviation: formData.abbreviation,
-      category: formData.category,
-      baseUnit: formData.baseUnit,
-      conversionFactor: formData.conversionFactor,
-    };
-
+  const handleSave = () => {
     if (editingUnit) {
-      try {
-        const updated = await updateUnit(editingUnit.id, payload);
-        setUnits((prev) =>
-          prev.map((u) => (u.id === editingUnit.id ? (updated as Unit) : u)),
-        );
-      } catch {
-        setUnits((prev) =>
-          prev.map((u) => (u.id === editingUnit.id ? { ...u, ...payload } : u)),
-        );
-      }
+      setUnits((prev) =>
+        prev.map((u) => (u.id === editingUnit.id ? { ...u, ...formData } : u))
+      );
     } else {
-      try {
-        const created = await createUnit(payload);
-        setUnits((prev) => [created as Unit, ...prev]);
-      } catch {
-        const newUnit: Unit = {
-          id: Date.now().toString(),
-          ...payload,
-        };
-        setUnits((prev) => [newUnit, ...prev]);
-      }
+      const newUnit: Unit = {
+        id: Date.now().toString(),
+        ...formData,
+      };
+      setUnits((prev) => [...prev, newUnit]);
     }
     handleCloseModal();
   };
@@ -224,9 +250,8 @@ export function UnitsOfMeasurementPage() {
         <div>
           <h3 className="text-sm font-medium text-blue-900">About Units</h3>
           <p className="text-sm text-blue-700 mt-1">
-            Create custom units for materials specific to projects (e.g.,
-            bags, bundles, rolls). All units are converted to base units for
-            accurate calculations.
+            Create custom units for materials specific to construction (e.g., bags, bundles, rolls).
+            All units are converted to base units for accurate calculations.
           </p>
         </div>
       </div>
@@ -235,41 +260,10 @@ export function UnitsOfMeasurementPage() {
       <DataTable
         data={units}
         columns={columns}
-        keyExtractor={(row) => row.id}
-        searchFields={[
-          (row) => row.name,
-          (row) => row.abbreviation,
-          (row) => row.category,
-          (row) => row.baseUnit,
-        ]}
-        searchPlaceholder="Search units..."
+        searchable={true}
+        exportable={true}
         pageSize={10}
-        headerExtra={
-          <button
-            onClick={() =>
-              exportCSV(
-                "units-of-measurement",
-                [
-                  "Name",
-                  "Abbreviation",
-                  "Category",
-                  "Base Unit",
-                  "Conversion Factor",
-                ],
-                units.map((u) => [
-                  u.name,
-                  u.abbreviation,
-                  u.category,
-                  u.baseUnit,
-                  String(u.conversionFactor),
-                ]),
-              )
-            }
-            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
-            <Download className="w-4 h-4" /> Export
-          </button>
-        }
+        maxHeight="520px"
       />
 
       {/* Add/Edit Modal */}
@@ -280,9 +274,7 @@ export function UnitsOfMeasurementPage() {
               <h2 className="text-lg font-semibold text-gray-900">
                 {editingUnit ? "Edit Unit" : "Add New Unit"}
               </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Define the unit properties and conversion factor.
-              </p>
+              <p className="text-sm text-gray-500 mt-1">Define the unit properties and conversion factor.</p>
             </div>
 
             <div className="px-6 py-5 space-y-4">
@@ -324,9 +316,7 @@ export function UnitsOfMeasurementPage() {
                   <CreatableSelect
                     options={categoryOptions}
                     value={formData.category}
-                    onChange={(value) =>
-                      setFormData({ ...formData, category: value })
-                    }
+                    onChange={(value) => setFormData({ ...formData, category: value })}
                     onCreateOption={(label) => {
                       const opt = { label, value: label };
                       setCategoryOptions((prev) => [...prev, opt]);
@@ -369,9 +359,7 @@ export function UnitsOfMeasurementPage() {
                     placeholder="e.g., 1, 0.01, 1000"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Multiplier to convert this unit to its base unit
-                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Multiplier to convert this unit to its base unit</p>
                 </div>
               </div>
             </div>
@@ -388,43 +376,6 @@ export function UnitsOfMeasurementPage() {
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
               >
                 {editingUnit ? "Save Changes" : "Add Unit"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">
-              Delete Unit?
-            </h2>
-            <p className="text-sm text-gray-500">
-              <strong>{deleteTarget.name}</strong> will be permanently removed.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    await deleteUnit(deleteTarget.id);
-                  } catch {
-                    // Fallback to local deletion when backend mutation is unavailable.
-                  }
-                  setUnits((prev) =>
-                    prev.filter((u) => u.id !== deleteTarget.id),
-                  );
-                  setDeleteTarget(null);
-                }}
-                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
-              >
-                Delete
               </button>
             </div>
           </div>

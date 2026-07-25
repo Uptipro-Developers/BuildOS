@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, RotateCcw, Filter } from "lucide-react";
+import { History, Search, RotateCcw, Filter } from "lucide-react";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
 

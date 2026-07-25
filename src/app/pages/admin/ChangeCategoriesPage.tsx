@@ -1,11 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Plus, Edit, Trash2, X, Search, RefreshCw } from "lucide-react";
-import {
-  getChangeCategories,
-  createChangeCategory,
-  updateChangeCategory,
-  deleteChangeCategory,
-} from "../../api/admin-extras";
 
 interface ChangeCategory {
   id: string;
@@ -13,7 +7,16 @@ interface ChangeCategory {
   description: string;
 }
 
-const SEED: ChangeCategory[] = [];
+const SEED: ChangeCategory[] = [
+  { id: "cc-001", name: "Design Change", description: "Modifications to architectural or engineering designs." },
+  { id: "cc-002", name: "Scope Adjustment", description: "Changes that expand or reduce the project scope." },
+  { id: "cc-003", name: "Budget Revision", description: "Requests to revise the approved project budget." },
+  { id: "cc-004", name: "Timeline Change", description: "Extensions or reductions to project milestones or deadlines." },
+  { id: "cc-005", name: "Specification Change", description: "Changes to material specs, grades, or product standards." },
+  { id: "cc-006", name: "Resource Reallocation", description: "Reassignment of labour, equipment, or personnel across tasks." },
+  { id: "cc-007", name: "Regulatory Compliance", description: "Changes mandated by regulatory or statutory requirements." },
+  { id: "cc-008", name: "Safety Improvement", description: "Changes required to address site safety or risk findings." },
+];
 
 const BLANK: Omit<ChangeCategory, "id"> = { name: "", description: "" };
 
@@ -23,18 +26,18 @@ function CategoryModal({
   onClose,
 }: {
   initial: Partial<ChangeCategory> & { name: string; description: string };
-  onSave: (data: Omit<ChangeCategory, "id"> & { id?: string }) => Promise<void>;
+  onSave: (data: Omit<ChangeCategory, "id"> & { id?: string }) => void;
   onClose: () => void;
 }) {
   const [form, setForm] = useState({ ...initial });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  async function submit() {
+  function submit() {
     if (!form.name.trim()) {
       setErrors({ name: "Name is required." });
       return;
     }
-    await onSave(form);
+    onSave(form);
     onClose();
   }
 
@@ -45,10 +48,7 @@ function CategoryModal({
           <h2 className="text-base font-semibold text-gray-900">
             {initial.id ? "Edit Change Category" : "New Change Category"}
           </h2>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"
-          >
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -65,19 +65,13 @@ function CategoryModal({
                 errors.name ? "border-red-400" : "border-gray-200"
               }`}
             />
-            {errors.name && (
-              <p className="text-xs text-red-500 mt-1">{errors.name}</p>
-            )}
+            {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Description
-            </label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
             <textarea
               value={form.description}
-              onChange={(e) =>
-                setForm({ ...form, description: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
               rows={3}
               placeholder="Describe when this category applies…"
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
@@ -115,9 +109,7 @@ function DeleteModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
-        <h2 className="text-base font-semibold text-gray-900">
-          Delete Change Category?
-        </h2>
+        <h2 className="text-base font-semibold text-gray-900">Delete Change Category?</h2>
         <p className="text-sm text-gray-500">
           <strong>"{name}"</strong> will be permanently removed.
         </p>
@@ -129,10 +121,7 @@ function DeleteModal({
             Cancel
           </button>
           <button
-            onClick={() => {
-              onConfirm();
-              onClose();
-            }}
+            onClick={() => { onConfirm(); onClose(); }}
             className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
           >
             Delete
@@ -150,29 +139,22 @@ export function ChangeCategoriesPage() {
   const [editing, setEditing] = useState<ChangeCategory | null>(null);
   const [deleting, setDeleting] = useState<ChangeCategory | null>(null);
 
-  useEffect(() => {
-    getChangeCategories()
-      .then(setCategories)
-      .catch(() => {
-        setCategories([]);
-      });
-  }, []);
-
   const filtered = categories.filter(
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.description.toLowerCase().includes(search.toLowerCase()),
   );
 
-  async function save(data: Omit<ChangeCategory, "id"> & { id?: string }) {
+  function save(data: Omit<ChangeCategory, "id"> & { id?: string }) {
     if (data.id) {
-      const updated = await updateChangeCategory(data.id, data);
       setCategories((prev) =>
-        prev.map((c) => (c.id === data.id ? updated : c)),
+        prev.map((c) => (c.id === data.id ? { ...data, id: data.id! } : c)),
       );
     } else {
-      const created = await createChangeCategory(data);
-      setCategories((prev) => [...prev, created]);
+      setCategories((prev) => [
+        ...prev,
+        { ...data, id: `cc-${Date.now()}` },
+      ]);
     }
   }
 
@@ -181,18 +163,13 @@ export function ChangeCategoriesPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Change Categories
-          </h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Change Categories</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Define categories used when employees raise change requests in ESS
           </p>
         </div>
         <button
-          onClick={() => {
-            setEditing(null);
-            setShowModal(true);
-          }}
+          onClick={() => { setEditing(null); setShowModal(true); }}
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-4 py-2 rounded-xl"
         >
           <Plus className="w-4 h-4" /> Add Category
@@ -203,9 +180,8 @@ export function ChangeCategoriesPage() {
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 flex items-start gap-3">
         <RefreshCw className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
         <p className="text-xs text-indigo-700">
-          These categories appear in the ESS <strong>Change Request</strong>{" "}
-          form. They help classify and route change requests to the appropriate
-          approvers.
+          These categories appear in the ESS <strong>Change Request</strong> form. They help classify and route
+          change requests to the appropriate approvers.
         </p>
       </div>
 
@@ -234,33 +210,20 @@ export function ChangeCategoriesPage() {
           <tbody className="divide-y divide-gray-50">
             {filtered.length === 0 && (
               <tr>
-                <td
-                  colSpan={4}
-                  className="px-4 py-8 text-center text-gray-400 text-sm"
-                >
+                <td colSpan={4} className="px-4 py-8 text-center text-gray-400 text-sm">
                   No categories found.
                 </td>
               </tr>
             )}
             {filtered.map((cat, i) => (
-              <tr
-                key={cat.id}
-                className="hover:bg-gray-50 transition-colors group"
-              >
+              <tr key={cat.id} className="hover:bg-gray-50 transition-colors group">
                 <td className="px-4 py-3 text-gray-400 text-xs">{i + 1}</td>
-                <td className="px-4 py-3 font-medium text-gray-900">
-                  {cat.name}
-                </td>
-                <td className="px-4 py-3 text-gray-500 text-xs">
-                  {cat.description || "—"}
-                </td>
+                <td className="px-4 py-3 font-medium text-gray-900">{cat.name}</td>
+                <td className="px-4 py-3 text-gray-500 text-xs">{cat.description || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => {
-                        setEditing(cat);
-                        setShowModal(true);
-                      }}
+                      onClick={() => { setEditing(cat); setShowModal(true); }}
                       className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"
                     >
                       <Edit className="w-4 h-4" />
@@ -293,10 +256,9 @@ export function ChangeCategoriesPage() {
       {deleting && (
         <DeleteModal
           name={deleting.name}
-          onConfirm={async () => {
-            await deleteChangeCategory(deleting.id);
-            setCategories((prev) => prev.filter((c) => c.id !== deleting.id));
-          }}
+          onConfirm={() =>
+            setCategories((prev) => prev.filter((c) => c.id !== deleting.id))
+          }
           onClose={() => setDeleting(null)}
         />
       )}

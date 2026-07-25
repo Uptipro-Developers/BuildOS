@@ -1,16 +1,12 @@
-import { useState, useEffect } from "react";
-import { useHRConfig } from "../../stores/hrConfigStore";
-import {
-  fetchOrgUnits,
-  createOrgUnit,
-  updateOrgUnit,
-  type OrgUnit as ApiOrgUnit,
-  type OrgUnitKind,
-} from "../../api/org-units";
-import { Plus, X, Save, CheckCircle, Building2, Users, Layers, Archive, Shield, BookOpen, UserPlus, ArrowUp, ArrowDown, FileText, Check } from "lucide-react";
+import { useState } from "react";
+import { useHRConfig, type OrgLevelConfig } from "../../stores/hrConfigStore";
+import { Plus, X, Edit3, Save, CheckCircle, Building2, Users, Layers, Archive, Shield, BookOpen, UserPlus, ArrowUp, ArrowDown, FileText, Check, Trash2 } from "lucide-react";
 
 interface OrgLevel {
-  id: string; name: string; description: string; members: number; archived: boolean;
+  id: string; name: string; description: string; archived: boolean;
+}
+interface SupportingStructure {
+  id: string; name: string; type: "craft" | "circle"; description: string;
 }
 
 interface StructureTemplate {
@@ -51,7 +47,7 @@ const TEMPLATES: StructureTemplate[] = [
 ];
 
 export function OrgStructurePage() {
-  const { setOrgLevels } = useHRConfig();
+  const { orgLevels, setOrgLevels } = useHRConfig();
   const [saved, setSaved] = useState(false);
   const [activeTemplate, setActiveTemplate] = useState<string>(TEMPLATES[0].id);
   const [customTemplate, setCustomTemplate] = useState<StructureTemplate | null>(null);
@@ -64,25 +60,32 @@ export function OrgStructurePage() {
   };
   const allLevels = currentTemplate.levels;
 
-  const TIER_KINDS: OrgUnitKind[] = ["tier1", "tier2", "tier3"];
-  const [units, setUnits] = useState<ApiOrgUnit[]>([]);
+  const [collegiums, setCollegiums] = useState<OrgLevel[]>([
+    { id: "col-1", name: "Executive Collegium", description: "Strategic leadership and governance", archived: false },
+    { id: "col-2", name: "Technical Collegium", description: "Technical oversight and standards", archived: false },
+  ]);
+  const [clusters, setClusters] = useState<OrgLevel[]>([
+    { id: "cl-1", name: "Lagos Operations", description: "Lagos metro area projects", archived: false },
+    { id: "cl-2", name: "Abuja Operations", description: "Federal capital territory projects", archived: false },
+    { id: "cl-3", name: "Rivers Operations", description: "South-south region projects", archived: false },
+  ]);
+  const [crews, setCrews] = useState<OrgLevel[]>([
+    { id: "cr-1", name: "Tower A Site Crew", description: "Lekki Tower A execution team", archived: false },
+    { id: "cr-2", name: "Finishing Crew", description: "Interior finishing specialists", archived: false },
+    { id: "cr-3", name: "MEP Crew", description: "Mechanical, electrical, plumbing", archived: false },
+  ]);
 
-  function loadUnits() {
-    fetchOrgUnits().then(setUnits).catch(console.error);
-  }
-  useEffect(() => { loadUnits(); }, []);
+  const allOrgItems = [collegiums, clusters, crews];
 
-  const toLevel = (u: ApiOrgUnit): OrgLevel => ({
-    id: u.id, name: u.name, description: u.description, members: u.members, archived: u.archived,
-  });
-  const allOrgItems = [
-    units.filter(u => u.kind === "tier1").map(toLevel),
-    units.filter(u => u.kind === "tier2").map(toLevel),
-    units.filter(u => u.kind === "tier3").map(toLevel),
-  ];
-
-  const crafts = units.filter(u => u.kind === "craft");
-  const circles = units.filter(u => u.kind === "circle");
+  const [crafts, setCrafts] = useState<SupportingStructure[]>([
+    { id: "sk-1", name: "Engineering", type: "craft", description: "Civil, structural, MEP engineers" },
+    { id: "sk-2", name: "Quantity Surveying", type: "craft", description: "Cost management and estimation" },
+    { id: "sk-3", name: "Safety Officers", type: "craft", description: "HSE professionals" },
+  ]);
+  const [circles, setCircles] = useState<SupportingStructure[]>([
+    { id: "ci-1", name: "Leadership Development", type: "circle", description: "Future leaders mentorship program" },
+    { id: "ci-2", name: "Technical Excellence", type: "circle", description: "Technical skills development" },
+  ]);
 
   const [newOrgName, setNewOrgName] = useState("");
   const [newOrgDesc, setNewOrgDesc] = useState("");
@@ -149,31 +152,57 @@ export function OrgStructurePage() {
 
   function addOrgLevel(levelIdx: number) {
     if (!newOrgName.trim()) return;
-    createOrgUnit({ name: newOrgName.trim(), description: newOrgDesc.trim(), kind: TIER_KINDS[levelIdx], members: 0, archived: false })
-      .then(loadUnits)
-      .catch(err => alert((err as Error)?.message || "Failed to add unit"));
+    const setters = [setCollegiums, setClusters, setCrews];
+    const item: OrgLevel = { id: `lvl-${levelIdx}-${Date.now()}`, name: newOrgName.trim(), description: newOrgDesc.trim(), archived: false };
+    setters[levelIdx](prev => [...prev, item]);
     setNewOrgName("");
     setNewOrgDesc("");
     setAddingTo(null);
   }
 
-  function archiveOrg(_levelIdx: number, id: string) {
-    const current = units.find(u => u.id === id);
-    if (!current) return;
-    updateOrgUnit(id, { archived: !current.archived })
-      .then(loadUnits)
-      .catch(err => alert((err as Error)?.message || "Failed to update unit"));
+  function archiveOrg(levelIdx: number, id: string) {
+    const setters = [setCollegiums, setClusters, setCrews];
+    const toggle = (items: OrgLevel[]) => items.map(i => i.id === id ? { ...i, archived: !i.archived } : i);
+    setters[levelIdx](toggle as any);
   }
 
   function addSupporting(type: "craft" | "circle") {
     const name = type === "craft" ? newCraftName : newCircleName;
     const desc = type === "craft" ? newCraftDesc : newCircleDesc;
     if (!name.trim()) return;
-    createOrgUnit({ name: name.trim(), description: desc.trim(), kind: type, members: 0, archived: false })
-      .then(loadUnits)
-      .catch(err => alert((err as Error)?.message || "Failed to add unit"));
+    const item: SupportingStructure = { id: `${type}-${Date.now()}`, name: name.trim(), type, description: desc.trim() };
+    if (type === "craft") setCrafts(p => [...p, item]);
+    else setCircles(p => [...p, item]);
     if (type === "craft") { setNewCraftName(""); setNewCraftDesc(""); }
     else { setNewCircleName(""); setNewCircleDesc(""); }
+  }
+
+  const [editingOrgItem, setEditingOrgItem] = useState<{ levelIdx: number; item: OrgLevel } | null>(null);
+  const [editOrgName, setEditOrgName] = useState("");
+  const [editOrgDesc, setEditOrgDesc] = useState("");
+
+  const [deletingOrgItem, setDeletingOrgItem] = useState<{ levelIdx: number; item: OrgLevel } | null>(null);
+
+  function editOrg(levelIdx: number, item: OrgLevel) {
+    setEditingOrgItem({ levelIdx, item });
+    setEditOrgName(item.name);
+    setEditOrgDesc(item.description);
+  }
+
+  function saveEditOrg() {
+    if (!editingOrgItem || !editOrgName.trim()) return;
+    const { levelIdx, item } = editingOrgItem;
+    const setters = [setCollegiums, setClusters, setCrews];
+    setters[levelIdx](prev => prev.map(i => i.id === item.id ? { ...i, name: editOrgName.trim(), description: editOrgDesc.trim() } : i));
+    setEditingOrgItem(null);
+  }
+
+  function deleteOrgItem() {
+    if (!deletingOrgItem) return;
+    const { levelIdx, item } = deletingOrgItem;
+    const setters = [setCollegiums, setClusters, setCrews];
+    setters[levelIdx](prev => prev.filter(i => i.id !== item.id));
+    setDeletingOrgItem(null);
   }
 
   const sectionIconMap = [Building2, Users, Users];
@@ -182,10 +211,16 @@ export function OrgStructurePage() {
     <div className={`flex items-center justify-between px-4 py-3 rounded-lg border text-sm ${item.archived ? "bg-gray-50 opacity-60" : "bg-white"}`} style={{ borderColor: "#E2E8F0" }}>
       <div className="flex-1 min-w-0">
         <p className={`font-medium ${item.archived ? "text-gray-400 line-through" : "text-gray-900"}`}>{item.name}</p>
-        <p className="text-xs text-gray-500 truncate">{item.description} · {item.members} members</p>
+        <p className="text-xs text-gray-500 truncate">{item.description}</p>
       </div>
-      <div className="flex items-center gap-2 shrink-0 ml-3">
-        <button onClick={() => archiveOrg(levelIdx, item.id)} className={`p-1 rounded ${item.archived ? "text-green-500 hover:bg-green-50" : "text-gray-400 hover:bg-gray-100"}`} title={item.archived ? "Restore" : "Archive"}>
+      <div className="flex items-center gap-1 shrink-0 ml-3">
+        <button onClick={() => editOrg(levelIdx, item)} className="p-1.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50" title="Edit name & details">
+          <Edit3 className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => setDeletingOrgItem({ levelIdx, item })} className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50" title="Delete branch">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => archiveOrg(levelIdx, item.id)} className={`p-1.5 rounded ${item.archived ? "text-green-500 hover:bg-green-50" : "text-gray-400 hover:bg-gray-100"}`} title={item.archived ? "Restore" : "Archive"}>
           <Archive className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -378,7 +413,7 @@ export function OrgStructurePage() {
               <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: "#E2E8F0" }}>
                 <div>
                   <p className="font-medium text-gray-900">{c.name}</p>
-                  <p className="text-xs text-gray-500">{c.description} · {c.members} members</p>
+                  <p className="text-xs text-gray-500">{c.description}</p>
                 </div>
               </div>
             ))}
@@ -401,7 +436,7 @@ export function OrgStructurePage() {
               <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: "#E2E8F0" }}>
                 <div>
                   <p className="font-medium text-gray-900">{c.name}</p>
-                  <p className="text-xs text-gray-500">{c.description} · {c.members} members</p>
+                  <p className="text-xs text-gray-500">{c.description}</p>
                 </div>
               </div>
             ))}
@@ -426,6 +461,58 @@ export function OrgStructurePage() {
           <span>Contractor supervisors can be attached to <strong>{levelNames.l3}s</strong> and participate in project execution without requiring employee records or payroll linkage.</span>
         </div>
       </div>
+
+      {/* Edit Branch Modal */}
+      {editingOrgItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Edit Branch / Org Level Item</h3>
+              <button onClick={() => setEditingOrgItem(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Branch Name</label>
+                <input value={editOrgName} onChange={e => setEditOrgName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+                <textarea value={editOrgDesc} onChange={e => setEditOrgDesc(e.target.value)} rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setEditingOrgItem(null)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={saveEditOrg} disabled={!editOrgName.trim()}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium disabled:opacity-40 flex items-center gap-1.5">
+                <Save className="w-4 h-4" /> Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingOrgItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm p-6 text-center space-y-4 shadow-xl">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900">Delete Branch?</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Are you sure you want to delete <strong className="text-gray-800">{deletingOrgItem.item.name}</strong> from organizational structure? This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setDeletingOrgItem(null)} className="w-full py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={deleteOrgItem} className="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium">Confirm Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

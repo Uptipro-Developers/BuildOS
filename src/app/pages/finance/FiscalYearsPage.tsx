@@ -6,6 +6,7 @@ import type { FiscalYear, FiscalYearStatus } from "./types";
 import { DataTable, type Column } from "../../components/DataTable";
 import { exportCSV } from "../../utils/exportCSV";
 
+const FISCAL_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const FISCAL_STATUS_STYLES: Record<FiscalYearStatus, string> = {
   open: "bg-emerald-100 text-emerald-700",

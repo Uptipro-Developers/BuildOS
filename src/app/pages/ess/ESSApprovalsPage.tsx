@@ -1,198 +1,101 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { getCurrencySymbol } from "../../utils/generalSettings";
-import {
-  CheckCircle,
-  XCircle,
-  Clock,
-  Search,
-  MessageSquare,
-  ChevronDown,
-  AlertTriangle,
-} from "lucide-react";
-import {
-  getApprovals,
-  approveItem,
-  rejectItem,
-  type ApprovalFlow,
-} from "../../api/approvals";
-import { createActivityRecord } from "../../api/activity-history";
-import { useAuthUser } from "../../utils/useAuthUser";
-import { toast } from "sonner";
+import { useState, type ReactNode } from "react";
+import { CheckCircle, XCircle, Clock, Search, MessageSquare, ChevronDown, AlertTriangle } from "lucide-react";
 
-type ESSApprovalType = string;
+type ESSApprovalType = "Leave Request" | "Time Extension" | "Expense Claim" | "Training Request";
 type ApprovalStatus = "pending" | "approved" | "rejected";
 
 interface ESSApproval {
-  id: string;
-  type: ESSApprovalType;
-  title: string;
-  project: string;
-  requestedBy: string;
-  date: string;
-  amount?: number;
-  status: ApprovalStatus;
-  urgency: "normal" | "urgent";
-  description: string;
-  approvalFlow?: ApprovalFlow | null;
+  id: string; type: ESSApprovalType; title: string; project: string;
+  requestedBy: string; date: string; amount?: number; status: ApprovalStatus;
+  urgency: "normal" | "urgent"; description: string;
 }
 
-const statusConfig: Record<
-  ApprovalStatus,
-  { icon: ReactNode; badge: string; label: string }
-> = {
-  pending: {
-    icon: <Clock className="w-4 h-4 text-amber-500" />,
-    badge: "bg-amber-100 text-amber-700",
-    label: "Pending",
-  },
-  approved: {
-    icon: <CheckCircle className="w-4 h-4 text-green-500" />,
-    badge: "bg-green-100 text-green-700",
-    label: "Approved",
-  },
-  rejected: {
-    icon: <XCircle className="w-4 h-4 text-red-500" />,
-    badge: "bg-red-100 text-red-700",
-    label: "Rejected",
-  },
+const approvals: ESSApproval[] = [
+  { id: "es1", type: "Leave Request",    title: "Annual Leave — 10 Days (Fatima Musa)",               project: "Downtown Office Complex",   requestedBy: "Fatima Musa",   date: "2026-04-09",              status: "pending",  urgency: "normal", description: "Leave dates: 14 Apr – 25 Apr 2026. No critical site deliverables in this window. Coverage arranged with team lead." },
+  { id: "es2", type: "Time Extension",   title: "Foundation Inspection Report Deadline",              project: "Industrial Warehouse",      requestedBy: "Daniel Moore",  date: "2026-04-08",              status: "pending",  urgency: "urgent", description: "Requests 5-day extension on inspection report. Third-party lab results delayed; beyond employee's control." },
+  { id: "es3", type: "Expense Claim",    title: "Monthly Site Travel Reimbursement",                  project: "University Science Block",  requestedBy: "Alice Ware",    date: "2026-04-08", amount: 12500,  status: "pending",  urgency: "normal", description: "Monthly fuel and toll reimbursement for university site travel. Mileage log and fuel receipts attached." },
+  { id: "es4", type: "Training Request", title: "Structural Analysis Advanced Course",                project: "—",                         requestedBy: "Carlos Rivera", date: "2026-04-07", amount: 85000,  status: "pending",  urgency: "normal", description: "3-day technical training at BIM Institute, Lagos. Directly relevant to current project scope. Registration closes April 15." },
+  { id: "es5", type: "Leave Request",    title: "Emergency Family Leave — 2 Days (Diana Park)",      project: "—",                         requestedBy: "Diana Park",    date: "2026-04-06",              status: "approved", urgency: "urgent", description: "Emergency personal circumstances. Leave granted with full pay per company compassionate leave policy." },
+  { id: "es6", type: "Expense Claim",    title: "Client Entertainment — Tender Submission Dinner",   project: "Downtown Office Complex",   requestedBy: "John Smith",    date: "2026-04-05", amount: 45000,  status: "approved", urgency: "normal", description: "Dinner with client representatives following successful tender submission. Within entertainment policy limits." },
+  { id: "es7", type: "Training Request", title: "First Aid & Safety Certification Renewal",          project: "—",                         requestedBy: "Robert Lee",    date: "2026-04-04", amount: 22000,  status: "rejected", urgency: "normal", description: "Rejected — company-wide group first aid training already scheduled for May 12. Defer to that date." },
+];
+
+const statusConfig: Record<ApprovalStatus, { icon: ReactNode; badge: string; label: string }> = {
+  pending:  { icon: <Clock className="w-4 h-4 text-amber-500" />,        badge: "bg-amber-100 text-amber-700",  label: "Pending"  },
+  approved: { icon: <CheckCircle className="w-4 h-4 text-green-500" />,  badge: "bg-green-100 text-green-700",  label: "Approved" },
+  rejected: { icon: <XCircle className="w-4 h-4 text-red-500" />,        badge: "bg-red-100 text-red-700",      label: "Rejected" },
 };
 
-const typeColors: Record<string, string> = {
-  "Leave Request": "bg-green-50 text-green-700",
-  "Time Extension": "bg-amber-50 text-amber-700",
-  "Expense Claim": "bg-blue-50 text-blue-700",
+const typeColors: Record<ESSApprovalType, string> = {
+  "Leave Request":    "bg-green-50 text-green-700",
+  "Time Extension":   "bg-amber-50 text-amber-700",
+  "Expense Claim":    "bg-blue-50 text-blue-700",
   "Training Request": "bg-teal-50 text-teal-700",
 };
 
 function fmt(n: number) {
-  const symbol = getCurrencySymbol();
-  if (n >= 1_000_000) return `${symbol}${(n / 1_000_000).toFixed(1)}M`;
-  return `${symbol}${(n / 1000).toFixed(0)}K`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  return `$${(n / 1000).toFixed(0)}K`;
 }
 
 export function ESSApprovalsPage() {
-  const { id: authUserId, name: authName } = useAuthUser();
-  const [approvals, setApprovals] = useState<ESSApproval[]>([]);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">(
-    "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<ESSApprovalType | "all">("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [approvalStates] = useState<Record<string, ApprovalStatus>>({});
+  const [approvalStates, setApprovalStates] = useState<Record<string, ApprovalStatus>>({});
   const [requestInfoFor, setRequestInfoFor] = useState<string | null>(null);
   const [infoNote, setInfoNote] = useState("");
   const [sentInfoFor, setSentInfoFor] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    getApprovals("ess")
-      .then((items) => setApprovals(items as ESSApproval[]))
-      .catch(() => setApprovals([]));
-  }, []);
-
   function getStatus(a: ESSApproval): ApprovalStatus {
     return approvalStates[a.id] ?? a.status;
   }
-  function approve(id: string) {
-    const item = approvals.find((a) => a.id === id);
-    approveItem(id)
-      .then(() => {
-        toast.success("Request approved.");
-        void createActivityRecord({
-          userId: authUserId || undefined,
-          userName: authName || "ESS User",
-          action: "Approved request",
-          module: "ess",
-          description: item ? `${item.type} · ${item.title}` : `Approval ${id}`,
-        }).catch(() => {});
-        getApprovals("ess")
-          .then((items) => setApprovals(items as ESSApproval[]))
-          .catch(() => setApprovals([]));
-      })
-      .catch((err) => {
-        toast.error("Failed to approve. Please try again.");
-        console.error(err);
-      });
-  }
-  function reject(id: string) {
-    const item = approvals.find((a) => a.id === id);
-    rejectItem(id)
-      .then(() => {
-        toast.success("Request rejected.");
-        void createActivityRecord({
-          userId: authUserId || undefined,
-          userName: authName || "ESS User",
-          action: "Rejected request",
-          module: "ess",
-          description: item ? `${item.type} · ${item.title}` : `Approval ${id}`,
-        }).catch(() => {});
-        getApprovals("ess")
-          .then((items) => setApprovals(items as ESSApproval[]))
-          .catch(() => setApprovals([]));
-      })
-      .catch((err) => {
-        toast.error("Failed to reject. Please try again.");
-        console.error(err);
-      });
-  }
+  function approve(id: string) { setApprovalStates(s => ({ ...s, [id]: "approved" })); }
+  function reject(id: string)  { setApprovalStates(s => ({ ...s, [id]: "rejected" })); }
   function sendInfoRequest(id: string) {
     if (!infoNote.trim()) return;
-    setSentInfoFor((prev) => new Set(prev).add(id));
+    setSentInfoFor(prev => new Set(prev).add(id));
     setRequestInfoFor(null);
     setInfoNote("");
   }
 
-  const filtered = approvals.filter((a) => {
-    if (
-      search &&
-      !a.title.toLowerCase().includes(search.toLowerCase()) &&
-      !a.requestedBy.toLowerCase().includes(search.toLowerCase())
-    )
-      return false;
+  const filtered = approvals.filter(a => {
+    if (search && !a.title.toLowerCase().includes(search.toLowerCase()) && !a.requestedBy.toLowerCase().includes(search.toLowerCase())) return false;
     if (statusFilter !== "all" && getStatus(a) !== statusFilter) return false;
     if (typeFilter !== "all" && a.type !== typeFilter) return false;
     return true;
   });
 
   const counts = {
-    all: approvals.length,
-    pending: approvals.filter((a) => getStatus(a) === "pending").length,
-    approved: approvals.filter((a) => getStatus(a) === "approved").length,
-    rejected: approvals.filter((a) => getStatus(a) === "rejected").length,
+    all:      approvals.length,
+    pending:  approvals.filter(a => getStatus(a) === "pending").length,
+    approved: approvals.filter(a => getStatus(a) === "approved").length,
+    rejected: approvals.filter(a => getStatus(a) === "rejected").length,
   };
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Team Approvals
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Review leave, time extensions, expense claims, and training requests
-            from your team
-          </p>
+          <h1 className="text-2xl font-semibold text-gray-900">Team Approvals</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Review leave, time extensions, expense claims, and training requests from your team</p>
         </div>
         {counts.pending > 0 && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
             <AlertTriangle className="w-4 h-4 text-amber-600" />
-            <span className="text-sm font-medium text-amber-800">
-              {counts.pending} pending approval{counts.pending !== 1 ? "s" : ""}
-            </span>
+            <span className="text-sm font-medium text-amber-800">{counts.pending} pending approval{counts.pending !== 1 ? "s" : ""}</span>
           </div>
         )}
       </div>
 
       {/* Status tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(["all", "pending", "approved", "rejected"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
+        {(["all", "pending", "approved", "rejected"] as const).map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize transition-colors ${statusFilter === s ? "border-teal-600 text-teal-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}
           >
-            {s}{" "}
-            <span className="ml-1 text-xs text-gray-400">({counts[s]})</span>
+            {s} <span className="ml-1 text-xs text-gray-400">({counts[s]})</span>
           </button>
         ))}
       </div>
@@ -201,232 +104,95 @@ export function ESSApprovalsPage() {
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by title or employee…"
-            className="pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 w-full"
-          />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by title or employee…"
+            className="pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 w-full" />
         </div>
-        <select
-          value={typeFilter}
-          onChange={(e) =>
-            setTypeFilter(e.target.value as ESSApprovalType | "all")
-          }
-          className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as ESSApprovalType | "all")}
+          className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option value="all">All Types</option>
-          {(
-            [
-              "Leave Request",
-              "Time Extension",
-              "Expense Claim",
-              "Training Request",
-            ] as const
-          ).map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
+          {(["Leave Request", "Time Extension", "Expense Claim", "Training Request"] as const).map(t => (
+            <option key={t} value={t}>{t}</option>
           ))}
         </select>
       </div>
 
       {/* Approval cards */}
       <div className="space-y-3">
-        {filtered.map((a) => {
+        {filtered.map(a => {
           const status = getStatus(a);
           const sc = statusConfig[status];
           const isPending = status === "pending";
           const isExpanded = expandedId === a.id;
           return (
-            <div
-              key={a.id}
-              className={`bg-white rounded-lg border transition-all ${a.urgency === "urgent" && isPending ? "border-amber-300" : "border-gray-200"}`}
-            >
-              <div
-                className="flex items-start gap-4 p-4 cursor-pointer"
-                onClick={() => setExpandedId(isExpanded ? null : a.id)}
-              >
+            <div key={a.id} className={`bg-white rounded-lg border transition-all ${a.urgency === "urgent" && isPending ? "border-amber-300" : "border-gray-200"}`}>
+              <div className="flex items-start gap-4 p-4 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : a.id)}>
                 <div className="mt-0.5 flex-shrink-0">{sc.icon}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <h3 className="text-sm font-semibold text-gray-900">
-                      {a.title}
-                    </h3>
+                    <h3 className="text-sm font-semibold text-gray-900">{a.title}</h3>
                     {a.urgency === "urgent" && isPending && (
-                      <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
-                        Urgent
-                      </span>
+                      <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">Urgent</span>
                     )}
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-                    <span
-                      className={`px-1.5 py-0.5 rounded font-medium ${typeColors[a.type]}`}
-                    >
-                      {a.type}
-                    </span>
+                    <span className={`px-1.5 py-0.5 rounded font-medium ${typeColors[a.type]}`}>{a.type}</span>
                     {a.project !== "—" && <span>📁 {a.project}</span>}
                     <span>👤 {a.requestedBy}</span>
                     <span>📅 {a.date}</span>
-                    {a.amount !== undefined && (
-                      <span className="font-medium text-gray-700">
-                        {fmt(a.amount)}
-                      </span>
-                    )}
+                    {a.amount !== undefined && <span className="font-medium text-gray-700">{fmt(a.amount)}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
-                  <span
-                    className={`text-xs px-2 py-1 rounded-full font-medium ${sc.badge}`}
-                  >
-                    {sc.label}
-                  </span>
-                  <ChevronDown
-                    className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                  />
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${sc.badge}`}>{sc.label}</span>
+                  <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                 </div>
               </div>
 
               {isExpanded && (
                 <div className="px-4 pb-4 pt-0 border-t border-gray-100">
-                  <p className="text-sm text-gray-600 mt-3 mb-4">
-                    {a.description}
-                  </p>
-                  {a.approvalFlow && a.approvalFlow.approvers.length > 0 && (
-                    <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                        Approval flow
-                        <span className="ml-1.5 font-normal capitalize text-gray-400">
-                          ({a.approvalFlow.workflowType})
-                        </span>
-                      </p>
-                      {a.approvalFlow.workflowType === "tier" &&
-                      a.approvalFlow.tierLevels ? (
-                        <ol className="flex flex-wrap items-center gap-2">
-                          {a.approvalFlow.tierLevels.map((t, i) => (
-                            <li
-                              key={`${t.level}-${t.approver}`}
-                              className="flex items-center gap-2"
-                            >
-                              <span className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
-                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-teal-100 text-[10px] font-semibold text-teal-700">
-                                  {t.level}
-                                </span>
-                                {t.approver}
-                                {t.condition && (
-                                  <span className="text-gray-400">
-                                    · {t.condition}
-                                  </span>
-                                )}
-                              </span>
-                              {i <
-                                (a.approvalFlow?.tierLevels?.length ?? 0) - 1 && (
-                                <span className="text-gray-400">→</span>
-                              )}
-                            </li>
-                          ))}
-                        </ol>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          {a.approvalFlow.approvers.map((approver) => (
-                            <span
-                              key={approver}
-                              className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700"
-                            >
-                              {approver}
-                            </span>
-                          ))}
-                          {a.approvalFlow.workflowType === "group" && (
-                            <span className="text-xs text-gray-400">
-                              (any approver)
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <p className="text-sm text-gray-600 mt-3 mb-4">{a.description}</p>
                   {isPending && (
                     <div className="flex items-center gap-3">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          approve(a.id);
-                        }}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700"
-                      >
+                      <button onClick={e => { e.stopPropagation(); approve(a.id); }}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700">
                         <CheckCircle className="w-3.5 h-3.5" /> Approve
                       </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          reject(a.id);
-                        }}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700"
-                      >
+                      <button onClick={e => { e.stopPropagation(); reject(a.id); }}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700">
                         <XCircle className="w-3.5 h-3.5" /> Reject
                       </button>
                       {sentInfoFor.has(a.id) ? (
                         <span className="flex items-center gap-1.5 text-xs text-teal-700 bg-teal-50 border border-teal-200 px-3 py-2 rounded-md font-medium">
-                          <MessageSquare className="w-3.5 h-3.5" /> Info
-                          requested
+                          <MessageSquare className="w-3.5 h-3.5" /> Info requested
                         </span>
                       ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRequestInfoFor(
-                              requestInfoFor === a.id ? null : a.id,
-                            );
-                            setInfoNote("");
-                          }}
-                          className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
-                        >
+                        <button onClick={e => { e.stopPropagation(); setRequestInfoFor(requestInfoFor === a.id ? null : a.id); setInfoNote(""); }}
+                          className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">
                           <MessageSquare className="w-3.5 h-3.5" /> Request Info
                         </button>
                       )}
                     </div>
                   )}
                   {isPending && requestInfoFor === a.id && (
-                    <div
-                      className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg space-y-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <p className="text-xs font-medium text-gray-600">
-                        What information do you need from this employee?
-                      </p>
-                      <textarea
-                        value={infoNote}
-                        onChange={(e) => setInfoNote(e.target.value)}
-                        rows={2}
+                    <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg space-y-2" onClick={e => e.stopPropagation()}>
+                      <p className="text-xs font-medium text-gray-600">What information do you need from this employee?</p>
+                      <textarea value={infoNote} onChange={e => setInfoNote(e.target.value)} rows={2}
                         placeholder="e.g. Please provide a handover plan before the leave starts…"
                         className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
                       />
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => sendInfoRequest(a.id)}
-                          disabled={!infoNote.trim()}
-                          className="px-3 py-1.5 bg-teal-600 text-white text-xs rounded-md font-medium hover:bg-teal-700 disabled:opacity-40"
-                        >
+                        <button onClick={() => sendInfoRequest(a.id)} disabled={!infoNote.trim()}
+                          className="px-3 py-1.5 bg-teal-600 text-white text-xs rounded-md font-medium hover:bg-teal-700 disabled:opacity-40">
                           Send Request
                         </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRequestInfoFor(null);
-                            setInfoNote("");
-                          }}
-                          className="px-3 py-1.5 border border-gray-300 text-xs rounded-md text-gray-600 hover:bg-gray-50"
-                        >
+                        <button onClick={e => { e.stopPropagation(); setRequestInfoFor(null); setInfoNote(""); }}
+                          className="px-3 py-1.5 border border-gray-300 text-xs rounded-md text-gray-600 hover:bg-gray-50">
                           Cancel
                         </button>
                       </div>
                     </div>
                   )}
-                  {!isPending && (
-                    <p className="text-xs text-gray-400">
-                      This request has been {status}.
-                    </p>
-                  )}
+                  {!isPending && <p className="text-xs text-gray-400">This request has been {status}.</p>}
                 </div>
               )}
             </div>
@@ -435,9 +201,7 @@ export function ESSApprovalsPage() {
         {filtered.length === 0 && (
           <div className="py-16 text-center bg-white rounded-lg border border-gray-200">
             <CheckCircle className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm font-medium text-gray-500">
-              No approvals match your filters
-            </p>
+            <p className="text-sm font-medium text-gray-500">No approvals match your filters</p>
           </div>
         )}
       </div>

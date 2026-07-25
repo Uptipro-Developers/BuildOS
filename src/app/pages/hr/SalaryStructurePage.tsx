@@ -1,29 +1,12 @@
-import { useState, useEffect } from "react";
-import { apiFetch } from "../../api/client";
+import { useState } from "react";
 import {
-  getCurrencySymbol,
-  formatNumberByGeneralSettings,
-} from "../../utils/generalSettings";
-import {
-  Plus,
-  Edit,
-  Trash2,
-  ChevronDown,
-  ChevronRight,
-  X,
-  Layers,
-  Percent,
-  Hash,
-  Link2,
-  Code2,
-  Users,
-  UserCheck,
-  DollarSign,
+  Plus, Edit, Trash2, ChevronDown, ChevronRight, X, Layers,
+  Percent, Hash, Link2, Code2, Users, UserCheck, DollarSign,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type CalcType = "fixed" | "percent_basic" | "percent_component" | "formula";
-type AppScope = "all" | "roles" | "grade_levels" | "custom_groups";
+type CalcType  = "fixed" | "percent_basic" | "percent_component" | "formula";
+type AppScope  = "all" | "roles" | "grade_levels" | "custom_groups";
 
 interface SalaryComponent {
   id: string;
@@ -50,55 +33,18 @@ interface SalaryBand {
 }
 
 // ── Static config ──────────────────────────────────────────────────────────────
-const CALC_TYPES: {
-  key: CalcType;
-  label: string;
-  hint: string;
-  icon: React.ReactNode;
-}[] = [
-  {
-    key: "fixed",
-    label: "Fixed Amount",
-    hint: "A fixed monetary value",
-    icon: <DollarSign className="w-4 h-4" />,
-  },
-  {
-    key: "percent_basic",
-    label: "% of Basic",
-    hint: "Percentage of the band's basic salary",
-    icon: <Percent className="w-4 h-4" />,
-  },
-  {
-    key: "percent_component",
-    label: "% of Component",
-    hint: "Percentage of another component's value",
-    icon: <Link2 className="w-4 h-4" />,
-  },
-  {
-    key: "formula",
-    label: "Formula",
-    hint: "Custom expression (e.g. basic * 0.1 + 500)",
-    icon: <Code2 className="w-4 h-4" />,
-  },
+const CALC_TYPES: { key: CalcType; label: string; hint: string; icon: React.ReactNode }[] = [
+  { key: "fixed", label: "Fixed Amount", hint: "A fixed monetary value", icon: <DollarSign className="w-4 h-4" /> },
+  { key: "percent_basic", label: "% of Basic", hint: "Percentage of the band's basic salary", icon: <Percent className="w-4 h-4" /> },
+  { key: "percent_component", label: "% of Component", hint: "Percentage of another component's value", icon: <Link2 className="w-4 h-4" /> },
+  { key: "formula", label: "Formula", hint: "Custom expression (e.g. basic * 0.1 + 500)", icon: <Code2 className="w-4 h-4" /> },
 ];
 
 const APP_SCOPES: { key: AppScope; label: string; icon: React.ReactNode }[] = [
   { key: "all", label: "All Employees", icon: <Users className="w-4 h-4" /> },
-  {
-    key: "roles",
-    label: "Specific Roles",
-    icon: <UserCheck className="w-4 h-4" />,
-  },
-  {
-    key: "grade_levels",
-    label: "Grade Levels",
-    icon: <Hash className="w-4 h-4" />,
-  },
-  {
-    key: "custom_groups",
-    label: "Custom Groups",
-    icon: <Layers className="w-4 h-4" />,
-  },
+  { key: "roles", label: "Specific Roles", icon: <UserCheck className="w-4 h-4" /> },
+  { key: "grade_levels", label: "Grade Levels", icon: <Hash className="w-4 h-4" /> },
+  { key: "custom_groups", label: "Custom Groups", icon: <Layers className="w-4 h-4" /> },
 ];
 
 const BLANK_COMP: Omit<SalaryComponent, "id"> = {
@@ -114,22 +60,75 @@ const BLANK_COMP: Omit<SalaryComponent, "id"> = {
   applicability: { scope: "all", target: "" },
 };
 
+// ── Seed data ─────────────────────────────────────────────────────────────────
+const SEED_BANDS: SalaryBand[] = [
+  {
+    id: "b1",
+    gradeName: "Junior Engineer",
+    gradeLevel: "L2",
+    department: "Engineering",
+    description: "Entry-level engineering positions",
+    basicSalary: 150000,
+    components: [
+      { id: "c1", name: "Housing Allowance", type: "allowance", calcType: "percent_basic", amount: 0, percentage: 30, taxable: false, description: "Standard housing benefit", applicability: { scope: "all" } },
+      { id: "c2", name: "Transport Allowance", type: "allowance", calcType: "fixed", amount: 15000, taxable: false, description: "Monthly transport stipend", applicability: { scope: "all" } },
+      { id: "c3", name: "Pension (Employee)", type: "deduction", calcType: "percent_basic", amount: 0, percentage: 8, taxable: false, description: "Employee pension contribution", applicability: { scope: "all" } },
+    ],
+  },
+  {
+    id: "b2",
+    gradeName: "Senior Engineer",
+    gradeLevel: "L4",
+    department: "Engineering",
+    description: "Senior individual contributors",
+    basicSalary: 280000,
+    components: [
+      { id: "c4", name: "Housing Allowance", type: "allowance", calcType: "percent_basic", amount: 0, percentage: 35, taxable: false, description: "Standard housing benefit", applicability: { scope: "all" } },
+      { id: "c5", name: "Performance Bonus", type: "allowance", calcType: "formula", amount: 0, formula: "basic * 0.12 * performance_rating", taxable: true, description: "Quarterly performance bonus", applicability: { scope: "roles", target: "Senior Engineer" } },
+      { id: "c6", name: "Pension (Employee)", type: "deduction", calcType: "percent_basic", amount: 0, percentage: 8, taxable: false, description: "Employee pension contribution", applicability: { scope: "all" } },
+    ],
+  },
+  {
+    id: "b3",
+    gradeName: "Project Manager",
+    gradeLevel: "M2",
+    department: "Construction",
+    description: "Mid-level project management",
+    basicSalary: 320000,
+    components: [
+      { id: "c7", name: "Housing Allowance", type: "allowance", calcType: "percent_basic", amount: 0, percentage: 40, taxable: false, description: "Standard housing benefit", applicability: { scope: "all" } },
+      { id: "c8", name: "Site Hazard Allowance", type: "allowance", calcType: "fixed", amount: 25000, taxable: true, description: "Site risk compensation", applicability: { scope: "grade_levels", target: "M2" } },
+      { id: "c9", name: "Pension (Employee)", type: "deduction", calcType: "percent_basic", amount: 0, percentage: 8, taxable: false, description: "Employee pension contribution", applicability: { scope: "all" } },
+      { id: "c10", name: "PAYE Tax", type: "deduction", calcType: "formula", amount: 0, formula: "(basic + taxable_allowances - 200000) * 0.24", taxable: false, description: "Pay as you earn income tax", applicability: { scope: "all" } },
+    ],
+  },
+  {
+    id: "b4",
+    gradeName: "Director",
+    gradeLevel: "D1",
+    department: "Executive",
+    description: "C-suite and directors",
+    basicSalary: 750000,
+    components: [
+      { id: "c11", name: "Housing Allowance", type: "allowance", calcType: "percent_basic", amount: 0, percentage: 50, taxable: false, description: "Executive housing benefit", applicability: { scope: "all" } },
+      { id: "c12", name: "Car Benefit", type: "allowance", calcType: "fixed", amount: 80000, taxable: true, description: "Company vehicle benefit", applicability: { scope: "roles", target: "Director" } },
+      { id: "c13", name: "Annual Bonus", type: "allowance", calcType: "percent_component", amount: 0, percentage: 20, referenceComponent: "c11", taxable: true, description: "Discretionary annual bonus", applicability: { scope: "custom_groups", target: "Executive Committee" } },
+      { id: "c14", name: "Pension (Employee)", type: "deduction", calcType: "percent_basic", amount: 0, percentage: 10, taxable: false, description: "Employee pension contribution", applicability: { scope: "all" } },
+    ],
+  },
+];
+
 // ── Helper badges ─────────────────────────────────────────────────────────────
 function CalcBadge({ type }: { type: CalcType }) {
   const map: Record<CalcType, { label: string; cls: string }> = {
-    fixed: { label: "Fixed", cls: "bg-blue-100 text-blue-700" },
-    percent_basic: { label: "% Basic", cls: "bg-purple-100 text-purple-700" },
-    percent_component: {
-      label: "% Component",
-      cls: "bg-amber-100 text-amber-700",
-    },
-    formula: { label: "Formula", cls: "bg-teal-100 text-teal-700" },
+    fixed:             { label: "Fixed",        cls: "bg-blue-100 text-blue-700" },
+    percent_basic:     { label: "% Basic",      cls: "bg-purple-100 text-purple-700" },
+    percent_component: { label: "% Component",  cls: "bg-amber-100 text-amber-700" },
+    formula:           { label: "Formula",       cls: "bg-teal-100 text-teal-700" },
   };
   const { label, cls } = map[type];
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}
-    >
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
       {label}
     </span>
   );
@@ -137,16 +136,14 @@ function CalcBadge({ type }: { type: CalcType }) {
 
 function AppBadge({ scope }: { scope: AppScope }) {
   const map: Record<AppScope, { label: string; cls: string }> = {
-    all: { label: "All", cls: "bg-gray-100 text-gray-600" },
-    roles: { label: "Roles", cls: "bg-indigo-100 text-indigo-700" },
-    grade_levels: { label: "Grades", cls: "bg-emerald-100 text-emerald-700" },
-    custom_groups: { label: "Groups", cls: "bg-rose-100 text-rose-700" },
+    all:           { label: "All",       cls: "bg-gray-100 text-gray-600" },
+    roles:         { label: "Roles",     cls: "bg-indigo-100 text-indigo-700" },
+    grade_levels:  { label: "Grades",    cls: "bg-emerald-100 text-emerald-700" },
+    custom_groups: { label: "Groups",    cls: "bg-rose-100 text-rose-700" },
   };
   const { label, cls } = map[scope];
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}
-    >
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
       {label}
     </span>
   );
@@ -165,7 +162,7 @@ function ComponentModal({
   onClose: () => void;
 }) {
   const [form, setForm] = useState<Omit<SalaryComponent, "id">>(
-    initial ? { ...initial } : { ...BLANK_COMP },
+    initial ? { ...initial } : { ...BLANK_COMP }
   );
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
@@ -186,10 +183,7 @@ function ComponentModal({
           <h2 className="text-lg font-semibold text-gray-900">
             {initial ? "Edit Component" : "Add Component"}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -198,9 +192,7 @@ function ComponentModal({
           {/* Basic info */}
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Component Name
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Component Name</label>
               <input
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 placeholder="e.g. Housing Allowance"
@@ -209,15 +201,11 @@ function ComponentModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Type
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
               <select
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 value={form.type}
-                onChange={(e) =>
-                  set("type", e.target.value as "allowance" | "deduction")
-                }
+                onChange={(e) => set("type", e.target.value as "allowance" | "deduction")}
               >
                 <option value="allowance">Allowance</option>
                 <option value="deduction">Deduction</option>
@@ -231,9 +219,7 @@ function ComponentModal({
                   form.taxable ? "bg-indigo-600" : "bg-gray-200"
                 }`}
               >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.taxable ? "translate-x-6" : "translate-x-1"}`}
-                />
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.taxable ? "translate-x-6" : "translate-x-1"}`} />
               </button>
               <span className="text-sm text-gray-700">Taxable</span>
             </div>
@@ -241,9 +227,7 @@ function ComponentModal({
 
           {/* Calculation type */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Calculation Type
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Calculation Type</label>
             <div className="grid grid-cols-2 gap-2">
               {CALC_TYPES.map((ct) => (
                 <button
@@ -256,15 +240,11 @@ function ComponentModal({
                       : "border-gray-200 hover:border-indigo-300"
                   }`}
                 >
-                  <span
-                    className={`mt-0.5 ${form.calcType === ct.key ? "text-indigo-600" : "text-gray-400"}`}
-                  >
+                  <span className={`mt-0.5 ${form.calcType === ct.key ? "text-indigo-600" : "text-gray-400"}`}>
                     {ct.icon}
                   </span>
                   <div>
-                    <p
-                      className={`text-sm font-medium ${form.calcType === ct.key ? "text-indigo-700" : "text-gray-700"}`}
-                    >
+                    <p className={`text-sm font-medium ${form.calcType === ct.key ? "text-indigo-700" : "text-gray-700"}`}>
                       {ct.label}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">{ct.hint}</p>
@@ -277,9 +257,7 @@ function ComponentModal({
           {/* Conditional inputs */}
           {form.calcType === "fixed" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Amount ({getCurrencySymbol()})
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₦)</label>
               <input
                 type="number"
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -288,39 +266,28 @@ function ComponentModal({
               />
             </div>
           )}
-          {(form.calcType === "percent_basic" ||
-            form.calcType === "percent_component") && (
+          {(form.calcType === "percent_basic" || form.calcType === "percent_component") && (
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Percentage (%)
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Percentage (%)</label>
                 <input
                   type="number"
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   value={form.percentage ?? ""}
-                  onChange={(e) =>
-                    set("percentage", parseFloat(e.target.value) || 0)
-                  }
+                  onChange={(e) => set("percentage", parseFloat(e.target.value) || 0)}
                 />
               </div>
               {form.calcType === "percent_component" && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Reference Component
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference Component</label>
                   <select
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     value={form.referenceComponent ?? ""}
-                    onChange={(e) =>
-                      set("referenceComponent", e.target.value || undefined)
-                    }
+                    onChange={(e) => set("referenceComponent", e.target.value || undefined)}
                   >
                     <option value="">Select component…</option>
                     {otherComponents.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
+                      <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>
@@ -329,9 +296,7 @@ function ComponentModal({
           )}
           {form.calcType === "formula" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Formula Expression
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Formula Expression</label>
               <input
                 className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 placeholder="e.g. basic * 0.1 + 5000"
@@ -339,25 +304,20 @@ function ComponentModal({
                 onChange={(e) => set("formula", e.target.value || undefined)}
               />
               <p className="text-xs text-gray-400 mt-1">
-                Available variables: <code>basic</code>,{" "}
-                <code>taxable_allowances</code>, <code>performance_rating</code>
+                Available variables: <code>basic</code>, <code>taxable_allowances</code>, <code>performance_rating</code>
               </p>
             </div>
           )}
 
           {/* Applicability */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Applicability
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Applicability</label>
             <div className="grid grid-cols-2 gap-2">
               {APP_SCOPES.map((s) => (
                 <button
                   key={s.key}
                   type="button"
-                  onClick={() =>
-                    set("applicability", { scope: s.key, target: "" })
-                  }
+                  onClick={() => set("applicability", { scope: s.key, target: "" })}
                   className={`flex items-center gap-2 p-3 rounded-lg border text-sm transition-colors ${
                     form.applicability.scope === s.key
                       ? "border-indigo-500 bg-indigo-50 text-indigo-700 font-medium"
@@ -373,18 +333,13 @@ function ComponentModal({
               <input
                 className="mt-2 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 placeholder={
-                  form.applicability.scope === "roles"
-                    ? "e.g. Senior Engineer, Project Manager"
-                    : form.applicability.scope === "grade_levels"
-                      ? "e.g. L2, M1, D1"
-                      : "e.g. Executive Committee, Field Staff"
+                  form.applicability.scope === "roles" ? "e.g. Senior Engineer, Project Manager" :
+                  form.applicability.scope === "grade_levels" ? "e.g. L2, M1, D1" :
+                  "e.g. Executive Committee, Field Staff"
                 }
                 value={form.applicability.target ?? ""}
                 onChange={(e) =>
-                  set("applicability", {
-                    scope: form.applicability.scope,
-                    target: e.target.value,
-                  })
+                  set("applicability", { scope: form.applicability.scope, target: e.target.value })
                 }
               />
             )}
@@ -392,9 +347,7 @@ function ComponentModal({
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <textarea
               rows={2}
               className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -428,31 +381,13 @@ function ComponentModal({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function SalaryStructurePage() {
-  const [bands, setBands] = useState<SalaryBand[]>([]);
-
-  useEffect(() => {
-    apiFetch("/salary-bands")
-      .then(setBands)
-      .catch((err) => {
-        console.error("Failed to load salary bands:", err);
-        setBands([]);
-      });
-  }, []);
+  const [bands, setBands] = useState<SalaryBand[]>(SEED_BANDS);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["b1"]));
   const [modalBand, setModalBand] = useState<SalaryBand | null>(null);
   const [editComp, setEditComp] = useState<SalaryComponent | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{
-    bandId: string;
-    comp: SalaryComponent;
-  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ bandId: string; comp: SalaryComponent } | null>(null);
   const [addBandOpen, setAddBandOpen] = useState(false);
-  const [newBand, setNewBand] = useState({
-    gradeName: "",
-    gradeLevel: "",
-    department: "",
-    description: "",
-    basicSalary: 0,
-  });
+  const [newBand, setNewBand] = useState({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0 });
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -481,7 +416,7 @@ export function SalaryStructurePage() {
             ? b.components.map((c) => (c.id === comp.id ? comp : c))
             : [...b.components, comp],
         };
-      }),
+      })
     );
     setModalBand(null);
     setEditComp(null);
@@ -490,10 +425,8 @@ export function SalaryStructurePage() {
   const deleteComponent = (bandId: string, compId: string) => {
     setBands((prev) =>
       prev.map((b) =>
-        b.id !== bandId
-          ? b
-          : { ...b, components: b.components.filter((c) => c.id !== compId) },
-      ),
+        b.id !== bandId ? b : { ...b, components: b.components.filter((c) => c.id !== compId) }
+      )
     );
     setDeleteTarget(null);
   };
@@ -528,29 +461,9 @@ export function SalaryStructurePage() {
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: "Grade Bands", value: bands.length, cls: "text-indigo-600" },
-          {
-            label: "Total Components",
-            value: bands.reduce((s, b) => s + b.components.length, 0),
-            cls: "text-gray-700",
-          },
-          {
-            label: "Allowances",
-            value: bands.reduce(
-              (s, b) =>
-                s + b.components.filter((c) => c.type === "allowance").length,
-              0,
-            ),
-            cls: "text-emerald-600",
-          },
-          {
-            label: "Deductions",
-            value: bands.reduce(
-              (s, b) =>
-                s + b.components.filter((c) => c.type === "deduction").length,
-              0,
-            ),
-            cls: "text-rose-600",
-          },
+          { label: "Total Components", value: bands.reduce((s, b) => s + b.components.length, 0), cls: "text-gray-700" },
+          { label: "Allowances", value: bands.reduce((s, b) => s + b.components.filter((c) => c.type === "allowance").length, 0), cls: "text-emerald-600" },
+          { label: "Deductions", value: bands.reduce((s, b) => s + b.components.filter((c) => c.type === "deduction").length, 0), cls: "text-rose-600" },
         ].map((s) => (
           <div key={s.label} className="bg-white border rounded-xl p-4">
             <p className="text-sm text-gray-500">{s.label}</p>
@@ -563,38 +476,19 @@ export function SalaryStructurePage() {
       <div className="space-y-3">
         {bands.map((band) => {
           const isOpen = expanded.has(band.id);
-          const allowances = band.components.filter(
-            (c) => c.type === "allowance",
-          );
-          const deductions = band.components.filter(
-            (c) => c.type === "deduction",
-          );
+          const allowances = band.components.filter((c) => c.type === "allowance");
+          const deductions = band.components.filter((c) => c.type === "deduction");
           const totalAllowances = allowances.reduce(
-            (sum, c) =>
-              sum +
-              (c.calcType === "fixed"
-                ? c.amount
-                : c.calcType === "percent_basic"
-                  ? band.basicSalary * ((c.percentage ?? 0) / 100)
-                  : 0),
-            0,
+            (sum, c) => sum + (c.calcType === "fixed" ? c.amount : c.calcType === "percent_basic" ? band.basicSalary * ((c.percentage ?? 0) / 100) : 0),
+            0
           );
           const totalDeductions = deductions.reduce(
-            (sum, c) =>
-              sum +
-              (c.calcType === "fixed"
-                ? c.amount
-                : c.calcType === "percent_basic"
-                  ? band.basicSalary * ((c.percentage ?? 0) / 100)
-                  : 0),
-            0,
+            (sum, c) => sum + (c.calcType === "fixed" ? c.amount : c.calcType === "percent_basic" ? band.basicSalary * ((c.percentage ?? 0) / 100) : 0),
+            0
           );
 
           return (
-            <div
-              key={band.id}
-              className="bg-white border rounded-xl overflow-hidden"
-            >
+            <div key={band.id} className="bg-white border rounded-xl overflow-hidden">
               {/* Band header */}
               <button
                 className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
@@ -602,17 +496,11 @@ export function SalaryStructurePage() {
               >
                 <div className="flex items-center gap-4">
                   <span className="text-gray-400">
-                    {isOpen ? (
-                      <ChevronDown className="w-5 h-5" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5" />
-                    )}
+                    {isOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                   </span>
                   <div className="text-left">
                     <div className="flex items-center gap-2">
-                      <p className="font-semibold text-gray-900">
-                        {band.gradeName}
-                      </p>
+                      <p className="font-semibold text-gray-900">{band.gradeName}</p>
                       <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
                         {band.gradeLevel}
                       </span>
@@ -620,35 +508,25 @@ export function SalaryStructurePage() {
                         {band.department}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                      {band.description}
-                    </p>
+                    <p className="text-sm text-gray-500 mt-0.5">{band.description}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-6 text-right">
                   <div>
                     <p className="text-xs text-gray-400">Basic Salary</p>
-                    <p className="text-sm font-semibold text-gray-800">
-                      {getCurrencySymbol()}{formatNumberByGeneralSettings(band.basicSalary)}
-                    </p>
+                    <p className="text-sm font-semibold text-gray-800">₦{band.basicSalary.toLocaleString()}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Allowances</p>
-                    <p className="text-sm font-semibold text-emerald-600">
-                      +{getCurrencySymbol()}{formatNumberByGeneralSettings(totalAllowances)}
-                    </p>
+                    <p className="text-sm font-semibold text-emerald-600">+₦{totalAllowances.toLocaleString()}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Deductions</p>
-                    <p className="text-sm font-semibold text-rose-600">
-                      -{getCurrencySymbol()}{formatNumberByGeneralSettings(totalDeductions)}
-                    </p>
+                    <p className="text-sm font-semibold text-rose-600">-₦{totalDeductions.toLocaleString()}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Components</p>
-                    <p className="text-sm font-semibold text-gray-700">
-                      {band.components.length}
-                    </p>
+                    <p className="text-sm font-semibold text-gray-700">{band.components.length}</p>
                   </div>
                 </div>
               </button>
@@ -657,21 +535,13 @@ export function SalaryStructurePage() {
               {isOpen && (
                 <div className="border-t px-5 py-4 bg-gray-50 space-y-4">
                   {(["allowance", "deduction"] as const).map((ctype) => {
-                    const list = band.components.filter(
-                      (c) => c.type === ctype,
-                    );
+                    const list = band.components.filter((c) => c.type === ctype);
                     return (
                       <div key={ctype}>
                         <div className="flex items-center justify-between mb-2">
-                          <h4
-                            className={`text-sm font-semibold ${ctype === "allowance" ? "text-emerald-700" : "text-rose-700"}`}
-                          >
-                            {ctype === "allowance"
-                              ? "Allowances"
-                              : "Deductions"}
-                            <span className="ml-2 text-xs font-normal text-gray-400">
-                              ({list.length})
-                            </span>
+                          <h4 className={`text-sm font-semibold ${ctype === "allowance" ? "text-emerald-700" : "text-rose-700"}`}>
+                            {ctype === "allowance" ? "Allowances" : "Deductions"}
+                            <span className="ml-2 text-xs font-normal text-gray-400">({list.length})</span>
                           </h4>
                           <button
                             onClick={() => openAddComp(band)}
@@ -682,99 +552,58 @@ export function SalaryStructurePage() {
                             }`}
                           >
                             <Plus className="w-3 h-3" />
-                            Add{" "}
-                            {ctype === "allowance" ? "Allowance" : "Deduction"}
+                            Add {ctype === "allowance" ? "Allowance" : "Deduction"}
                           </button>
                         </div>
 
                         {list.length === 0 ? (
-                          <p className="text-xs text-gray-400 italic py-2">
-                            No {ctype}s configured
-                          </p>
+                          <p className="text-xs text-gray-400 italic py-2">No {ctype}s configured</p>
                         ) : (
                           <div className="rounded-lg border overflow-hidden bg-white">
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="bg-gray-50 border-b">
-                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">
-                                    Name
-                                  </th>
-                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">
-                                    Calc Type
-                                  </th>
-                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">
-                                    Value
-                                  </th>
-                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">
-                                    Applicability
-                                  </th>
-                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">
-                                    Taxable
-                                  </th>
+                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Name</th>
+                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Calc Type</th>
+                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Value</th>
+                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Applicability</th>
+                                  <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Taxable</th>
                                   <th className="px-4 py-2" />
                                 </tr>
                               </thead>
                               <tbody>
                                 {list.map((comp, idx) => (
-                                  <tr
-                                    key={comp.id}
-                                    className={`border-b last:border-0 ${idx % 2 === 1 ? "bg-gray-50/50" : ""}`}
-                                  >
-                                    <td className="px-4 py-3 font-medium text-gray-800">
-                                      {comp.name}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                      <CalcBadge type={comp.calcType} />
-                                    </td>
+                                  <tr key={comp.id} className={`border-b last:border-0 ${idx % 2 === 1 ? "bg-gray-50/50" : ""}`}>
+                                    <td className="px-4 py-3 font-medium text-gray-800">{comp.name}</td>
+                                    <td className="px-4 py-3"><CalcBadge type={comp.calcType} /></td>
                                     <td className="px-4 py-3 text-gray-600 font-mono text-xs">
-                                      {comp.calcType === "fixed" &&
-                                        `${getCurrencySymbol()}${formatNumberByGeneralSettings(comp.amount)}`}
-                                      {(comp.calcType === "percent_basic" ||
-                                        comp.calcType ===
-                                          "percent_component") &&
-                                        `${comp.percentage}%`}
-                                      {comp.calcType === "formula" && (
-                                        <span className="text-teal-600">
-                                          {comp.formula}
-                                        </span>
-                                      )}
+                                      {comp.calcType === "fixed" && `₦${comp.amount.toLocaleString()}`}
+                                      {(comp.calcType === "percent_basic" || comp.calcType === "percent_component") && `${comp.percentage}%`}
+                                      {comp.calcType === "formula" && <span className="text-teal-600">{comp.formula}</span>}
                                     </td>
                                     <td className="px-4 py-3">
                                       <div className="flex items-center gap-1.5">
-                                        <AppBadge
-                                          scope={comp.applicability.scope}
-                                        />
+                                        <AppBadge scope={comp.applicability.scope} />
                                         {comp.applicability.target && (
-                                          <span className="text-xs text-gray-400 truncate max-w-[100px]">
-                                            {comp.applicability.target}
-                                          </span>
+                                          <span className="text-xs text-gray-400 truncate max-w-[100px]">{comp.applicability.target}</span>
                                         )}
                                       </div>
                                     </td>
                                     <td className="px-4 py-3">
-                                      <span
-                                        className={`text-xs font-medium ${comp.taxable ? "text-amber-600" : "text-gray-400"}`}
-                                      >
+                                      <span className={`text-xs font-medium ${comp.taxable ? "text-amber-600" : "text-gray-400"}`}>
                                         {comp.taxable ? "Yes" : "No"}
                                       </span>
                                     </td>
                                     <td className="px-4 py-3">
                                       <div className="flex items-center gap-2 justify-end">
                                         <button
-                                          onClick={() =>
-                                            openEditComp(band, comp)
-                                          }
+                                          onClick={() => openEditComp(band, comp)}
                                           className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                                         >
                                           <Edit className="w-4 h-4" />
                                         </button>
                                         <button
-                                          onClick={() =>
-                                            setDeleteTarget({
-                                              bandId: band.id,
-                                              comp,
-                                            })
-                                          }
+                                          onClick={() => setDeleteTarget({ bandId: band.id, comp })}
                                           className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                                         >
                                           <Trash2 className="w-4 h-4" />
@@ -802,104 +631,38 @@ export function SalaryStructurePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
             <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Add Grade Band
-              </h2>
-              <button
-                onClick={() => setAddBandOpen(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
+              <h2 className="text-lg font-semibold text-gray-900">Add Grade Band</h2>
+              <button onClick={() => setAddBandOpen(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="px-6 py-5 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Grade Name
-                  </label>
-                  <input
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. Senior Engineer"
-                    value={newBand.gradeName}
-                    onChange={(e) =>
-                      setNewBand((p) => ({ ...p, gradeName: e.target.value }))
-                    }
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Grade Name</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Senior Engineer" value={newBand.gradeName} onChange={(e) => setNewBand((p) => ({ ...p, gradeName: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Grade Level
-                  </label>
-                  <input
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. L3"
-                    value={newBand.gradeLevel}
-                    onChange={(e) =>
-                      setNewBand((p) => ({ ...p, gradeLevel: e.target.value }))
-                    }
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Grade Level</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. L3" value={newBand.gradeLevel} onChange={(e) => setNewBand((p) => ({ ...p, gradeLevel: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Department
-                  </label>
-                  <input
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. Engineering"
-                    value={newBand.department}
-                    onChange={(e) =>
-                      setNewBand((p) => ({ ...p, department: e.target.value }))
-                    }
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. Engineering" value={newBand.department} onChange={(e) => setNewBand((p) => ({ ...p, department: e.target.value }))} />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Basic Salary ({getCurrencySymbol()})
-                  </label>
-                  <input
-                    type="number"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. 200000"
-                    value={newBand.basicSalary || ""}
-                    onChange={(e) =>
-                      setNewBand((p) => ({
-                        ...p,
-                        basicSalary: parseFloat(e.target.value) || 0,
-                      }))
-                    }
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Basic Salary (₦)</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="e.g. 200000" value={newBand.basicSalary || ""} onChange={(e) => setNewBand((p) => ({ ...p, basicSalary: parseFloat(e.target.value) || 0 }))} />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    rows={2}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Brief description…"
-                    value={newBand.description}
-                    onChange={(e) =>
-                      setNewBand((p) => ({ ...p, description: e.target.value }))
-                    }
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea rows={2} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Brief description…" value={newBand.description} onChange={(e) => setNewBand((p) => ({ ...p, description: e.target.value }))} />
                 </div>
               </div>
             </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t bg-gray-50 rounded-b-xl">
-              <button
-                onClick={() => setAddBandOpen(false)}
-                className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={addBand}
-                disabled={!newBand.gradeName.trim()}
-                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Create Band
-              </button>
+              <button onClick={() => setAddBandOpen(false)} className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-100">Cancel</button>
+              <button onClick={addBand} disabled={!newBand.gradeName.trim()} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">Create Band</button>
             </div>
           </div>
         </div>
@@ -911,10 +674,7 @@ export function SalaryStructurePage() {
           band={modalBand}
           initial={editComp}
           onSave={(comp) => saveComponent(modalBand.id, comp)}
-          onClose={() => {
-            setModalBand(null);
-            setEditComp(null);
-          }}
+          onClose={() => { setModalBand(null); setEditComp(null); }}
         />
       )}
 
@@ -922,25 +682,14 @@ export function SalaryStructurePage() {
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              Delete Component
-            </h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Component</h3>
             <p className="text-sm text-gray-500 mb-5">
-              Are you sure you want to delete{" "}
-              <strong>{deleteTarget.comp.name}</strong>? This action cannot be
-              undone.
+              Are you sure you want to delete <strong>{deleteTarget.comp.name}</strong>? This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
+              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-100">Cancel</button>
               <button
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  deleteComponent(deleteTarget.bandId, deleteTarget.comp.id)
-                }
+                onClick={() => deleteComponent(deleteTarget.bandId, deleteTarget.comp.id)}
                 className="px-4 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700"
               >
                 Delete

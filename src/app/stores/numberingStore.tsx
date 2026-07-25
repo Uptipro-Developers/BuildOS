@@ -4,9 +4,20 @@ export interface ModuleNumbering {
   module: string;
   prefix: string;
   separator: string;
-  padLength: number;
-  nextNumber: number;
+  template: string;
+  startingNumber: number;
+  endingNumber: number | null;
+  incrementBy: number;
+  lastUsedDate: string;
+  lastUsedNumber: number;
   description: string;
+}
+
+export function formatId(template: string, num: number): string {
+  return template.replace(/\{N(:\d+)?\}/g, (m) => {
+    const width = m.match(/:(\d+)/);
+    return width ? String(num).padStart(parseInt(width[1]), "0") : String(num);
+  });
 }
 
 interface NumberingContextValue {
@@ -20,71 +31,96 @@ interface NumberingContextValue {
 
 const NumberingContext = createContext<NumberingContextValue | null>(null);
 
+function cfg(p: Partial<ModuleNumbering> & { module: string; prefix: string }): ModuleNumbering {
+  return {
+    separator: "-",
+    startingNumber: 1,
+    endingNumber: null,
+    incrementBy: 1,
+    lastUsedDate: "",
+    lastUsedNumber: 0,
+    description: "",
+    ...p,
+    template: p.template ?? `${p.prefix}${p.separator ?? "-"}{N:4}`,
+  };
+}
+
 const DEFAULT_CONFIGS: ModuleNumbering[] = [
   // ── Finance ──
-  { module: "Expense", prefix: "EXP", separator: "-", padLength: 4, nextNumber: 52, description: "Expense records (e.g., EXP-0051)" },
-  { module: "Income", prefix: "INC", separator: "-", padLength: 4, nextNumber: 22, description: "Income records (e.g., INC-0021)" },
-  { module: "Budget", prefix: "BDG", separator: "-", padLength: 4, nextNumber: 9, description: "Budget records (e.g., BDG-0009)" },
-  { module: "Claim", prefix: "CLM", separator: "-", padLength: 4, nextNumber: 32, description: "Claims (e.g., CLM-0031)" },
-  { module: "Payment", prefix: "PAY", separator: "-", padLength: 4, nextNumber: 42, description: "Payment records (e.g., PAY-0041)" },
-  { module: "JournalEntry", prefix: "JE", separator: "-", padLength: 3, nextNumber: 5, description: "Journal entries (e.g., JE-005)" },
-  { module: "PayrollRun", prefix: "PRL", separator: "-", padLength: 3, nextNumber: 1, description: "Payroll runs (e.g., PRL-001)" },
-  { module: "Accrual", prefix: "ACCR", separator: "-", padLength: 4, nextNumber: 5, description: "Accruals (e.g., ACCR-0004)" },
-  { module: "Transaction", prefix: "TXN", separator: "-", padLength: 4, nextNumber: 61, description: "Ledger transactions (e.g., TXN-0060)" },
-  { module: "FinanceApproval", prefix: "FA", separator: "-", padLength: 3, nextNumber: 19, description: "Finance approvals (e.g., FA-018)" },
-  { module: "ScheduledPosting", prefix: "SP", separator: "-", padLength: 4, nextNumber: 11, description: "Scheduled postings (e.g., SP-0010)" },
+  cfg({ module: "Expense", prefix: "EXP", startingNumber: 1, lastUsedNumber: 51, description: "Expense records" }),
+  cfg({ module: "Income", prefix: "INC", startingNumber: 1, lastUsedNumber: 21, description: "Income records" }),
+  cfg({ module: "Budget", prefix: "BDG", startingNumber: 1, lastUsedNumber: 8, description: "Budget records" }),
+  cfg({ module: "Claim", prefix: "CLM", startingNumber: 1, lastUsedNumber: 31, description: "Claims" }),
+  cfg({ module: "Payment", prefix: "PAY", startingNumber: 1, lastUsedNumber: 41, description: "Payment records" }),
+  cfg({ module: "JournalEntry", prefix: "JE", startingNumber: 1, lastUsedNumber: 4, description: "Journal entries" }),
+  cfg({ module: "PayrollRun", prefix: "PRL", startingNumber: 1, lastUsedNumber: 0, description: "Payroll runs" }),
+  cfg({ module: "Accrual", prefix: "ACCR", startingNumber: 1, lastUsedNumber: 4, description: "Accruals" }),
+  cfg({ module: "Transaction", prefix: "TXN", startingNumber: 1, lastUsedNumber: 60, description: "Ledger transactions" }),
+  cfg({ module: "FinanceApproval", prefix: "FA", startingNumber: 1, lastUsedNumber: 18, description: "Finance approvals" }),
+  cfg({ module: "ScheduledPosting", prefix: "SP", startingNumber: 1, lastUsedNumber: 10, description: "Scheduled postings" }),
   // ── HR ──
-  { module: "Employee", prefix: "EMP", separator: "-", padLength: 3, nextNumber: 16, description: "Employee records (e.g., EMP-015)" },
-  { module: "HRRole", prefix: "ROLE", separator: "-", padLength: 3, nextNumber: 15, description: "HR roles (e.g., ROLE-014)" },
-  { module: "PayrollPeriod", prefix: "PP", separator: "-", padLength: 3, nextNumber: 5, description: "Payroll periods (e.g., PP-004)" },
-  { module: "LeaveType", prefix: "LT", separator: "-", padLength: 3, nextNumber: 8, description: "Leave types (e.g., LT-007)" },
-  { module: "ClaimType", prefix: "CT", separator: "-", padLength: 3, nextNumber: 6, description: "Claim types (e.g., CT-005)" },
-  { module: "BankName", prefix: "BNK", separator: "-", padLength: 3, nextNumber: 13, description: "Bank names (e.g., BNK-012)" },
-  { module: "Holiday", prefix: "HOL", separator: "-", padLength: 3, nextNumber: 1, description: "Holidays (e.g., HOL-001)" },
+  cfg({ module: "Employee", prefix: "EMP", startingNumber: 1, lastUsedNumber: 15, description: "Employee records" }),
+  cfg({ module: "HRRole", prefix: "ROLE", startingNumber: 1, lastUsedNumber: 14, description: "HR roles" }),
+  cfg({ module: "PayrollPeriod", prefix: "PP", startingNumber: 1, lastUsedNumber: 4, description: "Payroll periods" }),
+  cfg({ module: "LeaveType", prefix: "LT", startingNumber: 1, lastUsedNumber: 7, description: "Leave types" }),
+  cfg({ module: "ClaimType", prefix: "CT", startingNumber: 1, lastUsedNumber: 5, description: "Claim types" }),
+  cfg({ module: "BankName", prefix: "BNK", startingNumber: 1, lastUsedNumber: 12, description: "Bank names" }),
+  cfg({ module: "Holiday", prefix: "HOL", startingNumber: 1, lastUsedNumber: 0, description: "Holidays" }),
   // ── Construction ──
-  { module: "Project", prefix: "PRJ", separator: "-", padLength: 3, nextNumber: 9, description: "Projects (e.g., PRJ-008)" },
-  { module: "Structure", prefix: "STR", separator: "-", padLength: 3, nextNumber: 16, description: "Project structures (e.g., STR-015)" },
-  { module: "SiteTask", prefix: "ST", separator: "-", padLength: 3, nextNumber: 10, description: "Site tasks (e.g., ST-009)" },
-  { module: "WorkPackage", prefix: "WP", separator: "-", padLength: 3, nextNumber: 6, description: "Work packages (e.g., WP-005)" },
-  { module: "DailyReport", prefix: "DR", separator: "-", padLength: 3, nextNumber: 3, description: "Daily reports (e.g., DR-002)" },
-  { module: "Issue", prefix: "ISS", separator: "-", padLength: 3, nextNumber: 4, description: "Issues (e.g., ISS-003)" },
-  { module: "ChangeRequest", prefix: "CR", separator: "-", padLength: 3, nextNumber: 3, description: "Change requests (e.g., CR-002)" },
-  { module: "NonConformance", prefix: "NCR", separator: "-", padLength: 3, nextNumber: 2, description: "Non-conformance reports (e.g., NCR-001)" },
-  { module: "HSERecord", prefix: "HSE", separator: "-", padLength: 3, nextNumber: 3, description: "HSE records (e.g., HSE-002)" },
-  { module: "Incident", prefix: "INC", separator: "-", padLength: 3, nextNumber: 3, description: "Incidents (e.g., INC-002)" },
-  { module: "Communication", prefix: "CL", separator: "-", padLength: 4, nextNumber: 1, description: "Communication log entries"},
-  { module: "Disbursement", prefix: "DB", separator: "-", padLength: 3, nextNumber: 1, description: "Disbursements (e.g., DB-001)" },
-  { module: "Vendor", prefix: "V", separator: "-", padLength: 3, nextNumber: 6, description: "Project vendors (e.g., V-005)" },
-  { module: "Staff", prefix: "STF", separator: "-", padLength: 3, nextNumber: 4, description: "Project staff (e.g., STF-003)" },
-  { module: "Contractor", prefix: "CON", separator: "-", padLength: 3, nextNumber: 2, description: "Project contractors (e.g., CON-001)" },
-  { module: "Material", prefix: "MAT", separator: "-", padLength: 3, nextNumber: 2, description: "Project materials (e.g., MAT-001)" },
-  { module: "Equipment", prefix: "EQ", separator: "-", padLength: 3, nextNumber: 2, description: "Project equipment (e.g., EQ-001)" },
-  { module: "Stakeholder", prefix: "SH", separator: "-", padLength: 3, nextNumber: 4, description: "Stakeholders (e.g., SH-003)" },
-  { module: "Baseline", prefix: "BL", separator: "-", padLength: 3, nextNumber: 2, description: "Baselines (e.g., BL-001)" },
-  { module: "Calendar", prefix: "CAL", separator: "-", padLength: 3, nextNumber: 3, description: "Project calendars (e.g., CAL-002)" },
+  cfg({ module: "Project", prefix: "PRJ", startingNumber: 1, lastUsedNumber: 8, description: "Projects" }),
+  cfg({ module: "Structure", prefix: "STR", startingNumber: 1, lastUsedNumber: 15, description: "Project structures" }),
+  cfg({ module: "SiteTask", prefix: "ST", startingNumber: 1, lastUsedNumber: 9, description: "Site tasks" }),
+  cfg({ module: "WorkPackage", prefix: "WP", startingNumber: 1, lastUsedNumber: 5, description: "Work packages" }),
+  cfg({ module: "DailyReport", prefix: "DR", startingNumber: 1, lastUsedNumber: 2, description: "Daily reports" }),
+  cfg({ module: "Issue", prefix: "ISS", startingNumber: 1, lastUsedNumber: 3, description: "Issues" }),
+  cfg({ module: "ChangeRequest", prefix: "CR", startingNumber: 1, lastUsedNumber: 2, description: "Change requests" }),
+  cfg({ module: "NonConformance", prefix: "NCR", startingNumber: 1, lastUsedNumber: 1, description: "Non-conformance reports" }),
+  cfg({ module: "HSERecord", prefix: "HSE", startingNumber: 1, lastUsedNumber: 2, description: "HSE records" }),
+  cfg({ module: "Incident", prefix: "INC", startingNumber: 1, lastUsedNumber: 2, description: "Incidents" }),
+  cfg({ module: "Communication", prefix: "CL", startingNumber: 1, lastUsedNumber: 0, description: "Communication log entries" }),
+  cfg({ module: "Disbursement", prefix: "DB", startingNumber: 1, lastUsedNumber: 0, description: "Disbursements" }),
+  cfg({ module: "Vendor", prefix: "V", startingNumber: 1, lastUsedNumber: 5, description: "Project vendors" }),
+  cfg({ module: "Staff", prefix: "STF", startingNumber: 1, lastUsedNumber: 3, description: "Project staff" }),
+  cfg({ module: "Contractor", prefix: "CON", startingNumber: 1, lastUsedNumber: 1, description: "Project contractors" }),
+  cfg({ module: "Material", prefix: "MAT", startingNumber: 1, lastUsedNumber: 1, description: "Project materials" }),
+  cfg({ module: "Equipment", prefix: "EQ", startingNumber: 1, lastUsedNumber: 1, description: "Project equipment" }),
+  cfg({ module: "Stakeholder", prefix: "SH", startingNumber: 1, lastUsedNumber: 3, description: "Stakeholders" }),
+  cfg({ module: "Baseline", prefix: "BL", startingNumber: 1, lastUsedNumber: 1, description: "Baselines" }),
+  cfg({ module: "Calendar", prefix: "CAL", startingNumber: 1, lastUsedNumber: 2, description: "Project calendars" }),
   // ── Procurement ──
-  { module: "MaterialRequest", prefix: "MR", separator: "-", padLength: 4, nextNumber: 42, description: "Material requests (e.g., MR-0041)" },
-  { module: "PurchaseOrder", prefix: "PO", separator: "-", padLength: 4, nextNumber: 32, description: "Purchase orders (e.g., PO-0031)" },
-  { module: "PurchaseRequest", prefix: "PR", separator: "-", padLength: 4, nextNumber: 19, description: "Purchase requests (e.g., PR-0018)" },
-  { module: "PurchaseInvoice", prefix: "PI", separator: "-", padLength: 3, nextNumber: 1, description: "Purchase invoices (e.g., PI-001)" },
-  { module: "RFQ", prefix: "RFQ", separator: "-", padLength: 4, nextNumber: 1, description: "Request for quotes (e.g., RFQ-0001)" },
-  { module: "Quote", prefix: "QT", separator: "-", padLength: 4, nextNumber: 1, description: "Quotes (e.g., QT-0001)" },
-  { module: "GoodsReceipt", prefix: "GRN", separator: "-", padLength: 4, nextNumber: 1, description: "Goods receipt notes (e.g., GRN-0001)" },
+  cfg({ module: "MaterialRequest", prefix: "MR", startingNumber: 1, lastUsedNumber: 41, description: "Material requests" }),
+  cfg({ module: "PurchaseOrder", prefix: "PO", startingNumber: 1, lastUsedNumber: 31, description: "Purchase orders" }),
+  cfg({ module: "PurchaseRequest", prefix: "PR", startingNumber: 1, lastUsedNumber: 18, description: "Purchase requests" }),
+  cfg({ module: "PurchaseInvoice", prefix: "PI", startingNumber: 1, lastUsedNumber: 0, description: "Purchase invoices" }),
+  cfg({ module: "RFQ", prefix: "RFQ", startingNumber: 1, lastUsedNumber: 0, description: "Request for quotes" }),
+  cfg({ module: "Quote", prefix: "QT", startingNumber: 1, lastUsedNumber: 0, description: "Quotes" }),
+  cfg({ module: "GoodsReceipt", prefix: "GRN", startingNumber: 1, lastUsedNumber: 0, description: "Goods receipt notes" }),
   // ── Storefront ──
-  { module: "GeneralStore", prefix: "GS", separator: "-", padLength: 3, nextNumber: 9, description: "General store items (e.g., GS-008)" },
-  { module: "StockTransfer", prefix: "TRF", separator: "-", padLength: 3, nextNumber: 1, description: "Stock transfers (e.g., TRF-001)" },
-  { module: "MaterialReturn", prefix: "RET", separator: "-", padLength: 3, nextNumber: 11, description: "Material returns (e.g., RET-010)" },
-  { module: "StockMovement", prefix: "MOV", separator: "-", padLength: 3, nextNumber: 1, description: "Stock movements (e.g., MOV-001)" },
+  cfg({ module: "GeneralStore", prefix: "GS", startingNumber: 1, lastUsedNumber: 8, description: "General store items" }),
+  cfg({ module: "StockTransfer", prefix: "TRF", startingNumber: 1, lastUsedNumber: 0, description: "Stock transfers" }),
+  cfg({ module: "MaterialReturn", prefix: "RET", startingNumber: 1, lastUsedNumber: 10, description: "Material returns" }),
+  cfg({ module: "StockMovement", prefix: "MOV", startingNumber: 1, lastUsedNumber: 0, description: "Stock movements" }),
   // ── ESS ──
-  { module: "Appraisal", prefix: "APR", separator: "-", padLength: 4, nextNumber: 6, description: "Appraisals (e.g., APR-0005)" },
+  cfg({ module: "Appraisal", prefix: "APR", startingNumber: 1, lastUsedNumber: 5, description: "Appraisals" }),
   // ── Admin ──
-  { module: "EmailConfig", prefix: "EC", separator: "-", padLength: 3, nextNumber: 1, description: "Email configurations (e.g., EC-001)" },
-  { module: "ReportSchedule", prefix: "RS", separator: "-", padLength: 3, nextNumber: 1, description: "Report schedules (e.g., RS-001)" },
-  { module: "Role", prefix: "R", separator: "", padLength: 1, nextNumber: 8, description: "Admin roles (e.g., R8)" },
-  // ── Shared / Cross-cutting ──
-  { module: "Task", prefix: "TASK", separator: "-", padLength: 4, nextNumber: 1, description: "Tasks (e.g., TASK-0001)" },
-  { module: "MyTask", prefix: "TK", separator: "-", padLength: 4, nextNumber: 1, description: "My personal tasks (e.g., TK-0001)" },
+  cfg({ module: "EmailConfig", prefix: "EC", startingNumber: 1, lastUsedNumber: 0, description: "Email configurations" }),
+  cfg({ module: "ReportSchedule", prefix: "RS", startingNumber: 1, lastUsedNumber: 0, description: "Report schedules" }),
+  cfg({ module: "Role", prefix: "R", separator: "", startingNumber: 1, lastUsedNumber: 7, description: "Admin roles" }),
+    // ── Shared / Cross-cutting ──
+  cfg({ module: "Task", prefix: "TASK", startingNumber: 1, lastUsedNumber: 0, description: "Tasks" }),
+  cfg({ module: "MyTask", prefix: "TK", startingNumber: 1, lastUsedNumber: 0, description: "My personal tasks" }),
 ];
+
+export const MODULE_DOMAINS: Record<string, string[]> = {
+  Finance: ["Expense", "Income", "Budget", "Claim", "Payment", "JournalEntry", "PayrollRun", "Accrual", "Transaction", "FinanceApproval", "ScheduledPosting"],
+  HR: ["Employee", "HRRole", "PayrollPeriod", "LeaveType", "ClaimType", "BankName", "Holiday"],
+  Construction: ["Project", "Structure", "SiteTask", "WorkPackage", "DailyReport", "Issue", "ChangeRequest", "NonConformance", "HSERecord", "Incident", "Communication", "Disbursement", "Vendor", "Staff", "Contractor", "Material", "Equipment", "Stakeholder", "Baseline", "Calendar"],
+  Procurement: ["MaterialRequest", "PurchaseOrder", "PurchaseRequest", "PurchaseInvoice", "RFQ", "Quote", "GoodsReceipt"],
+  Storefront: ["GeneralStore", "StockTransfer", "MaterialReturn", "StockMovement"],
+  ESS: ["Appraisal"],
+  Admin: ["EmailConfig", "ReportSchedule", "Role"],
+  Shared: ["Task", "MyTask"],
+};
 
 export function NumberingProvider({ children }: { children: ReactNode }) {
   const [configs, setConfigs] = useState<ModuleNumbering[]>(DEFAULT_CONFIGS);
@@ -95,10 +131,14 @@ export function NumberingProvider({ children }: { children: ReactNode }) {
       const idx = prev.findIndex(c => c.module === module);
       if (idx < 0) return prev;
       const cfg = prev[idx];
-      const padded = String(cfg.nextNumber).padStart(cfg.padLength, "0");
-      result = `${cfg.prefix}${cfg.separator}${padded}`;
+      const nextNum = cfg.lastUsedNumber === 0 ? cfg.startingNumber : cfg.lastUsedNumber + cfg.incrementBy;
+      if (cfg.endingNumber !== null && nextNum > cfg.endingNumber) {
+        result = "";
+        return prev;
+      }
+      result = formatId(cfg.template, nextNum);
       const next = [...prev];
-      next[idx] = { ...cfg, nextNumber: cfg.nextNumber + 1 };
+      next[idx] = { ...cfg, lastUsedNumber: nextNum, lastUsedDate: new Date().toISOString().split("T")[0] };
       return next;
     });
     return result;

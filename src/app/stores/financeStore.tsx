@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
 import type {
-  Account, AccountType, FiscalYear,
-  Accrual, TxnType, AccrualTypeConfig,
+  Account, AccountType, FiscalYear, FiscalYearStatus,
+  Accrual, AccrualType, AccrualStatus, TxnType, AccrualTypeConfig,
 } from "../pages/finance/types";
 
 // ── Transaction type (from TransactionsLedger) ─────────────────────────────

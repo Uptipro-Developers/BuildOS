@@ -2,121 +2,57 @@ import { Outlet } from "react-router";
 import { AppHeader } from "../../components/AppHeader";
 import { CollapsibleSidebar } from "../../components/CollapsibleSidebar";
 import {
-  LayoutDashboard,
-  Store,
-  FolderOpen,
-  BarChart3,
-  ListTodo,
-  User,
-  Package,
-  Inbox,
-  CheckSquare,
-  Settings,
-  TrendingDown,
+  LayoutDashboard, Store, FolderOpen, ArrowLeftRight, BarChart3,
+  ListTodo, User, Package, Inbox, CheckSquare, Settings, TrendingDown,
 } from "lucide-react";
 
 const sidebarSections = [
   {
     label: "",
     items: [
-      {
-        label: "Dashboard",
-        href: "/apps/storefront/dashboard",
-        icon: <LayoutDashboard className="w-4 h-4" />,
-        end: true,
-      },
+      { label: "Dashboard", href: "/apps/storefront/dashboard", icon: <LayoutDashboard className="w-4 h-4" />, end: true },
     ],
   },
   {
     label: "Tasks",
     items: [
-      {
-        label: "Tasks",
-        href: "/apps/storefront/tasks",
-        icon: <ListTodo className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "My Tasks",
-        href: "/apps/storefront/my-tasks",
-        icon: <User className="w-4 h-4" />,
-        end: true,
-      },
+      { label: "Tasks",    href: "/apps/storefront/tasks",    icon: <ListTodo className="w-4 h-4" />, end: true },
+      { label: "My Tasks", href: "/apps/storefront/my-tasks", icon: <User     className="w-4 h-4" />, end: true },
     ],
   },
   {
     label: "Inventory",
     items: [
-      {
-        label: "All Materials",
-        href: "/apps/storefront/all-materials",
-        icon: <Package className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "General Store",
-        href: "/apps/storefront/general-store",
-        icon: <Store className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Project Stores",
-        href: "/apps/storefront/project-stores",
-        icon: <FolderOpen className="w-4 h-4" />,
-        end: true,
-      },
+      { label: "All Materials",  href: "/apps/storefront/all-materials",  icon: <Package    className="w-4 h-4" />, end: true },
+      { label: "General Store",  href: "/apps/storefront/general-store",  icon: <Store      className="w-4 h-4" />, end: true },
+      { label: "Project Stores", href: "/apps/storefront/project-stores", icon: <FolderOpen className="w-4 h-4" />, end: true },
     ],
   },
   {
     label: "Distribution",
     items: [
-      {
-        label: "Incoming Requests",
-        href: "/apps/storefront/incoming-requests",
-        icon: <Inbox className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Stock Movement",
-        href: "/apps/storefront/stock-movement",
-        icon: <TrendingDown className="w-4 h-4" />,
-        end: true,
-      },
+      { label: "Incoming Requests", href: "/apps/storefront/incoming-requests", icon: <Inbox          className="w-4 h-4" />, end: true },
+      { label: "Stock Movement",    href: "/apps/storefront/stock-movement",    icon: <TrendingDown   className="w-4 h-4" />, end: true },
     ],
   },
   {
     label: "Approvals",
     items: [
-      {
-        label: "Approvals",
-        href: "/apps/storefront/approvals",
-        icon: <CheckSquare className="w-4 h-4" />,
-        end: true,
-      },
+      { label: "Approvals", href: "/apps/storefront/approvals", icon: <CheckSquare className="w-4 h-4" />, end: true },
     ],
   },
   {
     label: "Reports",
     items: [
-      {
-        label: "Reports",
-        href: "/apps/storefront/reports",
-        icon: <BarChart3 className="w-4 h-4" />,
-        end: true,
-      },
+      { label: "Reports", href: "/apps/storefront/reports", icon: <BarChart3 className="w-4 h-4" />, end: true },
     ],
   },
-  {
-    label: "Configuration",
-    items: [
-      {
-        label: "Configuration",
-        href: "/apps/storefront/config",
-        icon: <Settings className="w-4 h-4" />,
-        end: true,
-      },
-    ],
-  },
+    {
+      label: "Settings",
+      items: [
+        { label: "Settings", href: "/apps/storefront/settings", icon: <Settings className="w-4 h-4" />, end: true },
+      ],
+    },
 ];
 
 export function StorefrontLayout() {

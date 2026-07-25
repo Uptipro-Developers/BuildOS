@@ -73,13 +73,13 @@ const sidebarSections = [
       { label: "Reports",              href: "/apps/finance/reports",           icon: <BarChart3  className="w-4 h-4" />, end: true },
     ],
   },
-  {
-    label: "Configuration",
-    items: [
-      { label: "Finance Configuration", href: "/apps/finance/config",          icon: <Settings2    className="w-4 h-4" />, end: true },
-      { label: "Process Mapping",       href: "/apps/finance/process-mapping", icon: <GitBranch    className="w-4 h-4" />, end: true },
-    ],
-  },
+    {
+      label: "Settings",
+      items: [
+        { label: "Settings",       href: "/apps/finance/settings",       icon: <Settings2    className="w-4 h-4" />, end: true },
+        { label: "Process Mapping", href: "/apps/finance/process-mapping", icon: <GitBranch    className="w-4 h-4" />, end: true },
+      ],
+    },
 ];
 
 export function FinanceLayout() {
