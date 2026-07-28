@@ -284,6 +284,10 @@ model Employee {
   department   Department? @relation("DeptMembers", fields: [departmentId], references: [id])
   departmentId String?
 
+  // Linked login account, created automatically when the employee is onboarded
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String? @unique
+
   headOf        Department?    @relation("DeptHead")
   leaveRequests LeaveRequest[]
   claims        Claim[]
@@ -548,6 +552,7 @@ model User {
   permissions Permission[]
   auditLogs   AuditLog[]
   passwordHistory UserPasswordHistory[]
+  employee    Employee?
 }
 
 model UserRole {
@@ -1483,14 +1488,16 @@ model NotificationPreference {
 }
 
 model NotificationTemplate {
-  id        String   @id @default(cuid())
-  eventType String // "leave_approved", "payroll_processed", etc.
-  subject   String
-  body      String // Template with {{variable}} placeholders
-  module    String // Which module/app this applies to
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  eventType  String // "leave_approved", "payroll_processed", etc.
+  subject    String
+  body       String // Template with {{variable}} placeholders
+  module     String // Which module/app this applies to
+  recipients String? // literal address or {{variable}} placeholder
+  cc         String? // literal address or {{variable}} placeholder
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 // ─────────────── CONSTRUCTION PROJECT SETUP WIZARD ───────────────

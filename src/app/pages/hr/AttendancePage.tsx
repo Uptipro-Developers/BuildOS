@@ -41,13 +41,6 @@ interface AttRecord {
   hrs: number;
 }
 
-const today = new Date().toLocaleDateString("en-US", {
-  weekday: "long",
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-});
-
 const statusConfig: Record<
   AttStatus,
   { label: string; badge: string; icon: React.ReactNode; rowColor: string }
@@ -92,6 +85,12 @@ const statusConfig: Record<
 
 // NOTE: depts derived inside component from API records
 export function AttendancePage() {
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
   const [records, setRecords] = useState<AttRecord[]>([]);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");

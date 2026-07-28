@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Mail, Trash2, Edit2, Check, X } from "lucide-react";
-import { useNumbering } from "../../stores/numberingStore";
+import {
+  deleteNotificationTemplate,
+  getNotificationTemplates,
+  saveNotificationTemplate,
+  type NotificationTemplate,
+} from "../../api/notifications";
 
 type TriggerModule = "Finance" | "HR" | "Procurement" | "Projects" | "ESS" | "Admin" | "Storefront";
 
@@ -20,7 +25,7 @@ const VARS_BY_MODULE: Record<TriggerModule, string[]> = {
   Finance:     ["invoice_number", "invoice_amount", "due_date", "vendor_name", "account_name"],
   Projects:    ["project_name", "project_manager", "milestone_name", "deadline", "contract_number"],
   ESS:         ["employee_name", "claim_amount", "claim_ref", "travel_destination", "advance_amount"],
-  Admin:       ["user_name", "user_email", "role_name", "action_date", "system_message"],
+  Admin:       ["user_name", "user_email", "activation_link", "role_name", "action_date", "system_message"],
   Storefront:  ["material_name", "quantity", "store_name", "project_name", "transferred_by"],
 };
 
@@ -45,27 +50,39 @@ const MODULE_COLORS: Record<TriggerModule, string> = {
   Storefront: "bg-orange-50 text-orange-700",
 };
 
-const MOCK_CONFIGS: EmailConfig[] = [
-  { id: "EC-001", trigger: "Leave Request Submitted",   module: "HR",          subject: "New Leave Request — {{employee_name}}",           body: "Dear {{employee_manager}},\n\n{{employee_name}} has submitted a leave request ({{leave_type}}) from {{start_date}} to {{end_date}}.\n\nPlease review and approve or reject the request in BuildOS.",                                  recipients: "hr@buildos.ng",              cc: "{{employee_manager}}", enabled: true  },
-  { id: "EC-002", trigger: "Payroll Processed",         module: "HR",          subject: "Payroll Processed — {{period}}",                   body: "Dear Team,\n\nPayroll for {{period}} has been processed successfully. Please log in to BuildOS ESS to view your payslip.",                                                                    recipients: "all-staff@buildos.ng",       cc: "cfo@buildos.ng",       enabled: true  },
-  { id: "EC-003", trigger: "Send PO to Supplier",       module: "Procurement", subject: "Purchase Order {{po_number}} — BuildOS",             body: "Dear {{supplier_name}},\n\nPlease find attached Purchase Order {{po_number}}. Kindly confirm receipt and expected delivery date.\n\nRegards,\nBuildOS Procurement Team",              recipients: "{{supplier_email}}",         cc: "procurement@buildos.ng",enabled: true  },
-  { id: "EC-004", trigger: "Invoice Overdue",           module: "Finance",     subject: "Overdue Invoice Notice — {{invoice_number}}",      body: "Dear Finance Team,\n\nInvoice {{invoice_number}} for {{invoice_amount}} from {{vendor_name}} is past its due date of {{due_date}}.\n\nPlease take action.",                             recipients: "finance@buildos.ng",         cc: "cfo@buildos.ng",       enabled: true  },
-  { id: "EC-005", trigger: "New User Created",          module: "Admin",       subject: "Welcome to BuildOS — {{user_name}}",               body: "Dear {{user_name}},\n\nYour BuildOS account has been created. You can now log in at buildos.ng using your registered email address.\n\nPlease contact admin if you have any issues.",    recipients: "{{user_email}}",             cc: "admin@buildos.ng",     enabled: true  },
-  { id: "EC-006", trigger: "Material Request Approved", module: "Procurement", subject: "Material Request Approved — {{request_number}}",   body: "Dear {{requester_email}},\n\nYour material request {{request_number}} has been approved. The procurement team will proceed with sourcing.",                                              recipients: "{{requester_email}}",        cc: "",                     enabled: false },
-  { id: "EC-007", trigger: "Appraisal Cycle Opened",    module: "HR",          subject: "Performance Appraisal Cycle Started — {{cycle}}", body: "Dear Team,\n\nThe {{cycle}} performance appraisal cycle is now open. Please log in to BuildOS and complete your self-assessment by the deadline.",                                   recipients: "all-staff@buildos.ng",       cc: "hr@buildos.ng",        enabled: true  },
-];
-
 const BLANK_FORM: Omit<EmailConfig, "id"> = {
   trigger: "", module: "HR", subject: "", body: "", recipients: "", cc: "", enabled: true,
 };
 
+function toEmailConfig(t: NotificationTemplate): EmailConfig {
+  return {
+    id: t.id,
+    trigger: t.eventType,
+    module: t.module as TriggerModule,
+    subject: t.subject,
+    body: t.body,
+    recipients: t.recipients ?? "",
+    cc: t.cc ?? "",
+    enabled: t.isActive,
+  };
+}
+
 export function AdminEmailSettingsPage() {
-  const [configs, setConfigs] = useState<EmailConfig[]>(MOCK_CONFIGS);
+  const [configs, setConfigs] = useState<EmailConfig[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...BLANK_FORM });
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const { getNextId } = useNumbering();
+
+  useEffect(() => {
+    getNotificationTemplates()
+      .then((templates) => setConfigs(templates.map(toEmailConfig)))
+      .catch((err) => setLoadError(err instanceof Error ? err.message : "Failed to load email configurations"))
+      .finally(() => setLoading(false));
+  }, []);
 
   function openAdd() {
     setForm({ ...BLANK_FORM });
@@ -80,23 +97,57 @@ export function AdminEmailSettingsPage() {
     setShowModal(true);
   }
 
-  function saveConfig() {
-    if (editId) {
-      setConfigs((prev) => prev.map((c) => c.id === editId ? { ...form, id: editId } : c));
-    } else {
-      setConfigs([...configs, { ...form, id: getNextId("EmailConfig") }]);
+  async function saveConfig() {
+    setSaving(true);
+    try {
+      const saved = await saveNotificationTemplate({
+        id: editId ?? undefined,
+        eventType: form.trigger,
+        module: form.module,
+        subject: form.subject,
+        body: form.body,
+        recipients: form.recipients,
+        cc: form.cc,
+        isActive: form.enabled,
+      });
+      const config = toEmailConfig(saved);
+      setConfigs((prev) => (editId ? prev.map((c) => (c.id === editId ? config : c)) : [...prev, config]));
+      setShowModal(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to save email configuration");
+    } finally {
+      setSaving(false);
     }
-    setShowModal(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
   }
 
-  function toggleEnabled(id: string) {
-    setConfigs((prev) => prev.map((c) => c.id === id ? { ...c, enabled: !c.enabled } : c));
+  async function toggleEnabled(id: string) {
+    const target = configs.find((c) => c.id === id);
+    if (!target) return;
+    const nextEnabled = !target.enabled;
+    setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, enabled: nextEnabled } : c)));
+    try {
+      await saveNotificationTemplate({ id, isActive: nextEnabled });
+    } catch (err) {
+      setConfigs((prev) => prev.map((c) => (c.id === id ? { ...c, enabled: !nextEnabled } : c)));
+      setLoadError(err instanceof Error ? err.message : "Failed to update email configuration");
+    }
   }
 
-  function deleteConfig(id: string) {
+  async function deleteConfig(id: string) {
+    const previous = configs;
     setConfigs((prev) => prev.filter((c) => c.id !== id));
+    try {
+      await deleteNotificationTemplate(id);
+    } catch (err) {
+      setConfigs(previous);
+      setLoadError(err instanceof Error ? err.message : "Failed to delete email configuration");
+    }
+  }
+
+  if (loading) {
+    return <div className="text-sm text-gray-500">Loading email configuration…</div>;
   }
 
   return (
@@ -115,6 +166,13 @@ export function AdminEmailSettingsPage() {
       {saved && (
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2.5 rounded-xl">
           <Check className="w-4 h-4" /> Email configuration saved.
+        </div>
+      )}
+
+      {loadError && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-xl">
+          <X className="w-4 h-4" /> {loadError}
+          <button onClick={() => setLoadError(null)} className="ml-auto text-xs font-semibold">Dismiss</button>
         </div>
       )}
 
@@ -240,9 +298,9 @@ export function AdminEmailSettingsPage() {
             </div>
             <div className="px-6 pb-5 flex justify-end gap-3">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">Cancel</button>
-              <button onClick={saveConfig} disabled={!form.trigger.trim() || !form.subject.trim() || !form.recipients.trim()}
+              <button onClick={saveConfig} disabled={saving || !form.trigger.trim() || !form.subject.trim() || !form.recipients.trim()}
                 className="px-4 py-2 text-sm bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50">
-                {editId ? "Save Changes" : "Add Config"}
+                {saving ? "Saving…" : editId ? "Save Changes" : "Add Config"}
               </button>
             </div>
           </div>

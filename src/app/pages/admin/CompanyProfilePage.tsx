@@ -2,25 +2,13 @@ import {
   Save,
   Upload,
   Building2,
-  Plus,
-  Pencil,
-  Trash2,
-  Check,
-  X,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getCompanyProfile,
   updateCompanyProfile,
 } from "../../api/admin-extras";
-import {
-  createDepartment,
-  fetchDepartments,
-  updateDepartment,
-  deleteDepartment,
-} from "../../api/departments";
 
 const FALLBACK_COUNTRIES = [
   "Australia",
@@ -106,28 +94,10 @@ export function CompanyProfilePage() {
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [countries, setCountries] = useState<string[]>(FALLBACK_COUNTRIES);
-  const [departments, setDepartments] = useState<
-    { id: string; name: string }[]
-  >([]);
-  const [newDepartmentName, setNewDepartmentName] = useState("");
-  const [newDepartmentDescription, setNewDepartmentDescription] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [creatingDepartment, setCreatingDepartment] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
-  const [departmentMessage, setDepartmentMessage] = useState<string | null>(
-    null,
-  );
-  const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(
-    null,
-  );
-  const [editingDepartmentName, setEditingDepartmentName] = useState("");
-  const [departmentToDelete, setDepartmentToDelete] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
-  const [isDeletingDepartment, setIsDeletingDepartment] = useState(false);
 
   useEffect(() => {
     fetchCountryOptions()
@@ -135,12 +105,6 @@ export function CompanyProfilePage() {
         if (list.length > 0) setCountries(list);
       })
       .catch(() => setCountries(FALLBACK_COUNTRIES));
-
-    fetchDepartments()
-      .then((list) =>
-        setDepartments(list.map((d) => ({ id: d.id, name: d.name }))),
-      )
-      .catch(() => setDepartments([]));
 
     getCompanyProfile()
       .then((p) => {
@@ -256,113 +220,6 @@ export function CompanyProfilePage() {
       }
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleCreateDepartment = async () => {
-    const cleanName = newDepartmentName.trim();
-    if (!cleanName) {
-      setDepartmentMessage("Department name is required.");
-      toast.error("Department name is required.");
-      return;
-    }
-
-    setCreatingDepartment(true);
-    setDepartmentMessage(null);
-    try {
-      await createDepartment({
-        name: cleanName,
-        description:
-          newDepartmentDescription.trim() || `${cleanName} department`,
-        location: "Head Office",
-        budget: "0",
-      });
-
-      const list = await fetchDepartments();
-      setDepartments(list.map((d) => ({ id: d.id, name: d.name })));
-      setNewDepartmentName("");
-      setNewDepartmentDescription("");
-      setDepartmentMessage("Department created.");
-      toast.success("Department created successfully.");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create department.";
-      setDepartmentMessage(message);
-      toast.error(message);
-    } finally {
-      setCreatingDepartment(false);
-    }
-  };
-
-  const handleStartDepartmentEdit = (department: {
-    id: string;
-    name: string;
-  }) => {
-    setEditingDepartmentId(department.id);
-    setEditingDepartmentName(department.name);
-    setDepartmentMessage(null);
-  };
-
-  const handleSaveDepartmentEdit = async () => {
-    if (!editingDepartmentId) return;
-    const name = editingDepartmentName.trim();
-    if (!name) {
-      setDepartmentMessage("Department name is required.");
-      toast.error("Department name is required.");
-      return;
-    }
-
-    try {
-      await updateDepartment(editingDepartmentId, { name });
-      setDepartments((prev) =>
-        prev
-          .map((d) => (d.id === editingDepartmentId ? { ...d, name } : d))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-      );
-      setEditingDepartmentId(null);
-      setEditingDepartmentName("");
-      setDepartmentMessage("Department updated.");
-      toast.success("Department updated successfully.");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update department.";
-      setDepartmentMessage(message);
-      toast.error(message);
-    }
-  };
-
-  const handleDeleteDepartment = async (department: {
-    id: string;
-    name: string;
-  }) => {
-    setDepartmentToDelete(department);
-  };
-
-  const confirmDeleteDepartment = async () => {
-    if (!departmentToDelete) return;
-
-    setIsDeletingDepartment(true);
-    try {
-      await deleteDepartment(departmentToDelete.id);
-      setDepartments((prev) =>
-        prev.filter((d) => d.id !== departmentToDelete.id),
-      );
-      setDepartmentMessage("Department deleted.");
-      if (editingDepartmentId === departmentToDelete.id) {
-        setEditingDepartmentId(null);
-        setEditingDepartmentName("");
-      }
-      setDepartmentToDelete(null);
-      toast.success("Department deleted successfully.");
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Failed to delete department. Remove linked records first.";
-      setDepartmentMessage(message);
-      toast.error(message);
-    } finally {
-      setIsDeletingDepartment(false);
     }
   };
 
@@ -601,131 +458,6 @@ export function CompanyProfilePage() {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
-          Departments
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <input
-            type="text"
-            value={newDepartmentName}
-            onChange={(e) => setNewDepartmentName(e.target.value)}
-            placeholder="Department name"
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
-          />
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newDepartmentDescription}
-              onChange={(e) => setNewDepartmentDescription(e.target.value)}
-              placeholder="Description (optional)"
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
-            />
-            <button
-              type="button"
-              onClick={handleCreateDepartment}
-              disabled={creatingDepartment}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-900 disabled:opacity-60"
-            >
-              <Plus className="w-4 h-4" />
-              {creatingDepartment ? "Creating…" : "Create"}
-            </button>
-          </div>
-        </div>
-
-        {departmentMessage && (
-          <p className="text-sm text-gray-600 mb-3">{departmentMessage}</p>
-        )}
-
-        <div className="rounded-md border border-gray-200 overflow-hidden">
-          <div className="px-4 py-2 text-xs uppercase tracking-wide font-semibold text-gray-500 bg-gray-50 border-b border-gray-200">
-            Existing Departments ({departments.length})
-          </div>
-          <div className="max-h-52 overflow-auto divide-y divide-gray-100">
-            {departments.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-gray-500">
-                No departments yet.
-              </p>
-            ) : (
-              departments.map((department) => (
-                <div
-                  key={department.id}
-                  className="px-4 py-2 flex items-center gap-2"
-                >
-                  {editingDepartmentId === department.id ? (
-                    <>
-                      <input
-                        type="text"
-                        value={editingDepartmentName}
-                        onChange={(e) =>
-                          setEditingDepartmentName(e.target.value)
-                        }
-                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSaveDepartmentEdit}
-                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded"
-                        aria-label="Save department"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingDepartmentId(null);
-                          setEditingDepartmentName("");
-                        }}
-                        className="p-1.5 text-gray-500 hover:bg-gray-100 rounded"
-                        aria-label="Cancel edit"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <p className="flex-1 text-sm text-gray-700">
-                        {department.name}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => handleStartDepartmentEdit(department)}
-                        className="p-1.5 text-gray-500 hover:bg-gray-100 rounded"
-                        aria-label="Edit department"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleDeleteDepartment(department);
-                        }}
-                        className="p-1.5 text-red-600 hover:bg-red-50 rounded"
-                        aria-label="Delete department"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Confirmation Modal for Department Deletion */}
-      <ConfirmationModal
-        isOpen={departmentToDelete !== null}
-        title="Delete Department?"
-        description={`Are you sure you want to delete "${departmentToDelete?.name}"? This action cannot be undone.`}
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        isDangerous={true}
-        isLoading={isDeletingDepartment}
-        onConfirm={confirmDeleteDepartment}
-        onCancel={() => setDepartmentToDelete(null)}
-      />
     </div>
   );
 }

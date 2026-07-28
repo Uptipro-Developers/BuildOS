@@ -132,6 +132,13 @@ export class NotificationController {
     return { success: true, data: template, message: 'Template saved' };
   }
 
+  @Delete('templates/:id')
+  @Roles('admin')
+  async deleteNotificationTemplate(@Param('id') id: string) {
+    await this.notificationService.deleteNotificationTemplate(id);
+    return { success: true, message: 'Template deleted' };
+  }
+
   // ── Cleanup ──
   @Post('cleanup')
   @Roles('admin')

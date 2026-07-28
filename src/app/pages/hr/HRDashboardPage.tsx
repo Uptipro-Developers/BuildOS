@@ -76,7 +76,7 @@ export function HRDashboardPage() {
     fetchDepartments()
       .then((data) => setAllDepartments(toArray<any>(data)))
       .catch(() => {});
-    getAttendance()
+    getAttendance(undefined, new Date().toISOString().slice(0, 10))
       .then((data) => setTodayAttendance(toArray<any>(data)))
       .catch(() => {});
     getWorkforceAllocations()
@@ -384,15 +384,15 @@ export function HRDashboardPage() {
                     : "border-slate-100 bg-slate-50";
             return (
               <div
-                key={a.name}
+                key={a.id}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md border ${rowClass}`}
               >
                 {cfg.icon}
                 <div className="min-w-0">
                   <p className="text-xs font-medium text-gray-900 truncate">
-                    {a.name}
+                    {a.employeeName}
                   </p>
-                  <p className="text-xs text-gray-400">{a.time}</p>
+                  <p className="text-xs text-gray-400">{a.clockIn ?? "—"}</p>
                 </div>
               </div>
             );

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   fetchEmployees,
   createEmployee,
-  EMPLOYMENT_TYPE_TO_BACKEND,
+  toEmployeeCreatePayload,
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
 import { useNumbering } from "../../stores/numberingStore";
@@ -89,11 +89,28 @@ function buildEmployeeFilterFields(
 interface AddEmpForm {
   firstName: string;
   lastName: string;
+  middleName: string;
   role: string;
   departmentId: string;
   email: string;
   phone: string;
   employmentType: string;
+  dateOfBirth: string;
+  gender: string;
+  supervisorId: string;
+  gradeLevel: string;
+  baseSalary: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  taxId: string;
+  pensionId: string;
+  emergencyContact: string;
+  emergencyPhone: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
 }
 
 interface EmployeeRow {
@@ -115,35 +132,73 @@ interface EmployeeRow {
 const emptyEmpForm: AddEmpForm = {
   firstName: "",
   lastName: "",
+  middleName: "",
   role: "",
   departmentId: "",
   email: "",
   phone: "",
   employmentType: "Full-time",
+  dateOfBirth: "",
+  gender: "",
+  supervisorId: "",
+  gradeLevel: "",
+  baseSalary: "",
+  bankName: "",
+  accountNumber: "",
+  accountHolder: "",
+  taxId: "",
+  pensionId: "",
+  emergencyContact: "",
+  emergencyPhone: "",
+  address: "",
+  city: "",
+  state: "",
+  zipCode: "",
 };
+
+function FormField({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const inputClass =
+  "w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
 function AddEmployeeModal({
   onSave,
   onClose,
   departments,
+  activeEmployees,
   saving,
 }: {
   onSave: (f: AddEmpForm) => void;
   onClose: () => void;
   departments: { id: string; name: string }[];
+  activeEmployees: { id: string; firstName: string; lastName: string }[];
   saving: boolean;
 }) {
   const [form, setForm] = useState<AddEmpForm>({ ...emptyEmpForm });
   const set = (k: keyof AddEmpForm, v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
   const valid =
-    form.firstName.trim() &&
-    form.lastName.trim() &&
-    form.role.trim() &&
-    form.departmentId;
+    form.firstName.trim() && form.lastName.trim() && form.role.trim();
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full">
+      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
             Add New Employee
@@ -155,96 +210,114 @@ function AddEmployeeModal({
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
+        <div className="px-6 py-5 space-y-6 overflow-y-auto">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              First Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              value={form.firstName}
-              onChange={(e) => set("firstName", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">General</p>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="First Name" required>
+                <input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Last Name" required>
+                <input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Middle Name">
+                <input value={form.middleName} onChange={(e) => set("middleName", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Role / Position" required>
+                <input value={form.role} onChange={(e) => set("role", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Department">
+                <select value={form.departmentId} onChange={(e) => set("departmentId", e.target.value)} className={`${inputClass} bg-white`}>
+                  <option value="">Select department…</option>
+                  {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </FormField>
+              <FormField label="Supervisor">
+                <select value={form.supervisorId} onChange={(e) => set("supervisorId", e.target.value)} className={`${inputClass} bg-white`}>
+                  <option value="">Select supervisor…</option>
+                  {activeEmployees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField label="Date of Birth">
+                <input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Gender">
+                <select value={form.gender} onChange={(e) => set("gender", e.target.value)} className={`${inputClass} bg-white`}>
+                  <option value="">Select…</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+              </FormField>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Employment Type</label>
+                <div className="flex gap-3">
+                  {(["Full-time", "Contract"] as const).map((t) => (
+                    <label key={t} className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="empType" value={t} checked={form.employmentType === t} onChange={() => set("employmentType", t)} className="accent-indigo-600" />
+                      <span className="text-sm text-gray-700">{t}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Last Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              value={form.lastName}
-              onChange={(e) => set("lastName", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Contact</p>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Email">
+                <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Phone">
+                <input value={form.phone} onChange={(e) => set("phone", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Address">
+                <input value={form.address} onChange={(e) => set("address", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="City">
+                <input value={form.city} onChange={(e) => set("city", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="State">
+                <input value={form.state} onChange={(e) => set("state", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Zip Code">
+                <input value={form.zipCode} onChange={(e) => set("zipCode", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Next of Kin / Emergency Contact">
+                <input value={form.emergencyContact} onChange={(e) => set("emergencyContact", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Emergency Phone">
+                <input value={form.emergencyPhone} onChange={(e) => set("emergencyPhone", e.target.value)} className={inputClass} />
+              </FormField>
+            </div>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Role / Position <span className="text-red-500">*</span>
-            </label>
-            <input
-              value={form.role}
-              onChange={(e) => set("role", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Department <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={form.departmentId}
-              onChange={(e) => set("departmentId", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-            >
-              <option value="">Select department…</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Email
-            </label>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => set("email", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Phone
-            </label>
-            <input
-              value={form.phone}
-              onChange={(e) => set("phone", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Employment Type
-            </label>
-            <div className="flex gap-3">
-              {(["Full-time", "Contract"] as const).map((t) => (
-                <label
-                  key={t}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <input
-                    type="radio"
-                    name="empType"
-                    value={t}
-                    checked={form.employmentType === t}
-                    onChange={() => set("employmentType", t)}
-                    className="accent-indigo-600"
-                  />
-                  <span className="text-sm text-gray-700">{t}</span>
-                </label>
-              ))}
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Payment</p>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Salary Grade">
+                <input value={form.gradeLevel} onChange={(e) => set("gradeLevel", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Base Salary">
+                <input type="number" value={form.baseSalary} onChange={(e) => set("baseSalary", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Bank Name">
+                <input value={form.bankName} onChange={(e) => set("bankName", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Account Number">
+                <input value={form.accountNumber} onChange={(e) => set("accountNumber", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Account Holder">
+                <input value={form.accountHolder} onChange={(e) => set("accountHolder", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Tax ID">
+                <input value={form.taxId} onChange={(e) => set("taxId", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="PFA / Pension ID">
+                <input value={form.pensionId} onChange={(e) => set("pensionId", e.target.value)} className={inputClass} />
+              </FormField>
             </div>
           </div>
         </div>
@@ -390,21 +463,18 @@ export function EmployeesPage() {
 
   function handleAddEmployee(form: AddEmpForm) {
     setCreatingEmployee(true);
-    createEmployee({
-      firstName: form.firstName,
-      lastName: form.lastName,
-      role: form.role,
-      departmentId: form.departmentId,
-      email:
-        form.email ||
-        `${form.firstName.toLowerCase()}.${form.lastName.toLowerCase()}@buildos.ng`,
-      phone: form.phone || "",
-      employmentType:
-        EMPLOYMENT_TYPE_TO_BACKEND[form.employmentType] ?? form.employmentType,
-      status: "active",
-      dateHired: new Date().toISOString(),
-    })
-      .then(() => loadEmployees())
+    createEmployee(
+      toEmployeeCreatePayload({
+        ...form,
+        email:
+          form.email ||
+          `${form.firstName.toLowerCase()}.${form.lastName.toLowerCase()}@buildos.ng`,
+      }),
+    )
+      .then((created) => {
+        if (created?.onboardingWarning) toast.warning(created.onboardingWarning);
+        return loadEmployees();
+      })
       .then(() => {
         setShowAddModal(false);
         toast.success("Employee created");
@@ -678,6 +748,7 @@ export function EmployeesPage() {
           onSave={handleAddEmployee}
           onClose={() => setShowAddModal(false)}
           departments={departments}
+          activeEmployees={empList.filter((e) => e.status === "active")}
           saving={creatingEmployee}
         />
       )}

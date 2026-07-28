@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const API = 'http://localhost:8080/api';
+const API = 'http://localhost:8090/api';
 
 test('debug: capture page state after auth injection', async ({ page }) => {
   // Get a live token

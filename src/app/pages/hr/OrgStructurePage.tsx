@@ -4,10 +4,12 @@ import {
   fetchOrgUnits,
   createOrgUnit,
   updateOrgUnit,
+  deleteOrgUnit,
   type OrgUnit as ApiOrgUnit,
   type OrgUnitKind,
 } from "../../api/org-units";
-import { Plus, X, Save, CheckCircle, Building2, Users, Layers, Archive, Shield, BookOpen, UserPlus, ArrowUp, ArrowDown, FileText, Check } from "lucide-react";
+import { Plus, X, Save, CheckCircle, Building2, Users, Layers, Archive, Shield, BookOpen, UserPlus, ArrowUp, ArrowDown, FileText, Check, Edit, Trash2 } from "lucide-react";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 
 interface OrgLevel {
   id: string; name: string; description: string; members: number; archived: boolean;
@@ -165,6 +167,37 @@ export function OrgStructurePage() {
       .catch(err => alert((err as Error)?.message || "Failed to update unit"));
   }
 
+  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  function openRename(item: OrgLevel) {
+    setRenameTarget({ id: item.id, name: item.name });
+    setRenameValue(item.name);
+  }
+
+  function saveRename() {
+    if (!renameTarget || !renameValue.trim()) return;
+    setRenaming(true);
+    updateOrgUnit(renameTarget.id, { name: renameValue.trim() })
+      .then(loadUnits)
+      .then(() => setRenameTarget(null))
+      .catch(err => alert((err as Error)?.message || "Failed to rename unit"))
+      .finally(() => setRenaming(false));
+  }
+
+  function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    deleteOrgUnit(deleteTarget.id)
+      .then(loadUnits)
+      .then(() => setDeleteTarget(null))
+      .catch(err => alert((err as Error)?.message || "Failed to delete unit"))
+      .finally(() => setDeleting(false));
+  }
+
   function addSupporting(type: "craft" | "circle") {
     const name = type === "craft" ? newCraftName : newCircleName;
     const desc = type === "craft" ? newCraftDesc : newCircleDesc;
@@ -185,6 +218,12 @@ export function OrgStructurePage() {
         <p className="text-xs text-gray-500 truncate">{item.description} · {item.members} members</p>
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-3">
+        <button onClick={() => openRename(item)} className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-indigo-600" title="Rename">
+          <Edit className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => setDeleteTarget({ id: item.id, name: item.name })} className="p-1 rounded text-gray-400 hover:bg-red-50 hover:text-red-600" title="Delete">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
         <button onClick={() => archiveOrg(levelIdx, item.id)} className={`p-1 rounded ${item.archived ? "text-green-500 hover:bg-green-50" : "text-gray-400 hover:bg-gray-100"}`} title={item.archived ? "Restore" : "Archive"}>
           <Archive className="w-3.5 h-3.5" />
         </button>
@@ -290,6 +329,37 @@ export function OrgStructurePage() {
         </div>
         );
       })}
+
+      {/* Rename Modal */}
+      {renameTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="rounded-xl w-full max-w-md p-5" style={{ backgroundColor: "white" }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-gray-900">Rename</h3>
+              <button onClick={() => setRenameTarget(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input value={renameValue} onChange={e => setRenameValue(e.target.value)} className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" style={{ borderColor: "#E2E8F0" }} />
+            <div className="flex justify-end gap-3 mt-5">
+              <button onClick={() => setRenameTarget(null)} className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700">Cancel</button>
+              <button onClick={saveRename} disabled={!renameValue.trim() || renaming} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium disabled:opacity-40 hover:bg-indigo-700">
+                {renaming ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete this unit?"
+        description={deleteTarget ? `This will permanently remove "${deleteTarget.name}". This action cannot be undone.` : ""}
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
       {/* Add Org Level Modal */}
       {addingTo !== null && (

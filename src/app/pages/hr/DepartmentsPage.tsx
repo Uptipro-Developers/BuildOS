@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { fetchDepartments, createDepartment, deleteDepartment } from "../../api/departments";
+import { fetchDepartments, createDepartment, updateDepartment, deleteDepartment } from "../../api/departments";
+import { fetchEmployees } from "../../api/employees";
 import { getDepartmentPayrollSummary } from "../../api/hr-extras";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
@@ -43,6 +44,9 @@ const deptColors = [
 
 export function DepartmentsPage() {
   const [depts, setDepts] = useState<Department[]>([]);
+  const [activeEmployees, setActiveEmployees] = useState<
+    { id: string; firstName: string; lastName: string }[]
+  >([]);
   const [payrollSummary, setPayrollSummary] = useState<
     {
       department: string;
@@ -56,6 +60,9 @@ export function DepartmentsPage() {
   }
   useEffect(() => {
     loadDepartments();
+    fetchEmployees({ status: "active" })
+      .then((data: any[]) => setActiveEmployees(data))
+      .catch(() => setActiveEmployees([]));
     getDepartmentPayrollSummary()
       .then(setPayrollSummary)
       .catch(() => setPayrollSummary([]));
@@ -67,8 +74,17 @@ export function DepartmentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Department | null>(null);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
-  const [newHead, setNewHead] = useState("");
+  const [newHeadId, setNewHeadId] = useState("");
   const [newLocation, setNewLocation] = useState("");
+  const [newBudget, setNewBudget] = useState("");
+
+  const [editTarget, setEditTarget] = useState<Department | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editHeadId, setEditHeadId] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editBudget, setEditBudget] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function handleCreateDepartment() {
     if (!newName.trim()) {
@@ -80,18 +96,52 @@ export function DepartmentsPage() {
       name: newName.trim(),
       description: newDesc.trim(),
       location: newLocation.trim(),
+      headId: newHeadId || null,
+      budget: newBudget.trim() || undefined,
     })
       .then(() => loadDepartments())
       .then(() => {
         setShowCreate(false);
         setNewName("");
         setNewDesc("");
-        setNewHead("");
+        setNewHeadId("");
         setNewLocation("");
+        setNewBudget("");
         toast.success("Department created");
       })
       .catch(() => toast.error("Failed to create department. Please try again."))
       .finally(() => setCreating(false));
+  }
+
+  function openEdit(dept: Department) {
+    setEditTarget(dept);
+    setEditName(dept.name);
+    setEditDesc(dept.description);
+    setEditHeadId(dept.headId ?? "");
+    setEditLocation(dept.location);
+    setEditBudget(String(dept.budget ?? ""));
+  }
+
+  function handleSaveEdit() {
+    if (!editTarget || !editName.trim()) {
+      toast.error("Department name is required");
+      return;
+    }
+    setSaving(true);
+    updateDepartment(editTarget.id, {
+      name: editName.trim(),
+      description: editDesc.trim(),
+      location: editLocation.trim(),
+      headId: editHeadId || null,
+      budget: editBudget.trim() || undefined,
+    })
+      .then(() => loadDepartments())
+      .then(() => {
+        setEditTarget(null);
+        toast.success("Department updated");
+      })
+      .catch(() => toast.error("Failed to update department. Please try again."))
+      .finally(() => setSaving(false));
   }
 
   function handleDeleteDepartment() {
@@ -223,7 +273,10 @@ export function DepartmentsPage() {
                   <div className="flex items-center gap-1">
                     <button
                       className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEdit(dept);
+                      }}
                     >
                       <Edit className="w-3.5 h-3.5" />
                     </button>
@@ -290,39 +343,27 @@ export function DepartmentsPage() {
               </button>
             </div>
             <div className="space-y-4">
-              {[
-                {
-                  label: "Department Name",
-                  value: newName,
-                  set: setNewName,
-                  ph: "e.g. Engineering",
-                },
-                {
-                  label: "Department Head",
-                  value: newHead,
-                  set: setNewHead,
-                  ph: "e.g. Chukwudi Eze",
-                },
-                {
-                  label: "Work Location",
-                  value: newLocation,
-                  set: setNewLocation,
-                  ph: "e.g. Abuja, Lagos",
-                },
-              ].map((f) => (
-                <div key={f.label}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    {f.label}
-                  </label>
-                  <input
-                    type="text"
-                    value={f.value}
-                    onChange={(e) => f.set(e.target.value)}
-                    placeholder={f.ph}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Department Name</label>
+                <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Engineering" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Department Head</label>
+                <select value={newHeadId} onChange={(e) => setNewHeadId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                  <option value="">Unassigned</option>
+                  {activeEmployees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Work Location</label>
+                <input type="text" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} placeholder="e.g. Abuja, Lagos" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Annual Budget (optional)</label>
+                <input type="number" value={newBudget} onChange={(e) => setNewBudget(e.target.value)} placeholder="e.g. 5000000" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Description
@@ -348,6 +389,70 @@ export function DepartmentsPage() {
                 className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800 disabled:opacity-50"
               >
                 {creating ? "Creating…" : "Create Department"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-semibold text-gray-900">Edit Department</h2>
+              <button
+                onClick={() => setEditTarget(null)}
+                className="p-1 rounded hover:bg-gray-100"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Department Name</label>
+                <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Department Head</label>
+                <select value={editHeadId} onChange={(e) => setEditHeadId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                  <option value="">Unassigned</option>
+                  {activeEmployees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Work Location</label>
+                <input type="text" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Annual Budget (optional)</label>
+                <input type="number" value={editBudget} onChange={(e) => setEditBudget(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                onClick={() => setEditTarget(null)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={saving}
+                className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800 disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save Changes"}
               </button>
             </div>
           </div>

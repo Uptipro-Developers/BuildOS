@@ -9,10 +9,17 @@ export class HrExtrasService {
 
     // ── Attendance ──
     findAllAttendance(employeeId?: string, date?: string) {
+        let dateFilter: { gte: Date; lt: Date } | undefined;
+        if (date) {
+            const start = new Date(`${date}T00:00:00.000Z`);
+            const end = new Date(start);
+            end.setUTCDate(end.getUTCDate() + 1);
+            dateFilter = { gte: start, lt: end };
+        }
         return this.prisma.attendanceRecord.findMany({
             where: {
                 ...(employeeId ? { employeeId } : {}),
-                ...(date ? { date } : {}),
+                ...(dateFilter ? { date: dateFilter } : {}),
             },
             orderBy: { date: 'desc' },
         });

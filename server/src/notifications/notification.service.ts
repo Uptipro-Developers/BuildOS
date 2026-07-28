@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 
 interface NotificationRule {
   id: string;
@@ -11,7 +12,10 @@ interface NotificationRule {
 
 @Injectable()
 export class NotificationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   /**
    * Create notification rule
@@ -220,6 +224,42 @@ export class NotificationService {
     }
 
     return this.prisma.notificationTemplate.create({ data });
+  }
+
+  /**
+   * Delete notification template
+   */
+  async deleteNotificationTemplate(id: string) {
+    return this.prisma.notificationTemplate.delete({ where: { id } });
+  }
+
+  private renderPlaceholders(template: string, vars: Record<string, string>) {
+    return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key) => vars[key] ?? '');
+  }
+
+  /**
+   * Look up the active template for an event, render its {{variable}} placeholders,
+   * and send it via EmailService. Throws if no active template is configured.
+   */
+  async renderAndSendTemplate(eventType: string, to: string, vars: Record<string, string>) {
+    const template = await this.prisma.notificationTemplate.findFirst({
+      where: { eventType, isActive: true },
+    });
+    if (!template) {
+      throw new BadRequestException(`No active email template configured for "${eventType}"`);
+    }
+
+    const subject = this.renderPlaceholders(template.subject, vars);
+    const body = this.renderPlaceholders(template.body, vars);
+    const cc = template.cc ? this.renderPlaceholders(template.cc, vars) : undefined;
+
+    await this.emailService.sendNow({
+      to,
+      subject,
+      text: body,
+      html: body.replace(/\n/g, '<br />'),
+      cc: cc ? cc.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+    });
   }
 
   /**

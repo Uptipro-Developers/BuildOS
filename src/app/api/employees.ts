@@ -60,6 +60,7 @@ function mapEmployee(e: any) {
         orgLevel: '',
         nationality: '',
         syncStatus: 'unsynced',
+        onboardingWarning: e.onboardingWarning as string | undefined,
     };
 }
 
@@ -75,16 +76,24 @@ export function toEmployeeCreatePayload(form: any) {
         role: String(form.jobTitle ?? form.role ?? '').trim(),
         dateHired: form.employmentDate || form.dateHiredISO || undefined,
         dateOfBirth: form.dateOfBirth || undefined,
+        gender: form.gender || undefined,
         status: form.status ?? 'active',
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[form.employmentType] ?? form.employmentType ?? 'FullTime',
         departmentId: form.departmentId || undefined,
         department: form.department || undefined,
+        supervisorId: form.supervisorId || undefined,
+        baseSalary: form.baseSalary ? Number(form.baseSalary) : undefined,
         bankName: form.bankName || undefined,
         accountNumber: form.bankAccount || form.accountNumber || undefined,
+        accountHolder: form.accountHolder || undefined,
         taxId: form.taxId || undefined,
-        pensionId: form.rsaNumber || form.pfa || undefined,
+        pensionId: form.rsaNumber || form.pfa || form.pensionId || undefined,
         emergencyContact: form.nextOfKin || form.emergencyContact || undefined,
+        emergencyPhone: form.emergencyPhone || undefined,
         address: form.address || undefined,
+        city: form.city || undefined,
+        state: form.state || undefined,
+        zipCode: form.zipCode || undefined,
         gradeLevel: form.grade || form.gradeLevel || undefined,
     };
 }
