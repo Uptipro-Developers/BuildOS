@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  Search, Plus, Shield, MoreVertical, X, ChevronRight,
+  Search, Plus, Shield, X,
   Mail, Phone, MapPin, Briefcase, Calendar, Activity,
   CheckCircle2, XCircle, Clock, Edit, Copy, Trash2,
-  AlertCircle, Lock, Eye, PenLine, BadgeCheck, UserCheck, Upload, RefreshCw,
+  Lock, Eye, PenLine, BadgeCheck, UserCheck, RefreshCw,
   ChevronDown, ChevronUp, Save,
 } from "lucide-react";
 import { useEmployees } from "../../stores/employeeStore";
@@ -12,7 +12,6 @@ import { useUsers } from "../../stores/userStore";
 // ── Types ────────────────────────────────────────────────────────────────────
 type AppKey = "construction" | "finance" | "hr" | "procurement" | "admin" | "ess";
 type UserStatus = "Active" | "Inactive" | "Pending";
-type PermState = "allow" | "deny" | "inherit";
 
 interface AppDef { key: AppKey; label: string; color: string; abbr: string; }
 const ALL_APPS: AppDef[] = [
@@ -67,114 +66,6 @@ const buildProcesses = (allow: string[]): Process[] => [
   { id: "p10", label: "Approve Project Budget",    app: "construction", permissions: { view: true,  create: false, edit: false, approve: allow.includes("p10_a"), delete: false } },
   { id: "p11", label: "Generate Reports",          app: "admin",        permissions: { view: true,  create: allow.includes("p11_c"), edit: false, approve: false, delete: false } },
   { id: "p12", label: "Manage Users",              app: "admin",        permissions: { view: allow.includes("p12_v"), create: allow.includes("p12_c"), edit: allow.includes("p12_e"), approve: false, delete: allow.includes("p12_d") } },
-];
-
-// ── Mock Users ────────────────────────────────────────────────────────────────
-const mockUsers: UserRecord[] = [
-  {
-    id: "USR-001", name: "Amaka Osei", email: "amaka.osei@buildos.com", phone: "+234 801 234 5678",
-    location: "Lagos", role: "Admin", department: "IT", joinDate: "Jan 12, 2022",
-    status: "Active", apps: ["admin", "hr", "construction", "finance", "procurement", "ess"],
-    lastActive: "2 minutes ago",
-    processes: buildProcesses(["p1_v","p1_c","p1_e","p1_a","p1_d","p2_a","p3_c","p4_c","p4_e","p5_a","p6_v","p6_c","p7_a","p8_c","p8_e","p9_c","p9_e","p10_a","p11_c","p12_v","p12_c","p12_e","p12_d"]),
-    activity: [
-      { date: "Apr 10, 2026 09:14", action: "Synced employee Funke Adeyemi to user account", module: "Users", app: "admin" },
-      { date: "Apr 10, 2026 08:55", action: "Updated project Lekki Tower A", module: "Projects", app: "construction" },
-      { date: "Apr 9, 2026  17:30", action: "Approved expense EXP-0041", module: "Expenses", app: "finance" },
-    ],
-    requests: [
-      { type: "approved", label: "Budget Increase — Lekki Tower A", date: "Apr 9, 2026" },
-      { type: "submitted", label: "Q2 Payroll Run", date: "Apr 8, 2026" },
-    ],
-  },
-  {
-    id: "USR-002", name: "Chukwudi Eze", email: "c.eze@buildos.com", phone: "+234 802 345 6789",
-    location: "Abuja", role: "Construction Manager", department: "Construction", joinDate: "Mar 5, 2023",
-    status: "Active", apps: ["construction", "procurement", "ess"],
-    lastActive: "1 hour ago",
-    processes: buildProcesses(["p8_c","p8_e","p9_c","p9_e","p3_c","p1_v"]),
-    activity: [
-      { date: "Apr 10, 2026 07:45", action: "Assigned workforce to Project 003", module: "Workforce", app: "construction" },
-      { date: "Apr 9, 2026  15:20", action: "Submitted purchase request PR-0112", module: "Procurement", app: "procurement" },
-    ],
-    requests: [
-      { type: "submitted", label: "Purchase Request PR-0112", date: "Apr 9, 2026" },
-      { type: "rejected", label: "Equipment Hire — Crane", date: "Apr 7, 2026" },
-    ],
-  },
-  {
-    id: "USR-003", name: "Femi Adeleke", email: "f.adeleke@buildos.com", phone: "+234 803 456 7890",
-    location: "Ibadan", role: "Accountant", department: "Finance", joinDate: "Jun 20, 2023",
-    status: "Active", apps: ["finance", "ess"],
-    lastActive: "30 minutes ago",
-    processes: buildProcesses(["p4_c","p4_e","p5_a","p6_v","p11_c"]),
-    activity: [
-      { date: "Apr 10, 2026 09:00", action: "Approved expense EXP-0050", module: "Expenses", app: "finance" },
-      { date: "Apr 9, 2026  11:30", action: "Generated monthly report", module: "Reports", app: "admin" },
-    ],
-    requests: [
-      { type: "approved", label: "Expense EXP-0050", date: "Apr 10, 2026" },
-    ],
-  },
-  {
-    id: "USR-004", name: "Musa Ibrahim", email: "m.ibrahim@buildos.com", phone: "+234 804 567 8901",
-    location: "Kano", role: "Store Manager", department: "Procurement", joinDate: "Nov 3, 2022",
-    status: "Active", apps: ["procurement", "ess"],
-    lastActive: "5 hours ago",
-    processes: buildProcesses(["p1_v","p1_c","p2_a","p3_c"]),
-    activity: [
-      { date: "Apr 10, 2026 06:30", action: "Received delivery PO-2026-0041", module: "Purchase Orders", app: "procurement" },
-    ],
-    requests: [
-      { type: "submitted", label: "Purchase Order PO-2026-0044", date: "Apr 8, 2026" },
-    ],
-  },
-  {
-    id: "USR-005", name: "Ngozi Okafor", email: "n.okafor@buildos.com", phone: "+234 805 678 9012",
-    location: "Lagos", role: "HR Manager", department: "Human Resources", joinDate: "Feb 14, 2021",
-    status: "Active", apps: ["hr", "ess"],
-    lastActive: "Yesterday",
-    processes: buildProcesses(["p6_v","p6_c","p7_a"]),
-    activity: [
-      { date: "Apr 9, 2026  16:00", action: "Processed April payroll", module: "Payroll", app: "hr" },
-    ],
-    requests: [
-      { type: "submitted", label: "Payroll Processing — April 2026", date: "Apr 9, 2026" },
-    ],
-  },
-  {
-    id: "USR-006", name: "Tunde Bello", email: "t.bello@buildos.com", phone: "+234 806 789 0123",
-    location: "Lagos", role: "Employee", department: "Engineering", joinDate: "Aug 1, 2024",
-    status: "Pending", apps: ["ess"],
-    lastActive: "3 hours ago",
-    processes: buildProcesses([]),
-    activity: [],
-    requests: [
-      { type: "submitted", label: "Leave Request — Annual Leave", date: "Apr 8, 2026" },
-    ],
-  },
-  {
-    id: "USR-007", name: "Fatima Yusuf", email: "f.yusuf@buildos.com", phone: "+234 807 890 1234",
-    location: "Abuja", role: "Finance Manager", department: "Finance", joinDate: "May 10, 2020",
-    status: "Active", apps: ["finance", "procurement", "ess"],
-    lastActive: "4 hours ago",
-    processes: buildProcesses(["p4_c","p4_e","p5_a","p6_v","p6_c","p1_v","p2_a","p11_c"]),
-    activity: [
-      { date: "Apr 10, 2026 08:10", action: "Reviewed monthly expenditure", module: "Finance", app: "finance" },
-    ],
-    requests: [
-      { type: "approved", label: "Expense Batch — Apr Week 1", date: "Apr 9, 2026" },
-    ],
-  },
-  {
-    id: "USR-008", name: "Emeka Nwosu", email: "e.nwosu@buildos.com", phone: "+234 808 901 2345",
-    location: "Port Harcourt", role: "Site Engineer", department: "Construction", joinDate: "Sep 22, 2023",
-    status: "Inactive", apps: [],
-    lastActive: "2 weeks ago",
-    processes: buildProcesses([]),
-    activity: [],
-    requests: [],
-  },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -646,16 +537,22 @@ function UserDetailPanel({ user, onClose, onUpdateSignature }: { user: UserRecor
 
 // ── Main Page ────────────────────────────────────────────────────────────────
 export function UsersPage() {
-  const { employees, syncEmployee } = useEmployees();
+  const { employees, syncEmployee, markSyncedByEmails } = useEmployees();
   const { users, addUserFromEmployee, updateUserSignature } = useUsers();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<UserStatus | "all" | "unsynced">("all");
   const [appFilter, setAppFilter] = useState<AppKey | "all">("all");
   const [syncTarget, setSyncTarget] = useState<typeof employees[0] | null>(null);
   const [selectedUser, setSelectedUser] = useState<UserRecord | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
-  const unsyncedEmployees = employees.filter(e => e.syncStatus === "unsynced");
+  useEffect(() => {
+    markSyncedByEmails(users.map(u => u.email));
+  }, [markSyncedByEmails, users]);
+
+  const userEmails = new Set(users.map(u => u.email.trim().toLowerCase()).filter(Boolean));
+  const unsyncedEmployees = employees.filter(e => !userEmails.has((e.personalEmail || "").trim().toLowerCase()));
 
   const filteredUsers = users.filter((u) => {
     const q = search.toLowerCase();
@@ -680,13 +577,22 @@ export function UsersPage() {
     unsynced: unsyncedEmployees.length,
   };
 
-  function handleSync(employeeId: string, email: string, role: string, apps: AppKey[]) {
+  async function handleSync(employeeId: string, email: string, role: string, apps: AppKey[]) {
     const emp = employees.find(e => e.id === employeeId);
     if (emp) {
-      const newUser = addUserFromEmployee(emp, email, role, apps);
-      syncEmployee(employeeId, newUser.id);
+      setSyncingId(employeeId);
+      setSyncError(null);
+      try {
+        const newUser = await addUserFromEmployee(emp, email, role, apps);
+        syncEmployee(employeeId, newUser.id);
+        markSyncedByEmails([...users.map(u => u.email), newUser.email]);
+        setSyncTarget(null);
+      } catch (err) {
+        setSyncError(err instanceof Error ? err.message : "Employee sync failed. Please try again.");
+      } finally {
+        setSyncingId(null);
+      }
     }
-    setSyncTarget(null);
   }
 
   return (
@@ -697,6 +603,14 @@ export function UsersPage() {
           onSync={handleSync}
           onClose={() => setSyncTarget(null)}
         />
+      )}
+
+      {syncError && (
+        <div className="fixed bottom-4 right-4 z-50 bg-red-50 border border-red-200 shadow-lg rounded-lg px-4 py-3 text-sm text-red-700 max-w-md">
+          <p className="font-semibold">Sync failed</p>
+          <p>{syncError}</p>
+          <button onClick={() => setSyncError(null)} className="text-xs font-semibold mt-2 text-red-800">Dismiss</button>
+        </div>
       )}
 
       {selectedUser && (
@@ -784,9 +698,9 @@ export function UsersPage() {
                     <td className="px-4 py-3 text-sm text-gray-700">{emp.jobTitle}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{emp.department}</td>
                     <td className="px-4 py-3 text-right">
-                      <button onClick={() => setSyncTarget(emp)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors">
-                        <RefreshCw className="w-3.5 h-3.5" /> Sync
+                      <button onClick={() => setSyncTarget(emp)} disabled={syncingId === emp.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                        <RefreshCw className="w-3.5 h-3.5" /> {syncingId === emp.id ? "Syncing..." : "Sync"}
                       </button>
                     </td>
                   </tr>
@@ -826,9 +740,9 @@ export function UsersPage() {
                   <td className="px-4 py-3.5 text-sm text-gray-700">{emp.jobTitle}</td>
                   <td className="px-4 py-3.5 text-sm text-gray-500">{emp.department}</td>
                   <td className="px-4 py-3.5 text-right">
-                    <button onClick={() => setSyncTarget(emp)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors">
-                      <RefreshCw className="w-3.5 h-3.5" /> Sync to User
+                    <button onClick={() => setSyncTarget(emp)} disabled={syncingId === emp.id}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                      <RefreshCw className="w-3.5 h-3.5" /> {syncingId === emp.id ? "Syncing..." : "Sync to User"}
                     </button>
                   </td>
                 </tr>
@@ -877,7 +791,7 @@ export function UsersPage() {
                       <div className="flex items-center gap-2">
                         <Shield className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                         <span className="text-sm text-gray-700">{user.role}</span>
-                        {user.hasSignature && <BadgeCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" title="Signature on file" />}
+                        {user.hasSignature && <span title="Signature on file"><BadgeCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" /></span>}
                       </div>
                     </td>
                     <td className="px-4 py-3.5">

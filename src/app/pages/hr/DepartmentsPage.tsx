@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Building2, Plus, Search, Edit, Trash2, ChevronDown, ChevronRight, X, History, Save, DollarSign, CheckCircle2,
 } from "lucide-react";
 import { useEmployees } from "../../stores/employeeStore";
+import { createDepartment, deleteDepartment, fetchDepartments, updateDepartment } from "../../api/departments";
 
 interface BudgetLog {
   id: string;
@@ -101,6 +102,22 @@ const deptColors = [
   "bg-purple-100 text-purple-700", "bg-teal-100 text-teal-700",
 ];
 
+function formatBudget(value: number | string | undefined) {
+  if (typeof value === "string" && value.trim().startsWith("₦")) return value;
+  const amount = Number(value ?? 0) || 0;
+  if (amount >= 1_000_000) return `₦${(amount / 1_000_000).toFixed(amount % 1_000_000 ? 1 : 0)}M / yr`;
+  if (amount >= 1_000) return `₦${(amount / 1_000).toFixed(amount % 1000 ? 1 : 0)}K / yr`;
+  return `₦${amount} / yr`;
+}
+
+function parseBudget(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const multiplier = /m\b/i.test(trimmed) ? 1_000_000 : /k\b/i.test(trimmed) ? 1_000 : 1;
+  const numeric = Number(trimmed.replace(/[^\d.]/g, ""));
+  return Number.isFinite(numeric) ? numeric * multiplier : 0;
+}
+
 export function DepartmentsPage() {
   const { employees } = useEmployees();
   const [departmentsList, setDepartmentsList] = useState<Department[]>(initialDepts);
@@ -124,6 +141,22 @@ export function DepartmentsPage() {
   // Budget update flow states
   const [updateBudgetAmount, setUpdateBudgetAmount] = useState("");
   const [updateBudgetNote, setUpdateBudgetNote] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDepartments()
+      .then((items) => {
+        setDepartmentsList(items.map((dept: any) => ({
+          ...dept,
+          budget: formatBudget(dept.budget),
+          orgLevel: dept.orgLevel || "Cluster",
+          head: dept.head || "Unassigned",
+          headId: dept.headId || "",
+          budgetHistory: [],
+        })));
+      })
+      .catch((err) => setLoadError(err instanceof Error ? err.message : "Failed to load departments"));
+  }, []);
 
   const onboardedEmployees = employees.filter(e => e.status === "active");
 
@@ -153,14 +186,20 @@ export function DepartmentsPage() {
     setUpdateBudgetNote("");
   };
 
-  const handleCreateDepartment = () => {
+  const handleCreateDepartment = async () => {
     if (!formName.trim()) return;
     const selectedHeadEmp = onboardedEmployees.find(e => e.id === formHeadId);
     const headName = selectedHeadEmp ? `${selectedHeadEmp.firstName} ${selectedHeadEmp.lastName}` : "Unassigned";
+    const created = await createDepartment({
+      name: formName.trim(),
+      headId: formHeadId || null,
+      description: formDesc.trim() || "No description provided.",
+      location: formLocation.trim() || "Headquarters",
+      budget: String(parseBudget(formBudget)),
+    });
 
-    const newId = `DEPT-${String(departmentsList.length + 1).padStart(3, "0")}`;
     const newDept: Department = {
-      id: newId,
+      id: created.id,
       name: formName.trim(),
       head: headName,
       headId: formHeadId,
@@ -185,10 +224,18 @@ export function DepartmentsPage() {
     setShowCreateModal(false);
   };
 
-  const handleSaveEditDepartment = () => {
+  const handleSaveEditDepartment = async () => {
     if (!editingDept || !formName.trim()) return;
     const selectedHeadEmp = onboardedEmployees.find(e => e.id === formHeadId);
     const headName = selectedHeadEmp ? `${selectedHeadEmp.firstName} ${selectedHeadEmp.lastName}` : editingDept.head;
+
+    await updateDepartment(editingDept.id, {
+      name: formName.trim(),
+      headId: formHeadId || null,
+      description: formDesc.trim(),
+      location: formLocation.trim(),
+      budget: String(parseBudget(formBudget)),
+    });
 
     setDepartmentsList(prev => prev.map(d => {
       if (d.id === editingDept.id) {
@@ -222,8 +269,9 @@ export function DepartmentsPage() {
     setEditingDept(null);
   };
 
-  const handleUpdateBudgetTrackable = () => {
+  const handleUpdateBudgetTrackable = async () => {
     if (!budgetModalDept || !updateBudgetAmount.trim()) return;
+    await updateDepartment(budgetModalDept.id, { budget: String(parseBudget(updateBudgetAmount)) });
 
     setDepartmentsList(prev => prev.map(d => {
       if (d.id === budgetModalDept.id) {
@@ -248,6 +296,7 @@ export function DepartmentsPage() {
 
   const handleDeleteDepartment = () => {
     if (!deleteConfirmDept) return;
+    deleteDepartment(deleteConfirmDept.id).catch(() => null);
     setDepartmentsList(prev => prev.filter(d => d.id !== deleteConfirmDept.id));
     setDeleteConfirmDept(null);
   };
@@ -271,6 +320,12 @@ export function DepartmentsPage() {
           <Plus className="w-4 h-4" /> Add Department
         </button>
       </div>
+
+      {loadError && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+          {loadError}. Showing the locally seeded department layout until the API is available.
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-4">

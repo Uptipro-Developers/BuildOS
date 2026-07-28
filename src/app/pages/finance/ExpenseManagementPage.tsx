@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus, Download, Receipt, X, Save, Eye, CheckCircle, XCircle, Clock, Send, Wallet, Upload } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, Download, Receipt, X, Save, Eye, CheckCircle, XCircle, Clock, Send, Wallet, Upload, Edit, Trash2 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
@@ -48,24 +48,61 @@ const mockExpenses: Expense[] = [
   { id: "EXP-0044", project: "Lekki Tower A", category: "Materials", amount: 320000, description: "Glass panels — curtain wall system", createdBy: "Amaka Osei", date: "Apr 5, 2026", status: "Approved", approvedBy: "Sola Adeleke", approvedAt: "Apr 6, 2026 10:30" },
 ];
 
-const emptyForm = { project: "", category: "", amount: "", description: "", receipt: "" };
+const emptyForm = { project: "", category: "", amount: "", description: "", receipt: "", receiptName: "" };
+
+const LS_EXPENSE_KEY = "buildos_expenses";
+
+function loadExpenses(): Expense[] {
+  try {
+    const raw = localStorage.getItem(LS_EXPENSE_KEY);
+    if (raw) return JSON.parse(raw) as Expense[];
+  } catch { /* ignore */ }
+  return mockExpenses;
+}
 
 export function ExpenseManagementPage() {
-  const [expenses, setExpenses] = useState<Expense[]>(mockExpenses);
+  const [expenses, setExpenses] = useState<Expense[]>(loadExpenses);
   const [statusFilter, setStatusFilter] = useState<ExpenseStatus | "All">("All");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editExpense, setEditExpense] = useState<Expense | null>(null);
   const [viewExpense, setViewExpense] = useState<Expense | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState({ ...emptyForm });
   const [rejectState, setRejectState] = useState<{ id: string; reason: string } | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { logChange } = useChangelog();
   const { getNextId } = useNumbering();
 
-  const fmt = (n: number) => `$${n.toLocaleString()}`;
+  useEffect(() => {
+    try { localStorage.setItem(LS_EXPENSE_KEY, JSON.stringify(expenses)); } catch { /* ignore */ }
+  }, [expenses]);
+
+  const fmt = (n: number) => `₦${n.toLocaleString()}`;
 
   const filtered = statusFilter !== "All"
     ? expenses.filter((e) => e.status === statusFilter)
     : expenses;
+
+  function openCreate() {
+    setEditExpense(null);
+    setForm({ ...emptyForm });
+    setShowAddModal(true);
+  }
+
+  function openEditDraft(e: Expense) {
+    setEditExpense(e);
+    setForm({ project: e.project, category: e.category, amount: String(e.amount), description: e.description, receipt: e.receipt ?? "", receiptName: "" });
+    setShowAddModal(true);
+  }
+
+  function handleFileChange(ev: React.ChangeEvent<HTMLInputElement>) {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => setForm(f => ({ ...f, receipt: reader.result as string, receiptName: file.name }));
+    reader.readAsDataURL(file);
+  }
 
   const columns: Column<Expense>[] = [
     {
@@ -100,7 +137,7 @@ export function ExpenseManagementPage() {
     },
     {
       key: "amount",
-      label: "Amount ($)",
+      label: "Amount (₦)",
       render: (e) => <span className="text-sm font-semibold text-gray-900">{fmt(e.amount)}</span>,
       sortable: true,
       filterable: false,
@@ -134,9 +171,15 @@ export function ExpenseManagementPage() {
       key: "actions",
       label: "Actions",
       render: (e) => (
-        <button onClick={() => setViewExpense(e)} className="text-xs text-emerald-600 hover:underline flex items-center gap-1 ml-auto">
-          <Eye className="w-3.5 h-3.5" /> View
-        </button>
+        <div className="flex items-center justify-end gap-1">
+          <button onClick={() => setViewExpense(e)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg" title="View"><Eye className="w-3.5 h-3.5" /></button>
+          {e.status !== "Paid" && (
+            <button onClick={() => openEditDraft(e)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit"><Edit className="w-3.5 h-3.5" /></button>
+          )}
+          {e.status === "Draft" && (
+            <button onClick={() => setDeleteConfirmId(e.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+          )}
+        </div>
       ),
       sortable: false,
       filterable: false,
@@ -145,22 +188,41 @@ export function ExpenseManagementPage() {
     },
   ];
 
-  function addExpense() {
+  function addExpense(submitNow?: boolean) {
     if (!form.project || !form.amount || !form.description) return;
-    const newExp: Expense = {
-      id: getNextId("Expense"),
-      project: form.project,
-      category: form.category || "Other",
-      amount: parseFloat(form.amount.replace(/,/g, "")),
-      description: form.description,
-      createdBy: "Current User",
-      date: "Apr 13, 2026",
-      status: "Draft",
-    };
-    setExpenses([newExp, ...expenses]);
-    logChange({ module: "Finance", action: "Created", entityType: "Expense", entityId: newExp.id, summary: `Expense ${newExp.id} created — ${newExp.description}`, performedBy: "Current User" });
+    const newStatus: ExpenseStatus = submitNow ? "Submitted" : "Draft";
+    if (editExpense) {
+      setExpenses(prev => prev.map(e => e.id === editExpense.id ? {
+        ...e, project: form.project, category: form.category || "Other",
+        amount: parseFloat(form.amount.replace(/,/g, "")), description: form.description,
+        receipt: form.receipt || e.receipt,
+      } : e));
+      logChange({ module: "Finance", action: "Updated", entityType: "Expense", entityId: editExpense.id, summary: `Expense ${editExpense.id} updated`, performedBy: "Current User" });
+    } else {
+      const newExp: Expense = {
+        id: getNextId("Expense"),
+        project: form.project,
+        category: form.category || "Other",
+        amount: parseFloat(form.amount.replace(/,/g, "")),
+        description: form.description,
+        createdBy: "Current User",
+        date: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+        status: newStatus,
+        receipt: form.receipt || undefined,
+      };
+      setExpenses(prev => [newExp, ...prev]);
+      logChange({ module: "Finance", action: "Created", entityType: "Expense", entityId: newExp.id, summary: `Expense ${newExp.id} created — ${newExp.description}`, performedBy: "Current User" });
+    }
     setShowAddModal(false);
-    setForm(emptyForm);
+    setEditExpense(null);
+    setForm({ ...emptyForm });
+  }
+
+  function deleteExpense(id: string) {
+    const exp = expenses.find(e => e.id === id);
+    setExpenses(prev => prev.filter(e => e.id !== id));
+    if (exp) logChange({ module: "Finance", action: "Deleted", entityType: "Expense", entityId: id, summary: `Expense ${id} deleted`, performedBy: "Current User" });
+    setDeleteConfirmId(null);
   }
 
   function approve(id: string) {
@@ -210,7 +272,7 @@ export function ExpenseManagementPage() {
           <p className="text-sm text-gray-500 mt-0.5">Track, submit, and approve all project expenses</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
+          <button onClick={openCreate} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
             <Plus className="w-4 h-4" /> Add Expense
           </button>
         </div>
@@ -271,9 +333,9 @@ export function ExpenseManagementPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <Receipt className="w-4 h-4 text-emerald-600" />
-                <h2 className="text-sm font-semibold text-gray-900">Add Expense</h2>
+                <h2 className="text-sm font-semibold text-gray-900">{editExpense ? "Edit Expense" : "Add Expense"}</h2>
               </div>
-              <button onClick={() => setShowAddModal(false)} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-400" /></button>
+              <button onClick={() => { setShowAddModal(false); setEditExpense(null); }} className="p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4 text-gray-400" /></button>
             </div>
             <div className="px-6 py-5 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -293,7 +355,7 @@ export function ExpenseManagementPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Amount (USD) *</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Amount *</label>
                 <input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="e.g. 45000" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
               </div>
               <div>
@@ -302,20 +364,37 @@ export function ExpenseManagementPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">Receipt Upload</label>
-                <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-emerald-300 hover:bg-emerald-50 transition-colors">
+                <input
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg,image/jpg"
+                  ref={fileInputRef}
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <div
+                  className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   <Upload className="w-5 h-5 text-gray-300 mx-auto mb-1" />
-                  <p className="text-xs text-gray-500">Click to upload or drag and drop</p>
-                  <p className="text-xs text-gray-400">PDF, PNG, JPG up to 10MB</p>
+                  {form.receiptName
+                    ? <p className="text-xs font-medium text-emerald-700">✓ {form.receiptName}</p>
+                    : <>
+                        <p className="text-xs text-gray-500">Click to upload or drag and drop</p>
+                        <p className="text-xs text-gray-400">PDF, PNG, JPG up to 10MB</p>
+                      </>
+                  }
                 </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-              <button onClick={addExpense} className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800">
-                <Save className="w-3.5 h-3.5" /> Save as Draft
-              </button>
-              <button onClick={addExpense} className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
-                <Send className="w-3.5 h-3.5" /> Submit
+              <button onClick={() => { setShowAddModal(false); setEditExpense(null); }} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              {!editExpense && (
+                <button onClick={() => addExpense(false)} disabled={!form.project || !form.amount || !form.description} className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-40">
+                  <Save className="w-3.5 h-3.5" /> Save as Draft
+                </button>
+              )}
+              <button onClick={() => addExpense(!editExpense || undefined)} disabled={!form.project || !form.amount || !form.description} className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                {editExpense ? <><Save className="w-3.5 h-3.5" /> Save Changes</> : <><Send className="w-3.5 h-3.5" /> Submit</>}
               </button>
             </div>
           </div>
@@ -387,6 +466,23 @@ export function ExpenseManagementPage() {
               {!["Submitted", "Approved", "Sent to Finance"].includes(viewExpense.status) && !rejectState && (
                 <button onClick={() => setViewExpense(null)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="w-5 h-5 text-red-600" />
+            </div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Delete Expense?</h3>
+            <p className="text-sm text-gray-500 mb-5">This draft expense will be permanently deleted. This action cannot be undone.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={() => deleteExpense(deleteConfirmId)} className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
             </div>
           </div>
         </div>

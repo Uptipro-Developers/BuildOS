@@ -55,6 +55,12 @@ export class EmployeesService {
 
     async create(data: any) {
         const clean = sanitizeEmployeeInput(data);
+        if (!clean.departmentId && typeof data?.department === 'string' && data.department.trim()) {
+            const department = await this.prisma.department.findFirst({
+                where: { name: { equals: data.department.trim(), mode: 'insensitive' } },
+            });
+            if (department) clean.departmentId = department.id;
+        }
         // Required columns without Prisma defaults.
         clean.phone = clean.phone ?? '';
         clean.dateHired = clean.dateHired ?? new Date();
@@ -71,6 +77,12 @@ export class EmployeesService {
 
     async update(id: string, data: any) {
         const clean = sanitizeEmployeeInput(data);
+        if (!clean.departmentId && typeof data?.department === 'string' && data.department.trim()) {
+            const department = await this.prisma.department.findFirst({
+                where: { name: { equals: data.department.trim(), mode: 'insensitive' } },
+            });
+            if (department) clean.departmentId = department.id;
+        }
         const employee = await this.prisma.employee.update({ where: { id }, data: clean as any, include: { department: true } });
         this.activityHistory.create({
             userId: employee.id,

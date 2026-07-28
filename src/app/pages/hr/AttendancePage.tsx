@@ -12,9 +12,6 @@ interface AttRecord {
   checkIn: string; checkOut: string; status: AttStatus; hrs: number;
 }
 
-const getTodayFormatted = () => new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-const today = getTodayFormatted();
-
 const initialRecords: AttRecord[] = [
   { id: "EMP-001", name: "Chukwudi Eze", role: "Site Engineer", department: "Engineering", checkIn: "07:48 AM", checkOut: "05:10 PM", status: "present", hrs: 9.4 },
   { id: "EMP-002", name: "Aisha Bello", role: "Project Manager", department: "Operations", checkIn: "08:05 AM", checkOut: "06:00 PM", status: "present", hrs: 9.9 },
@@ -52,6 +49,7 @@ const statusOptions: { key: AttStatus | "all"; label: string }[] = [
 ];
 
 export function AttendancePage() {
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const [records, setRecords] = useState<AttRecord[]>(initialRecords);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");

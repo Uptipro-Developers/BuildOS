@@ -64,6 +64,9 @@ const attConfig: Record<string, { badge: string; icon: React.ReactNode }> = {
   absent: { badge: "bg-red-100 text-red-700", icon: <XCircle className="w-3.5 h-3.5 text-red-500" /> },
 };
 
+const formatLocalToday = () =>
+  new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
 function fmt(n: number) {
   const abs = Math.abs(n);
   const prefix = n < 0 ? "-₦" : "₦";
@@ -74,6 +77,7 @@ function fmt(n: number) {
 
 export function HRDashboardPage() {
   const navigate = useNavigate();
+  const todayLabel = formatLocalToday();
   const presentCount = todayAttendance.filter(a => a.status === "present").length;
   const lateCount = todayAttendance.filter(a => a.status === "late").length;
   const absentCount = todayAttendance.filter(a => a.status === "absent").length;
@@ -84,7 +88,7 @@ export function HRDashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">HR Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Workforce overview — April 9, 2026</p>
+          <p className="text-sm text-gray-500 mt-0.5">Workforce overview — {todayLabel}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => navigate("/apps/hr/attendance")} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">

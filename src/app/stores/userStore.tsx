@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { getUsers, inviteUser } from "../api/admin-extras";
 
 export type AppKey = "construction" | "finance" | "hr" | "procurement" | "admin" | "ess";
 export type UserStatus = "Active" | "Inactive" | "Pending";
@@ -45,7 +46,7 @@ export const buildProcesses = (allow: string[]): Process[] => [
   { id: "p9",  label: "Create Project",            app: "construction", permissions: { view: true,  create: allow.includes("p9_c"), edit: allow.includes("p9_e"), approve: false, delete: false } },
   { id: "p10", label: "Approve Project Budget",    app: "construction", permissions: { view: true,  create: false, edit: false, approve: allow.includes("p10_a"), delete: false } },
   { id: "p11", label: "Generate Reports",          app: "admin",        permissions: { view: true,  create: allow.includes("p11_c"), edit: false, approve: false, delete: false } },
-  { id: "p12", label: "Manage Users",              app: "admin",        permissions: { view: allow.includes("p12_v"), create: allow.includes("p12_c"), edit: allow.includes("p12_e"), approve: allow.includes("p12_d") } },
+  { id: "p12", label: "Manage Users",              app: "admin",        permissions: { view: allow.includes("p12_v"), create: allow.includes("p12_c"), edit: allow.includes("p12_e"), approve: false, delete: allow.includes("p12_d") } },
 ];
 
 const INITIAL_USERS: UserRecord[] = [
@@ -149,6 +150,9 @@ const INITIAL_USERS: UserRecord[] = [
 
 interface UserContextValue {
   users: UserRecord[];
+  loading: boolean;
+  error: string | null;
+  refreshUsers: () => Promise<void>;
   addUserFromEmployee: (emp: {
     id: string;
     firstName: string;
@@ -159,7 +163,7 @@ interface UserContextValue {
     personalEmail?: string;
     personalPhone?: string;
     address?: string;
-  }, email?: string, role?: string, apps?: AppKey[]) => UserRecord;
+  }, email?: string, role?: string, apps?: AppKey[]) => Promise<UserRecord>;
   updateUserSignature: (userId: string, hasSignature: boolean, signatureInitials?: string) => void;
 }
 
@@ -167,6 +171,49 @@ const UserContext = createContext<UserContextValue | null>(null);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<UserRecord[]>(INITIAL_USERS);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mapApiUser = useCallback((user: any): UserRecord => {
+    const statusText = String(user.status ?? "Pending").toLowerCase();
+    const status: UserStatus = statusText === "active" ? "Active" : statusText === "inactive" ? "Inactive" : "Pending";
+    const apps = ((user.assignedApps ?? []) as string[]).filter((app): app is AppKey =>
+      ["construction", "finance", "hr", "procurement", "admin", "ess"].includes(app)
+    );
+    return {
+      id: user.id,
+      name: user.name ?? "",
+      email: user.email ?? "",
+      phone: user.phone ?? "",
+      location: "",
+      role: user.role ?? "Employee",
+      department: user.department ?? "",
+      joinDate: user.createdAt ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "",
+      status,
+      apps,
+      lastActive: user.lastLogin ? new Date(user.lastLogin).toLocaleString() : "Not active yet",
+      processes: buildProcesses([]),
+      activity: [],
+      requests: [],
+    };
+  }, []);
+
+  const refreshUsers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiUsers = await getUsers();
+      setUsers(apiUsers.map(mapApiUser));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  }, [mapApiUser]);
+
+  useEffect(() => {
+    refreshUsers();
+  }, [refreshUsers]);
 
   const addUserFromEmployee = useCallback((emp: {
     id: string;
@@ -181,38 +228,43 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, customEmail?: string, customRole?: string, apps: AppKey[] = ["ess", "hr"]) => {
     const fullName = `${emp.firstName} ${emp.middleName || ""} ${emp.lastName}`.replace(/\s+/g, " ").trim();
     const email = customEmail || emp.personalEmail || `${emp.firstName.toLowerCase()}.${emp.lastName.toLowerCase()}@buildos.com`;
-    const newUserId = `USR-${String(users.length + 1).padStart(3, "0")}`;
-    
-    const newUser: UserRecord = {
-      id: newUserId,
+    return inviteUser({
       name: fullName,
       email,
-      phone: emp.personalPhone || "+234 800 000 0000",
-      location: emp.address?.split(",").pop()?.trim() || "Lagos",
       role: customRole || emp.jobTitle || "Employee",
+      assignedApps: apps,
       department: emp.department || "General",
-      joinDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-      status: "Active",
-      apps,
-      lastActive: "Just now",
-      employeeId: emp.id,
-      processes: buildProcesses(["p1_v", "p4_c", "p6_v"]),
-      activity: [
-        { date: new Date().toLocaleString(), action: `Synced employee ${fullName} to user account`, module: "Users", app: "admin" }
-      ],
-      requests: []
-    };
-
-    setUsers(prev => [...prev, newUser]);
-    return newUser;
-  }, [users.length]);
+    }).then((created) => {
+      const newUser: UserRecord = {
+        id: created.id,
+        name: fullName,
+        email: created.email,
+        phone: emp.personalPhone || "",
+        location: emp.address?.split(",").pop()?.trim() || "",
+        role: customRole || emp.jobTitle || "Employee",
+        department: emp.department || "General",
+        joinDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        status: "Pending",
+        apps,
+        lastActive: "Pending invite",
+        employeeId: emp.id,
+        processes: buildProcesses([]),
+        activity: [
+          { date: new Date().toLocaleString(), action: `Invited employee ${fullName} to activate user account`, module: "Users", app: "admin" }
+        ],
+        requests: []
+      };
+      setUsers(prev => [...prev.filter(u => u.id !== newUser.id), newUser]);
+      return newUser;
+    });
+  }, []);
 
   const updateUserSignature = useCallback((userId: string, hasSignature: boolean, signatureInitials?: string) => {
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, hasSignature, signatureInitials } : u));
   }, []);
 
   return (
-    <UserContext.Provider value={{ users, addUserFromEmployee, updateUserSignature }}>
+    <UserContext.Provider value={{ users, loading, error, refreshUsers, addUserFromEmployee, updateUserSignature }}>
       {children}
     </UserContext.Provider>
   );

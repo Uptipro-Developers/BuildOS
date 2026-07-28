@@ -238,9 +238,9 @@ export function TasksPage({ app, accentColor = "bg-indigo-600 hover:bg-indigo-70
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                <button onClick={() => openEdit(task)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"><Edit className="w-3.5 h-3.5" /></button>
-                <button onClick={() => deleteTask(task.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-3.5 h-3.5" /></button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => openEdit(task)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit task"><Edit className="w-3.5 h-3.5" /></button>
+                <button onClick={() => deleteTask(task.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Delete task"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             </div>
           );

@@ -3,33 +3,89 @@ import { apiFetch } from './client';
 export const EMPLOYMENT_TYPE_TO_DISPLAY: Record<string, string> = { FullTime: 'Full-time', Contract: 'Contract' };
 export const EMPLOYMENT_TYPE_TO_BACKEND: Record<string, string> = { 'Full-time': 'FullTime', Contract: 'Contract' };
 
+function toLocalDateInput(value: string | Date | null | undefined) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 function mapEmployee(e: any) {
     const statusMap: Record<string, string> = { active: 'active', inactive: 'inactive', on_leave: 'on_leave' };
+    const fullName = `${e.firstName ?? ''} ${e.middleName ?? ''} ${e.lastName ?? ''}`.replace(/\s+/g, ' ').trim();
     return {
         id: e.id,
-        firstName: e.firstName,
-        lastName: e.lastName,
-        role: e.role,
+        firstName: e.firstName ?? '',
+        middleName: e.middleName ?? '',
+        lastName: e.lastName ?? '',
+        name: fullName,
+        role: e.role ?? '',
+        jobTitle: e.role ?? '',
         department: e.department?.name ?? '',
         departmentId: e.departmentId ?? e.department?.id ?? '',
         status: statusMap[e.status] ?? e.status,
-        email: e.email,
-        phone: e.phone,
+        email: e.email ?? '',
+        personalEmail: e.email ?? '',
+        phone: e.phone ?? '',
+        personalPhone: e.phone ?? '',
         dateHired: e.dateHired ? new Date(e.dateHired).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
-        dateHiredISO: e.dateHired ? new Date(e.dateHired).toISOString().slice(0, 10) : '',
+        dateHiredISO: toLocalDateInput(e.dateHired),
+        employmentDate: toLocalDateInput(e.dateHired),
         employmentType: EMPLOYMENT_TYPE_TO_DISPLAY[e.employmentType] ?? e.employmentType,
         projectCount: e.projectCount ?? 0,
         projects: e.projects ?? [],
-        dateOfBirth: e.dateOfBirth ? new Date(e.dateOfBirth).toISOString().slice(0, 10) : '',
+        dateOfBirth: toLocalDateInput(e.dateOfBirth),
         gender: e.gender ?? '',
         address: e.address ?? '',
         city: e.city ?? '',
         state: e.state ?? '',
         zipCode: e.zipCode ?? '',
         emergencyContact: e.emergencyContact ?? '',
+        nextOfKin: e.emergencyContact ?? '',
         emergencyPhone: e.emergencyPhone ?? '',
         gradeLevel: e.gradeLevel ?? '',
+        grade: e.gradeLevel ?? '',
         baseSalary: e.baseSalary ?? 0,
+        bankName: e.bankName ?? '',
+        bankAccount: e.accountNumber ?? '',
+        accountNumber: e.accountNumber ?? '',
+        taxId: e.taxId ?? '',
+        pfa: e.pensionId ?? '',
+        rsaNumber: e.pensionId ?? '',
+        primarySupervisor: '',
+        maritalStatus: '',
+        orgLevel: '',
+        nationality: '',
+        syncStatus: 'unsynced',
+    };
+}
+
+export function toEmployeeCreatePayload(form: any) {
+    const email = String(form.personalEmail ?? form.email ?? '').trim().toLowerCase();
+    const phone = String(form.personalPhone ?? form.phone ?? '').trim();
+    return {
+        firstName: String(form.firstName ?? '').trim(),
+        middleName: String(form.middleName ?? '').trim() || undefined,
+        lastName: String(form.lastName ?? '').trim(),
+        email,
+        phone,
+        role: String(form.jobTitle ?? form.role ?? '').trim(),
+        dateHired: form.employmentDate || form.dateHiredISO || undefined,
+        dateOfBirth: form.dateOfBirth || undefined,
+        status: form.status ?? 'active',
+        employmentType: EMPLOYMENT_TYPE_TO_BACKEND[form.employmentType] ?? form.employmentType ?? 'FullTime',
+        departmentId: form.departmentId || undefined,
+        department: form.department || undefined,
+        bankName: form.bankName || undefined,
+        accountNumber: form.bankAccount || form.accountNumber || undefined,
+        taxId: form.taxId || undefined,
+        pensionId: form.rsaNumber || form.pfa || undefined,
+        emergencyContact: form.nextOfKin || form.emergencyContact || undefined,
+        address: form.address || undefined,
+        gradeLevel: form.grade || form.gradeLevel || undefined,
     };
 }
 
@@ -67,7 +123,7 @@ export async function fetchEmployee(id: string) {
 }
 
 export function createEmployee(data: any) {
-    return apiFetch(`/employees`, { method: 'POST', body: JSON.stringify(data) });
+    return apiFetch<any>(`/employees`, { method: 'POST', body: JSON.stringify(data) }).then(mapEmployee);
 }
 
 export function updateEmployee(id: string, data: any) {

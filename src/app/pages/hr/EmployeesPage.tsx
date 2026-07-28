@@ -9,6 +9,7 @@ import { exportCSV } from "../../utils/exportCSV";
 import { AdvancedFilter, type FilterFieldDef, type ActiveFilters, type SortConfig } from "../../components/AdvancedFilter";
 import { useHRConfig } from "../../stores/hrConfigStore";
 import { useEmployees, type Employee } from "../../stores/employeeStore";
+import { useUsers } from "../../stores/userStore";
 
 type EmpStatus = "active" | "inactive" | "on_leave";
 
@@ -224,13 +225,16 @@ function AddEmployeeModal({ onSave, onClose, orgLevels }: {
 export function EmployeesPage() {
   const navigate = useNavigate();
   const { orgLevels } = useHRConfig();
-  const { employees, addEmployee } = useEmployees();
+  const { employees, addEmployee, syncEmployee } = useEmployees();
+  const { addUserFromEmployee } = useUsers();
   const [search, setSearch] = useState("");
   const [advFilters, setAdvFilters] = useState<ActiveFilters>({});
   const [advSort, setAdvSort] = useState<SortConfig>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [welcomeNotice, setWelcomeNotice] = useState<{ name: string; email: string } | null>(null);
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
+  const [creatingEmployee, setCreatingEmployee] = useState(false);
 
   function handleSort(col: string) {
     if (advSort?.field === col) {
@@ -245,7 +249,7 @@ export function EmployeesPage() {
       const fullName = `${e.firstName} ${e.middleName} ${e.lastName}`;
       const matchSearch = `${fullName} ${e.id} ${e.jobTitle} ${e.department}`.toLowerCase().includes(search.toLowerCase());
       const matchAdv = Object.entries(advFilters).every(([key, vals]) => {
-        const fieldVal = String((e as Record<string, unknown>)[key] ?? "");
+        const fieldVal = String((e as unknown as Record<string, unknown>)[key] ?? "");
         if (vals.text?.trim() && !fieldVal.toLowerCase().includes(vals.text.trim().toLowerCase())) return false;
         if (vals.selected?.length && !vals.selected.includes(fieldVal)) return false;
         return true;
@@ -255,8 +259,8 @@ export function EmployeesPage() {
     .sort((a, b) => {
       if (!advSort) return 0;
       const sf = advSort.field;
-      const aVal = sf === "name" ? `${a.firstName} ${a.lastName}` : String((a as Record<string, unknown>)[sf] ?? "");
-      const bVal = sf === "name" ? `${b.firstName} ${b.lastName}` : String((b as Record<string, unknown>)[sf] ?? "");
+      const aVal = sf === "name" ? `${a.firstName} ${a.lastName}` : String((a as unknown as Record<string, unknown>)[sf] ?? "");
+      const bVal = sf === "name" ? `${b.firstName} ${b.lastName}` : String((b as unknown as Record<string, unknown>)[sf] ?? "");
       const cmp = aVal.localeCompare(bVal);
       return advSort.direction === "asc" ? cmp : -cmp;
     });
@@ -266,14 +270,24 @@ export function EmployeesPage() {
     return advSort.direction === "asc" ? <ChevronUp className="w-3 h-3 text-indigo-600" /> : <ChevronDown className="w-3 h-3 text-indigo-600" />;
   }
 
-  function handleAddEmployee(form: typeof emptyForm) {
-    addEmployee({
-      ...form,
-      status: "active",
-    });
-    setShowAddModal(false);
-    const fullName = `${form.firstName} ${form.lastName}`;
-    setWelcomeNotice({ name: fullName, email: form.personalEmail || `${form.firstName.toLowerCase()}@buildos.com` });
+  async function handleAddEmployee(form: typeof emptyForm) {
+    setCreatingEmployee(true);
+    setOnboardingError(null);
+    try {
+      const createdEmployee = await addEmployee({
+        ...form,
+        status: "active",
+      });
+      const fullName = `${createdEmployee.firstName} ${createdEmployee.lastName}`.trim();
+      const newUser = await addUserFromEmployee(createdEmployee, createdEmployee.personalEmail, createdEmployee.jobTitle, ["ess", "hr"]);
+      syncEmployee(createdEmployee.id, newUser.id);
+      setShowAddModal(false);
+      setWelcomeNotice({ name: fullName, email: createdEmployee.personalEmail });
+    } catch (err) {
+      setOnboardingError(err instanceof Error ? err.message : "Employee was not fully onboarded. Please try again.");
+    } finally {
+      setCreatingEmployee(false);
+    }
   }
 
   function handleExportCSV() {
@@ -411,6 +425,25 @@ export function EmployeesPage() {
       </div>
 
       {showAddModal && <AddEmployeeModal onSave={handleAddEmployee} onClose={() => setShowAddModal(false)} orgLevels={orgLevels} />}
+
+      {creatingEmployee && (
+        <div className="fixed bottom-4 right-4 z-50 bg-white border border-indigo-100 shadow-lg rounded-lg px-4 py-3 text-sm text-indigo-700">
+          Creating employee and sending welcome invite...
+        </div>
+      )}
+
+      {onboardingError && (
+        <div className="fixed bottom-4 right-4 z-50 bg-red-50 border border-red-200 shadow-lg rounded-lg px-4 py-3 text-sm text-red-700 max-w-md">
+          <div className="flex items-start gap-2">
+            <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold">Onboarding incomplete</p>
+              <p>{onboardingError}</p>
+              <button onClick={() => setOnboardingError(null)} className="text-xs font-semibold mt-2 text-red-800">Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {welcomeNotice && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

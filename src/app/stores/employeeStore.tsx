@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createEmployee, fetchEmployees, toEmployeeCreatePayload } from "../api/employees";
 
 export interface Employee {
   id: string;
@@ -41,8 +42,12 @@ const SEED_EMPLOYEES: Employee[] = [
 
 interface EmployeeContextValue {
   employees: Employee[];
-  addEmployee: (emp: Omit<Employee, "id" | "syncStatus" | "userId">) => void;
+  loading: boolean;
+  error: string | null;
+  refreshEmployees: () => Promise<void>;
+  addEmployee: (emp: Omit<Employee, "id" | "syncStatus" | "userId">) => Promise<Employee>;
   syncEmployee: (empId: string, userId: string) => void;
+  markSyncedByEmails: (emails: string[]) => void;
   getByStatus: (status: "unsynced" | "synced" | "all") => Employee[];
 }
 
@@ -50,13 +55,31 @@ const EmployeeContext = createContext<EmployeeContextValue | null>(null);
 
 export function EmployeeProvider({ children }: { children: ReactNode }) {
   const [employees, setEmployees] = useState<Employee[]>(SEED_EMPLOYEES);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const addEmployee = useCallback((emp: Omit<Employee, "id" | "syncStatus" | "userId">) => {
-    setEmployees(prev => {
-      const maxId = prev.reduce((max, e) => Math.max(max, parseInt(e.id.replace("EMP-", ""))), 0);
-      const newId = `EMP-${String(maxId + 1).padStart(3, "0")}`;
-      return [...prev, { ...emp, id: newId, syncStatus: "unsynced" as const }];
-    });
+  const refreshEmployees = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiEmployees = await fetchEmployees();
+      setEmployees(apiEmployees as Employee[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load employees");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshEmployees();
+  }, [refreshEmployees]);
+
+  const addEmployee = useCallback(async (emp: Omit<Employee, "id" | "syncStatus" | "userId">) => {
+    const created = await createEmployee(toEmployeeCreatePayload(emp));
+    const normalized = { ...(created as Employee), syncStatus: "unsynced" as const };
+    setEmployees(prev => [...prev.filter(e => e.id !== normalized.id), normalized]);
+    return normalized;
   }, []);
 
   const syncEmployee = useCallback((empId: string, userId: string) => {
@@ -65,13 +88,21 @@ export function EmployeeProvider({ children }: { children: ReactNode }) {
     ));
   }, []);
 
+  const markSyncedByEmails = useCallback((emails: string[]) => {
+    const normalized = new Set(emails.map(email => email.trim().toLowerCase()).filter(Boolean));
+    setEmployees(prev => prev.map(e => {
+      const email = (e.personalEmail || "").trim().toLowerCase();
+      return normalized.has(email) ? { ...e, syncStatus: "synced" as const } : e;
+    }));
+  }, []);
+
   const getByStatus = useCallback((status: "unsynced" | "synced" | "all") => {
     if (status === "all") return employees;
     return employees.filter(e => e.syncStatus === status);
   }, [employees]);
 
   return (
-    <EmployeeContext.Provider value={{ employees, addEmployee, syncEmployee, getByStatus }}>
+    <EmployeeContext.Provider value={{ employees, loading, error, refreshEmployees, addEmployee, syncEmployee, markSyncedByEmails, getByStatus }}>
       {children}
     </EmployeeContext.Provider>
   );

@@ -1,9 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Search, Eye, Edit, Trash2, X, BookOpen } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useNumbering } from "../../stores/numberingStore";
+
+const LS_KEY = "buildos_journal_entries";
+
+function loadEntries(): JournalEntry[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) return JSON.parse(raw) as JournalEntry[];
+  } catch { /* ignore */ }
+  return mockEntries;
+}
+
+function persistEntries(entries: JournalEntry[]) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(entries)); } catch { /* ignore */ }
+}
 
 type EntryStatus = "Draft" | "Posted" | "Reversed";
 
@@ -95,7 +109,9 @@ const STATUS_STYLES: Record<EntryStatus, string> = {
 export function JournalEntryPage() {
   const { logChange } = useChangelog();
   const { getNextId } = useNumbering();
-  const [entries, setEntries] = useState<JournalEntry[]>(mockEntries);
+  const [entries, setEntries] = useState<JournalEntry[]>(loadEntries);
+
+  useEffect(() => { persistEntries(entries); }, [entries]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<EntryStatus | "All">("All");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -154,15 +170,17 @@ export function JournalEntryPage() {
 
   function saveEntry(status: EntryStatus) {
     if (!form.description || !isBalanced) return;
+    const ref = form.reference.trim() ||
+      `JE-REF-${new Date().toISOString().slice(0,10).replace(/-/g,"")}-${Math.random().toString(36).slice(2,6).toUpperCase()}`;
     if (editId) {
-      setEntries((prev) => prev.map((e) => e.id === editId ? { ...e, ...form, status } : e));
+      setEntries((prev) => prev.map((e) => e.id === editId ? { ...e, ...form, reference: ref, status } : e));
       logChange({ module: "Finance", action: "Updated", entityType: "JournalEntry", entityId: editId, summary: `Journal Entry: ${form.description} updated [${status}]`, performedBy: "Current User" });
     } else {
       const newEntry: JournalEntry = {
         id: getNextId("JournalEntry"),
-        ...form, status, createdBy: "Current User",
+        ...form, reference: ref, status, createdBy: "Current User",
       };
-      setEntries([newEntry, ...entries]);
+      setEntries(prev => [newEntry, ...prev]);
       logChange({ module: "Finance", action: "Created", entityType: "JournalEntry", entityId: newEntry.id, summary: `Journal Entry ${newEntry.id}: ${form.description} [${status}]`, performedBy: "Current User" });
     }
     setModalOpen(false);
@@ -170,7 +188,7 @@ export function JournalEntryPage() {
 
   function deleteEntry(id: string) {
     const entry = entries.find(e => e.id === id);
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    setEntries(prev => prev.filter((e) => e.id !== id));
     if (entry) logChange({ module: "Finance", action: "Deleted", entityType: "JournalEntry", entityId: entry.id, summary: `Journal Entry ${entry.id}: ${entry.description} deleted`, performedBy: "Current User" });
   }
 
@@ -264,8 +282,8 @@ export function JournalEntryPage() {
                   <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Reference</label>
-                  <input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="e.g. REF-EXP-0042" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Reference <span className="font-normal text-gray-400">(auto-generated if blank)</span></label>
+                  <input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="e.g. REF-EXP-0042 — leave blank to auto-generate" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Description *</label>

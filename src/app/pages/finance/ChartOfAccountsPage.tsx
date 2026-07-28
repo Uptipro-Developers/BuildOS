@@ -100,6 +100,12 @@ export function ChartOfAccountsPage() {
     { key: "type", label: "Type", render: a => (
       <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${typeColors[a.type]}`}>{a.type}</span>
     ), sortable: true, filterable: true },
+    { key: "parent", label: "Parent Ledger", render: a => {
+      const parent = a.parentId ? accounts.find(p => p.id === a.parentId) : null;
+      return parent
+        ? <span className="text-xs text-gray-600">{parent.code} — {parent.name}</span>
+        : <span className="text-xs text-gray-400 italic">Top-level</span>;
+    }, sortable: false, filterable: false },
     { key: "balance", label: "Amount (₦)", render: a => {
       const bal = getAccountBalance(a.id);
       return <span className={`text-sm font-mono font-semibold ${bal >= 0 ? "text-gray-900" : "text-red-600"}`}>{fmt(bal)}</span>;
