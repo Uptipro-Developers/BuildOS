@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Download, Columns, X, Check, FileSpreadsheet } from "lucide-react";
+import { Columns, Check, FileSpreadsheet } from "lucide-react";
 
 export interface ColumnDef {
   key: string;

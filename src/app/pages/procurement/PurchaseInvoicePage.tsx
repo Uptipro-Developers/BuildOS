@@ -1,11 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
-import { useNumbering } from "../../stores/numberingStore";
+import {
+  getPurchaseInvoices,
+  createPurchaseInvoice,
+  PurchaseInvoice as ApiPurchaseInvoice,
+} from "../../api/procurement-requests";
+import {
+  getCurrencySymbol,
+  formatNumberByGeneralSettings,
+} from "../../utils/generalSettings";
 
-type InvoiceStatus = "Draft" | "Pending Approval" | "Approved" | "Paid" | "Overdue";
+type InvoiceStatus =
+  | "Draft"
+  | "Pending Approval"
+  | "Approved"
+  | "Paid"
+  | "Overdue";
 
 interface InvoiceLine {
   id: string;
@@ -27,76 +40,88 @@ interface PurchaseInvoice {
 }
 
 const STATUS_STYLES: Record<InvoiceStatus, string> = {
-  Draft:              "bg-gray-100 text-gray-600",
+  Draft: "bg-gray-100 text-gray-600",
   "Pending Approval": "bg-yellow-50 text-yellow-700",
-  Approved:           "bg-blue-50 text-blue-700",
-  Paid:               "bg-green-50 text-green-700",
-  Overdue:            "bg-red-50 text-red-700",
+  Approved: "bg-blue-50 text-blue-700",
+  Paid: "bg-green-50 text-green-700",
+  Overdue: "bg-red-50 text-red-700",
 };
 
-const STATUS_ORDER: InvoiceStatus[] = ["Draft", "Pending Approval", "Approved", "Paid", "Overdue"];
+// MOCK_INVOICES removed — data fetched from API
 
-const MOCK_INVOICES: PurchaseInvoice[] = [
-  {
-    id: "PI-001", invoiceNo: "INV-CEM-0142", supplier: "CemCo Nigeria Ltd", poRef: "PO-2025-014",
-    issueDate: "May 20, 2025", dueDate: "Jun 19, 2025", status: "Approved",
-    lines: [
-      { id: "l1", description: "Cement (50kg)", qty: 500, unit: "Bags", unitPrice: 8500 },
-      { id: "l2", description: "Concrete Block 9 Inch", qty: 2000, unit: "Units", unitPrice: 350 },
-    ],
-  },
-  {
-    id: "PI-002", invoiceNo: "INV-STL-0089", supplier: "SteelMart International", poRef: "PO-2025-012",
-    issueDate: "May 15, 2025", dueDate: "Jun 14, 2025", status: "Paid",
-    lines: [
-      { id: "l3", description: "Steel Rebar Y16", qty: 20, unit: "Tonnes", unitPrice: 410000 },
-      { id: "l4", description: "Binding Wire", qty: 50, unit: "Rolls", unitPrice: 2800 },
-    ],
-  },
-  {
-    id: "PI-003", invoiceNo: "INV-ELT-0033", supplier: "ElectraHub", poRef: "PO-2025-010",
-    issueDate: "Apr 30, 2025", dueDate: "May 30, 2025", status: "Overdue",
-    lines: [
-      { id: "l5", description: "Electrical Conduit 25mm", qty: 1000, unit: "Metres", unitPrice: 1200 },
-    ],
-  },
-  {
-    id: "PI-004", invoiceNo: "INV-STL-0090", supplier: "SteelMart International", poRef: "PO-2025-018",
-    issueDate: "Jun 1, 2025", dueDate: "Jul 1, 2025", status: "Pending Approval",
-    lines: [
-      { id: "l6", description: "Steel Rebar Y12", qty: 15, unit: "Tonnes", unitPrice: 380000 },
-    ],
-  },
-];
+function fromApi(r: ApiPurchaseInvoice): PurchaseInvoice {
+  return {
+    id: r.id,
+    invoiceNo: r.invoiceNo,
+    supplier: r.supplierName,
+    poRef: r.poRef ?? "",
+    issueDate: r.invoiceDate,
+    dueDate: r.dueDate,
+    status: r.status as InvoiceStatus,
+    lines: Array.isArray(r.lines)
+      ? (
+          r.lines as {
+            id?: string;
+            description?: string;
+            qty?: number;
+            unit?: string;
+            unitPrice?: number;
+          }[]
+        ).map((l) => ({
+          id: l.id ?? Math.random().toString(36).slice(2),
+          description: l.description ?? "",
+          qty: l.qty ?? 0,
+          unit: l.unit ?? "Units",
+          unitPrice: l.unitPrice ?? 0,
+        }))
+      : [],
+  };
+}
 
 function lineTotal(lines: InvoiceLine[]) {
   return lines.reduce((s, l) => s + l.qty * l.unitPrice, 0);
 }
 
 function fmt(n: number) {
-  return "₦" + n.toLocaleString("en-NG");
+  return getCurrencySymbol() + formatNumberByGeneralSettings(n);
 }
 
 const BLANK_LINE = (): InvoiceLine => ({
   id: Math.random().toString(36).slice(2),
-  description: "", qty: 1, unit: "Units", unitPrice: 0,
+  description: "",
+  qty: 1,
+  unit: "Units",
+  unitPrice: 0,
 });
 
 const BLANK_FORM = {
-  invoiceNo: "", supplier: "", poRef: "",
-  issueDate: "", dueDate: "", status: "Draft" as InvoiceStatus,
+  invoiceNo: "",
+  supplier: "",
+  poRef: "",
+  issueDate: "",
+  dueDate: "",
+  status: "Draft" as InvoiceStatus,
   lines: [BLANK_LINE()],
 };
 
 export function PurchaseInvoicePage() {
-  const [invoices, setInvoices] = useState<PurchaseInvoice[]>(MOCK_INVOICES);
+  const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "All">("All");
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "All">(
+    "All",
+  );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM, lines: [BLANK_LINE()] });
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
+
+  useEffect(() => {
+    getPurchaseInvoices()
+      .then((data) => setInvoices(data.map(fromApi)))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = invoices.filter((inv) => {
     const matchSearch =
@@ -107,6 +132,11 @@ export function PurchaseInvoicePage() {
     return matchSearch && matchStatus;
   });
 
+  if (loading)
+    return (
+      <div className="p-8 text-center text-gray-400 text-sm">Loading…</div>
+    );
+
   function addLine() {
     setForm((f) => ({ ...f, lines: [...f.lines, BLANK_LINE()] }));
   }
@@ -115,20 +145,33 @@ export function PurchaseInvoicePage() {
     setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.id !== id) }));
   }
 
-  function updateLine(id: string, key: keyof InvoiceLine, value: string | number) {
+  function updateLine(
+    id: string,
+    key: keyof InvoiceLine,
+    value: string | number,
+  ) {
     setForm((f) => ({
       ...f,
       lines: f.lines.map((l) => (l.id === id ? { ...l, [key]: value } : l)),
     }));
   }
 
-  function saveInvoice() {
-    const newInvoice: PurchaseInvoice = {
-      ...form,
-      id: getNextId("PurchaseInvoice"),
-    };
-    setInvoices([newInvoice, ...invoices]);
-    logChange({ module: "Procurement", action: "Created", entityType: "PurchaseInvoice", entityId: newInvoice.id, summary: `Invoice ${newInvoice.invoiceNo} created — ${newInvoice.supplier}`, performedBy: "Current User" });
+  async function saveInvoice() {
+    try {
+      const created = await createPurchaseInvoice({
+        invoiceNo: form.invoiceNo,
+        supplierName: form.supplier,
+        poRef: form.poRef,
+        invoiceDate: form.issueDate,
+        dueDate: form.dueDate,
+        status: form.status,
+        lines: form.lines,
+      });
+      setInvoices((prev) => [fromApi(created), ...prev]);
+      logChange({ module: "Procurement", action: "Created", entityType: "PurchaseInvoice", entityId: created.id, summary: `Invoice ${form.invoiceNo} created — ${form.supplier}`, performedBy: "Current User" });
+    } catch (e) {
+      console.error(e);
+    }
     setShowModal(false);
     setForm({ ...BLANK_FORM, lines: [BLANK_LINE()] });
   }
@@ -145,8 +188,26 @@ export function PurchaseInvoicePage() {
   }
 
   function handleExport() {
-    exportCSV("purchase-invoices", ["Invoice No", "Supplier", "PO Ref", "Issue Date", "Due Date", "Amount", "Status"],
-      invoices.map((inv) => [inv.invoiceNo, inv.supplier, inv.poRef, inv.issueDate, inv.dueDate, fmt(lineTotal(inv.lines)), inv.status])
+    exportCSV(
+      "purchase-invoices",
+      [
+        "Invoice No",
+        "Supplier",
+        "PO Ref",
+        "Issue Date",
+        "Due Date",
+        "Amount",
+        "Status",
+      ],
+      invoices.map((inv) => [
+        inv.invoiceNo,
+        inv.supplier,
+        inv.poRef,
+        inv.issueDate,
+        inv.dueDate,
+        fmt(lineTotal(inv.lines)),
+        inv.status,
+      ]),
     );
   }
 
@@ -253,8 +314,12 @@ export function PurchaseInvoicePage() {
     <div className="space-y-5">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Purchase Invoices</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Track and manage supplier invoices</p>
+          <h1 className="text-2xl font-semibold text-gray-900">
+            Purchase Invoices
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Track and manage supplier invoices
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => { setForm({ ...BLANK_FORM, lines: [BLANK_LINE()] }); setShowModal(true); }}
@@ -266,11 +331,23 @@ export function PurchaseInvoicePage() {
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
-        {(["Draft", "Pending Approval", "Approved", "Overdue"] as InvoiceStatus[]).map((s) => {
+        {(
+          [
+            "Draft",
+            "Pending Approval",
+            "Approved",
+            "Overdue",
+          ] as InvoiceStatus[]
+        ).map((s) => {
           const count = invoices.filter((i) => i.status === s).length;
-          const total = invoices.filter((i) => i.status === s).reduce((acc, i) => acc + lineTotal(i.lines), 0);
+          const total = invoices
+            .filter((i) => i.status === s)
+            .reduce((acc, i) => acc + lineTotal(i.lines), 0);
           return (
-            <div key={s} className={`p-4 rounded-xl border ${STATUS_STYLES[s]} border-current/20 bg-white`}>
+            <div
+              key={s}
+              className={`p-4 rounded-xl border ${STATUS_STYLES[s]} border-current/20 bg-white`}
+            >
               <p className="text-2xl font-bold">{count}</p>
               <p className="text-xs font-medium mt-0.5">{s}</p>
               <p className="text-xs opacity-70 mt-0.5">{fmt(total)}</p>
@@ -286,9 +363,21 @@ export function PurchaseInvoicePage() {
             placeholder="Search invoices…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="flex gap-1.5 flex-wrap">
-          {(["All", "Draft", "Pending Approval", "Approved", "Paid", "Overdue"] as const).map((f) => (
-            <button key={f} onClick={() => setStatusFilter(f)}
-              className={`px-2.5 py-1.5 text-xs rounded-lg border font-medium ${statusFilter === f ? "bg-blue-700 text-white border-blue-700" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+          {(
+            [
+              "All",
+              "Draft",
+              "Pending Approval",
+              "Approved",
+              "Paid",
+              "Overdue",
+            ] as const
+          ).map((f) => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={`px-2.5 py-1.5 text-xs rounded-lg border font-medium ${statusFilter === f ? "bg-blue-700 text-white border-blue-700" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}
+            >
               {f}
             </button>
           ))}
@@ -352,91 +441,210 @@ export function PurchaseInvoicePage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center">
-              <h2 className="text-base font-semibold text-gray-900">New Purchase Invoice</h2>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+              <h2 className="text-base font-semibold text-gray-900">
+                New Purchase Invoice
+              </h2>
+              <button
+                onClick={() => setShowModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+              >
+                ✕
+              </button>
             </div>
             <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Invoice Number</label>
-                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="INV-XXXX-0001" value={form.invoiceNo} onChange={(e) => setForm({ ...form, invoiceNo: e.target.value })} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Invoice Number
+                  </label>
+                  <input
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="INV-XXXX-0001"
+                    value={form.invoiceNo}
+                    onChange={(e) =>
+                      setForm({ ...form, invoiceNo: e.target.value })
+                    }
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Supplier</label>
-                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Supplier name" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Supplier
+                  </label>
+                  <input
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Supplier name"
+                    value={form.supplier}
+                    onChange={(e) =>
+                      setForm({ ...form, supplier: e.target.value })
+                    }
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">PO Reference</label>
-                  <input className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="PO-2025-XXX" value={form.poRef} onChange={(e) => setForm({ ...form, poRef: e.target.value })} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    PO Reference
+                  </label>
+                  <input
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="PO-2025-XXX"
+                    value={form.poRef}
+                    onChange={(e) =>
+                      setForm({ ...form, poRef: e.target.value })
+                    }
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
-                  <select className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as InvoiceStatus })}>
-                    {(["Draft", "Pending Approval", "Approved"] as InvoiceStatus[]).map((s) => (
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Status
+                  </label>
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    value={form.status}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        status: e.target.value as InvoiceStatus,
+                      })
+                    }
+                  >
+                    {(
+                      [
+                        "Draft",
+                        "Pending Approval",
+                        "Approved",
+                      ] as InvoiceStatus[]
+                    ).map((s) => (
                       <option key={s}>{s}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Issue Date</label>
-                  <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.issueDate} onChange={(e) => setForm({ ...form, issueDate: e.target.value })} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Issue Date
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    value={form.issueDate}
+                    onChange={(e) =>
+                      setForm({ ...form, issueDate: e.target.value })
+                    }
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label>
-                  <input type="date" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                    value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Due Date
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    value={form.dueDate}
+                    onChange={(e) =>
+                      setForm({ ...form, dueDate: e.target.value })
+                    }
+                  />
                 </div>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Line Items</p>
-                  <button onClick={addLine} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Line Items
+                  </p>
+                  <button
+                    onClick={addLine}
+                    className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
                     <Plus className="w-3 h-3" /> Add Line
                   </button>
                 </div>
                 <div className="space-y-2">
-                  {form.lines.map((l, i) => (
-                    <div key={l.id} className="grid grid-cols-12 gap-2 items-center">
+                  {form.lines.map((l) => (
+                    <div
+                      key={l.id}
+                      className="grid grid-cols-12 gap-2 items-center"
+                    >
                       <div className="col-span-5">
-                        <input className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Description" value={l.description} onChange={(e) => updateLine(l.id, "description", e.target.value)} />
+                        <input
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Description"
+                          value={l.description}
+                          onChange={(e) =>
+                            updateLine(l.id, "description", e.target.value)
+                          }
+                        />
                       </div>
                       <div className="col-span-2">
-                        <input type="number" min={1} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Qty" value={l.qty} onChange={(e) => updateLine(l.id, "qty", Number(e.target.value))} />
+                        <input
+                          type="number"
+                          min={1}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Qty"
+                          value={l.qty}
+                          onChange={(e) =>
+                            updateLine(l.id, "qty", Number(e.target.value))
+                          }
+                        />
                       </div>
                       <div className="col-span-2">
-                        <input className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Unit" value={l.unit} onChange={(e) => updateLine(l.id, "unit", e.target.value)} />
+                        <input
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Unit"
+                          value={l.unit}
+                          onChange={(e) =>
+                            updateLine(l.id, "unit", e.target.value)
+                          }
+                        />
                       </div>
                       <div className="col-span-2">
-                        <input type="number" min={0} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Price" value={l.unitPrice} onChange={(e) => updateLine(l.id, "unitPrice", Number(e.target.value))} />
+                        <input
+                          type="number"
+                          min={0}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Price"
+                          value={l.unitPrice}
+                          onChange={(e) =>
+                            updateLine(
+                              l.id,
+                              "unitPrice",
+                              Number(e.target.value),
+                            )
+                          }
+                        />
                       </div>
                       <div className="col-span-1 flex justify-center">
-                        <button disabled={form.lines.length === 1} onClick={() => removeLine(l.id)}
-                          className="text-gray-400 hover:text-red-500 disabled:opacity-30">✕</button>
+                        <button
+                          disabled={form.lines.length === 1}
+                          onClick={() => removeLine(l.id)}
+                          className="text-gray-400 hover:text-red-500 disabled:opacity-30"
+                        >
+                          ✕
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
                 <div className="mt-3 text-right">
                   <span className="text-sm font-semibold text-gray-700">
-                    Total: {fmt(form.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0))}
+                    Total:{" "}
+                    {fmt(
+                      form.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0),
+                    )}
                   </span>
                 </div>
               </div>
             </div>
             <div className="px-6 pb-5 flex justify-end gap-3">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">Cancel</button>
-              <button onClick={saveInvoice} disabled={!form.invoiceNo.trim() || !form.supplier.trim()}
-                className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-50">
+              <button
+                onClick={() => setShowModal(false)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveInvoice}
+                disabled={!form.invoiceNo.trim() || !form.supplier.trim()}
+                className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-50"
+              >
                 Save Invoice
               </button>
             </div>

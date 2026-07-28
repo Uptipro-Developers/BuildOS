@@ -5,14 +5,13 @@ import {
 } from "lucide-react";
 import { useFinance, type IncomeStatementRow } from "../../stores/financeStore";
 import { useChangelog } from "../../stores/changelogStore";
-import type { FiscalYear } from "./types";
 import { DataTable, type Column } from "../../components/DataTable";
 import { exportCSV } from "../../utils/exportCSV";
 
 const CLOSE_STEPS = [
   { id: "verify", label: "Verify Transactions", icon: <FileText className="w-4 h-4" />, desc: "Ensure all ledger entries are complete and the trial balance is balanced before proceeding." },
   { id: "appropriation", label: "Select Appropriation Account", icon: <Database className="w-4 h-4" />, desc: "Choose the retained earnings or appropriation account where net income/loss will be transferred." },
-  { id: "zeroize", label: "Generate Closing Entries", icon: <LogOut className="w-4 h-4" />, desc: "Close all revenue and expense accounts to zero, transferring balances to the appropriation account." },
+  { id: "zeroize", label: "Zeroize Income Statement Accounts", icon: <LogOut className="w-4 h-4" />, desc: "Close all revenue and expense accounts to zero, transferring balances to the appropriation account." },
   { id: "lock", label: "Close Account for Fiscal Year", icon: <Lock className="w-4 h-4" />, desc: "Once closed, the account will be locked. No further postings, edits, or reversals will be permitted for this period." },
 ];
 
@@ -130,7 +129,7 @@ export function YearEndClosePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Year-End Close</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Close a fiscal year &mdash; verify transactions, select appropriation account, generate closing entries, and lock the period.</p>
+          <p className="text-sm text-gray-500 mt-0.5">Close a fiscal year &mdash; verify transactions, select appropriation account, zeroise income statements, and lock the period.</p>
         </div>
       </div>
 
@@ -219,7 +218,7 @@ export function YearEndClosePage() {
                   </select>
                 </div>
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
-                  <p>This account will receive the net income or loss for <strong>{selectedFy?.label}</strong>. Income statement accounts will be closed against this account.</p>
+                  <p>This account will receive the net income or loss for <strong>{selectedFy?.label}</strong>. Income statement accounts will be zeroized against this account.</p>
                 </div>
                 <div className="flex justify-end">
                   <button onClick={() => { setCurrentStep(2); generateClosingEntries(); }} className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
@@ -231,7 +230,7 @@ export function YearEndClosePage() {
 
             {currentStep === 2 && (
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-gray-900">Step 3: Generate Closing Entries</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Step 3: Zeroize Income Statement Accounts</h3>
                 <p className="text-sm text-gray-500">Close all income and expense accounts to zero. Balances are transferred to {appropriationAccount}.</p>
                 {closingEntries.length === 0 ? (
                   <button onClick={generateClosingEntries} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
@@ -285,7 +284,7 @@ export function YearEndClosePage() {
                       <span className="font-semibold text-gray-900">{appropriationAccount}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">Closing Entries Generated</span>
+                      <span className="text-gray-600">Income Statement Accounts to Zeroize</span>
                       <span className="font-semibold text-gray-900">{closingEntries.length} entries</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">

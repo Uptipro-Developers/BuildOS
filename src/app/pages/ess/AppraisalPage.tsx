@@ -1,5 +1,12 @@
-import { useState } from "react";
-import { Star, MessageSquare, ChevronDown, ChevronUp, Plus } from "lucide-react";
+import { useState, useEffect } from "react";
+import {
+  Star,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+} from "lucide-react";
+import { getAppraisals } from "../../api/hr-extras";
 
 type AppraisalStatus = "Pending" | "In Review" | "Completed";
 
@@ -15,56 +22,18 @@ interface Appraisal {
 }
 
 const STATUS_STYLES: Record<AppraisalStatus, string> = {
-  Pending:    "bg-yellow-50 text-yellow-700",
-  "In Review":"bg-blue-50 text-blue-700",
-  Completed:  "bg-green-50 text-green-700",
+  Pending: "bg-yellow-50 text-yellow-700",
+  "In Review": "bg-blue-50 text-blue-700",
+  Completed: "bg-green-50 text-green-700",
 };
 
-const MOCK_APPRAISALS: Appraisal[] = [
-  {
-    id: "APR-0005",
-    cycle: "H1 2025 (Jan – Jun)",
-    manager: "Michael Chen",
-    status: "In Review",
-    selfScore: 4,
-    managerScore: null,
-    feedback: "",
-    objectives: [
-      { label: "Complete structural design for Block C", achieved: true },
-      { label: "Reduce site rework rate by 10%",        achieved: true },
-      { label: "Complete PMP certification",             achieved: false },
-    ],
-  },
-  {
-    id: "APR-0004",
-    cycle: "H2 2024 (Jul – Dec)",
-    manager: "Michael Chen",
-    status: "Completed",
-    selfScore: 4,
-    managerScore: 4,
-    feedback: "James demonstrated strong technical skills and improved site coordination. Needs to focus on certification goals in the next cycle.",
-    objectives: [
-      { label: "Lead foundation work for Phase 2", achieved: true },
-      { label: "Mentor two junior engineers",      achieved: true },
-      { label: "Complete AutoCAD advanced course", achieved: true },
-    ],
-  },
-  {
-    id: "APR-0003",
-    cycle: "H1 2024 (Jan – Jun)",
-    manager: "Michael Chen",
-    status: "Completed",
-    selfScore: 3,
-    managerScore: 3,
-    feedback: "Solid performance. Some delays in reporting that need improvement.",
-    objectives: [
-      { label: "Improve daily report submission time", achieved: false },
-      { label: "Achieve zero safety incidents on site",achieved: true },
-    ],
-  },
-];
-
-function StarRating({ value, onChange }: { value: number | null; onChange?: (v: number) => void }) {
+function StarRating({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange?: (v: number) => void;
+}) {
   return (
     <div className="flex gap-0.5">
       {[1, 2, 3, 4, 5].map((n) => (
@@ -79,10 +48,31 @@ function StarRating({ value, onChange }: { value: number | null; onChange?: (v: 
 }
 
 export function AppraisalPage() {
-  const [appraisals, setAppraisals] = useState<Appraisal[]>(MOCK_APPRAISALS);
-  const [expanded, setExpanded] = useState<string | null>("APR-0005");
+  const [appraisals, setAppraisals] = useState<Appraisal[]>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [feedbackDraft, setFeedbackDraft] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAppraisals()
+      .then((data) =>
+        setAppraisals(
+          data.map((a) => ({
+            id: a.id,
+            cycle: a.period,
+            manager: a.reviewer ?? "",
+            status: (["Pending", "In Review", "Completed"].includes(a.status)
+              ? a.status
+              : "Pending") as AppraisalStatus,
+            selfScore: a.score ?? null,
+            managerScore: null,
+            feedback: a.comments ?? "",
+            objectives: [],
+          })),
+        ),
+      )
+      .catch(console.error);
+  }, []);
 
   function toggleExpand(id: string) {
     setExpanded((prev) => (prev === id ? null : id));
@@ -90,7 +80,7 @@ export function AppraisalPage() {
 
   function saveSelfScore(id: string, score: number) {
     setAppraisals((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, selfScore: score } : a))
+      prev.map((a) => (a.id === id ? { ...a, selfScore: score } : a)),
     );
   }
 
@@ -99,7 +89,9 @@ export function AppraisalPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Appraisals</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Performance reviews across appraisal cycles</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Performance reviews across appraisal cycles
+          </p>
         </div>
       </div>
 
@@ -108,10 +100,16 @@ export function AppraisalPage() {
         <div className="bg-teal-600 text-white rounded-xl p-5 flex justify-between items-center">
           <div>
             <p className="text-teal-100 text-sm">Current Appraisal Cycle</p>
-            <p className="text-lg font-semibold mt-0.5">{appraisals[0].cycle}</p>
-            <p className="text-teal-200 text-xs mt-1">Manager: {appraisals[0].manager}</p>
+            <p className="text-lg font-semibold mt-0.5">
+              {appraisals[0].cycle}
+            </p>
+            <p className="text-teal-200 text-xs mt-1">
+              Manager: {appraisals[0].manager}
+            </p>
           </div>
-          <span className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_STYLES[appraisals[0].status]}`}>
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-medium ${STATUS_STYLES[appraisals[0].status]}`}
+          >
             {appraisals[0].status}
           </span>
         </div>
@@ -119,8 +117,16 @@ export function AppraisalPage() {
 
       {/* Appraisal list */}
       <div className="space-y-3">
+        {appraisals.length === 0 && (
+          <div className="text-center py-16 text-gray-400">
+            <p className="text-sm">No appraisal records found.</p>
+          </div>
+        )}
         {appraisals.map((a) => (
-          <div key={a.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div
+            key={a.id}
+            className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+          >
             {/* Header row */}
             <button
               className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 text-left"
@@ -129,14 +135,22 @@ export function AppraisalPage() {
               <div className="flex items-center gap-4">
                 <div>
                   <p className="font-medium text-gray-900 text-sm">{a.cycle}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{a.id} · {a.manager}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {a.id} · {a.manager}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[a.status]}`}>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[a.status]}`}
+                >
                   {a.status}
                 </span>
-                {expanded === a.id ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                {expanded === a.id ? (
+                  <ChevronUp className="w-4 h-4 text-gray-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                )}
               </div>
             </button>
 
@@ -146,10 +160,16 @@ export function AppraisalPage() {
                 {/* Scores */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-xs text-gray-500 mb-1.5">Your Self-Assessment</p>
+                    <p className="text-xs text-gray-500 mb-1.5">
+                      Your Self-Assessment
+                    </p>
                     <StarRating
                       value={a.selfScore}
-                      onChange={a.status !== "Completed" ? (v) => saveSelfScore(a.id, v) : undefined}
+                      onChange={
+                        a.status !== "Completed"
+                          ? (v) => saveSelfScore(a.id, v)
+                          : undefined
+                      }
                     />
                     <p className="text-xs text-gray-400 mt-1">
                       {a.selfScore ? `${a.selfScore}/5` : "Not submitted"}
@@ -157,24 +177,38 @@ export function AppraisalPage() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-500 mb-1.5">Manager Score</p>
+                    <p className="text-xs text-gray-500 mb-1.5">
+                      Manager Score
+                    </p>
                     <StarRating value={a.managerScore} />
                     <p className="text-xs text-gray-400 mt-1">
-                      {a.managerScore ? `${a.managerScore}/5` : "Pending manager review"}
+                      {a.managerScore
+                        ? `${a.managerScore}/5`
+                        : "Pending manager review"}
                     </p>
                   </div>
                 </div>
 
                 {/* Objectives */}
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Objectives</p>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Objectives
+                  </p>
                   <ul className="space-y-1.5">
                     {a.objectives.map((obj, i) => (
                       <li key={i} className="flex items-center gap-2 text-sm">
-                        <span className={`w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${obj.achieved ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"}`}>
+                        <span
+                          className={`w-4 h-4 rounded-full flex-shrink-0 flex items-center justify-center text-xs ${obj.achieved ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-400"}`}
+                        >
                           {obj.achieved ? "✓" : "–"}
                         </span>
-                        <span className={obj.achieved ? "text-gray-800" : "text-gray-400"}>{obj.label}</span>
+                        <span
+                          className={
+                            obj.achieved ? "text-gray-800" : "text-gray-400"
+                          }
+                        >
+                          {obj.label}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -193,7 +227,9 @@ export function AppraisalPage() {
                 {/* Add self-feedback for in-review */}
                 {a.status === "In Review" && (
                   <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Self-Feedback</p>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                      Self-Feedback
+                    </p>
                     {editing === a.id ? (
                       <div className="space-y-2">
                         <textarea

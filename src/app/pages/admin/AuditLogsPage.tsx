@@ -1,11 +1,32 @@
-import { FileText, Download, Filter } from "lucide-react";
-import { useState } from "react";
-import { DataTable } from "../../components/DataTable";
+import { Filter, Download } from "lucide-react";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { DataTable, type Column } from "../../components/DataTable";
+import { getAuditLogs, getUsers } from "../../api/admin-extras";
+import { formatDateTimeByGeneralSettings } from "../../utils/generalSettings";
+import { exportCSV } from "../../utils/exportCSV";
+
+const ACTION_LABELS: Record<string, string> = {
+  CREATE: "Created",
+  UPDATE: "Updated",
+  DELETE: "Deleted",
+  READ: "Viewed",
+  LOGIN: "Login",
+  APPROVE: "Approved",
+  EXPORT: "Exported",
+};
+
+function normalizeAction(action: string): string {
+  if (!action) return "Unknown";
+  return ACTION_LABELS[action.toUpperCase()] ?? action;
+}
 
 interface AuditLog {
   id: string;
   timestamp: string;
+  createdAt: string;
   user: string;
+  userId: string;
   action: string;
   module: string;
   details: string;
@@ -13,100 +34,79 @@ interface AuditLog {
 }
 
 export function AuditLogsPage() {
-  const [logs] = useState<AuditLog[]>([
-    {
-      id: "1",
-      timestamp: "2026-04-07 14:35:22",
-      user: "John Smith",
-      action: "Created",
-      module: "Projects",
-      details: "Created project 'Harbor View Complex'",
-      ipAddress: "192.168.1.100",
-    },
-    {
-      id: "2",
-      timestamp: "2026-04-07 14:30:15",
-      user: "Sarah Johnson",
-      action: "Updated",
-      module: "Expenses",
-      details: "Updated expense #EXP-1234 amount to $5,500",
-      ipAddress: "192.168.1.105",
-    },
-    {
-      id: "3",
-      timestamp: "2026-04-07 14:25:10",
-      user: "Michael Chen",
-      action: "Approved",
-      module: "Approvals",
-      details: "Approved material request #MR-5678",
-      ipAddress: "192.168.1.110",
-    },
-    {
-      id: "4",
-      timestamp: "2026-04-07 14:20:05",
-      user: "Emily Davis",
-      action: "Deleted",
-      module: "Users",
-      details: "Deleted user 'test@example.com'",
-      ipAddress: "192.168.1.115",
-    },
-    {
-      id: "5",
-      timestamp: "2026-04-07 14:15:30",
-      user: "Robert Wilson",
-      action: "Login",
-      module: "Authentication",
-      details: "User logged in successfully",
-      ipAddress: "192.168.1.120",
-    },
-    {
-      id: "6",
-      timestamp: "2026-04-07 14:10:45",
-      user: "Lisa Anderson",
-      action: "Updated",
-      module: "Projects",
-      details: "Updated project budget for 'Skyline Plaza'",
-      ipAddress: "192.168.1.125",
-    },
-    {
-      id: "7",
-      timestamp: "2026-04-07 14:05:20",
-      user: "David Lee",
-      action: "Created",
-      module: "Materials",
-      details: "Added new material 'Steel Rebar 12mm'",
-      ipAddress: "192.168.1.130",
-    },
-    {
-      id: "8",
-      timestamp: "2026-04-07 14:00:10",
-      user: "Maria Garcia",
-      action: "Exported",
-      module: "Reports",
-      details: "Exported project performance report",
-      ipAddress: "192.168.1.135",
-    },
-    {
-      id: "9",
-      timestamp: "2026-04-07 13:55:30",
-      user: "Thomas Brown",
-      action: "Updated",
-      module: "Settings",
-      details: "Changed company currency to USD",
-      ipAddress: "192.168.1.140",
-    },
-    {
-      id: "10",
-      timestamp: "2026-04-07 13:50:15",
-      user: "Jennifer Wilson",
-      action: "Created",
-      module: "Employees",
-      details: "Added new employee 'Alex Johnson'",
-      ipAddress: "192.168.1.145",
-    },
-  ]);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [activeUsers, setActiveUsers] = useState(0);
 
-  const columns = [
+  useEffect(() => {
+    Promise.all([getAuditLogs({ limit: 100 }), getUsers()])
+      .then(([auditLogs, users]) => {
+        setLogs(
+          auditLogs.map((log: any) => ({
+            id: String(log.id),
+            timestamp: formatDateTimeByGeneralSettings(
+              log.createdAt || log.timestamp,
+            ),
+            createdAt: String(log.createdAt || log.timestamp || ""),
+            user:
+              typeof log.user === "string"
+                ? log.user
+                : log.user?.name ||
+                  log.user?.userId ||
+                  log.user?.email ||
+                  log.userId ||
+                  "System",
+            userId:
+              (typeof log.user === "object"
+                ? log.user?.userId || log.user?.id
+                : null) ||
+              log.userId ||
+              "—",
+            action: normalizeAction(String(log.action || "Unknown")),
+            module: String(
+              log.module || log.resource || log.entity || "System",
+            ),
+            details: String(log.details || log.description || ""),
+            ipAddress: String(log.ipAddress || "N/A"),
+          })),
+        );
+
+        const since24h = Date.now() - 24 * 60 * 60 * 1000;
+        setActiveUsers(
+          users.filter((user) => {
+            if (!user.lastLogin) return false;
+            const at = new Date(user.lastLogin).getTime();
+            return Number.isFinite(at) && at >= since24h;
+          }).length,
+        );
+      })
+      .catch((err) => {
+        console.error("Failed to load audit logs:", err);
+        toast.error("Failed to load audit logs.");
+        setLogs([]);
+        setActiveUsers(0);
+      });
+  }, []);
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const todayCount = logs.filter((log) => {
+    const at = new Date(log.createdAt).getTime();
+    return Number.isFinite(at) && at >= startOfToday.getTime();
+  }).length;
+
+  const failedLogins = logs.filter((log) => {
+    const action = log.action.toLowerCase();
+    const details = log.details.toLowerCase();
+    return (
+      action.includes("failed") ||
+      action.includes("login_failed") ||
+      action.includes("failed login") ||
+      details.includes("failed login")
+    );
+  }).length;
+
+  const columns: Column<AuditLog>[] = [
     {
       key: "timestamp",
       label: "Timestamp",
@@ -119,6 +119,17 @@ export function AuditLogsPage() {
       key: "user",
       label: "User",
       sortable: true,
+      render: (row: AuditLog) => (
+        <span className="text-sm text-gray-900">{row.user}</span>
+      ),
+    },
+    {
+      key: "userId",
+      label: "User ID",
+      sortable: true,
+      render: (row: AuditLog) => (
+        <span className="text-sm font-mono text-gray-600">{row.userId}</span>
+      ),
     },
     {
       key: "action",
@@ -148,6 +159,9 @@ export function AuditLogsPage() {
       key: "module",
       label: "Module",
       sortable: true,
+      render: (row: AuditLog) => (
+        <span className="text-sm text-gray-700">{row.module}</span>
+      ),
     },
     {
       key: "details",
@@ -191,18 +205,22 @@ export function AuditLogsPage() {
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <p className="text-sm text-gray-600">Today</p>
           <p className="text-2xl font-semibold text-gray-900 mt-1">
-            {logs.filter((log) => log.timestamp.startsWith("2026-04-07")).length}
+            {todayCount}
           </p>
         </div>
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <p className="text-sm text-gray-600">Active Users</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">8</p>
+          <p className="text-2xl font-semibold text-gray-900 mt-1">
+            {activeUsers}
+          </p>
         </div>
 
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <p className="text-sm text-gray-600">Failed Logins</p>
-          <p className="text-2xl font-semibold text-red-600 mt-1">0</p>
+          <p className="text-2xl font-semibold text-red-600 mt-1">
+            {failedLogins}
+          </p>
         </div>
       </div>
 
@@ -240,9 +258,47 @@ export function AuditLogsPage() {
       <DataTable
         data={logs}
         columns={columns}
-        searchable={true}
-        exportable={true}
+        keyExtractor={(row) => row.id}
+        searchFields={[
+          (row) => row.user,
+          (row) => row.userId,
+          (row) => row.action,
+          (row) => row.module,
+          (row) => row.details,
+          (row) => row.ipAddress,
+        ]}
+        searchPlaceholder="Search audit logs..."
         pageSize={15}
+        headerExtra={
+          <button
+            onClick={() =>
+              exportCSV(
+                "audit-logs",
+                [
+                  "Timestamp",
+                  "User",
+                  "User ID",
+                  "Action",
+                  "Module",
+                  "Details",
+                  "IP Address",
+                ],
+                logs.map((l) => [
+                  l.timestamp,
+                  l.user,
+                  l.userId,
+                  l.action,
+                  l.module,
+                  l.details,
+                  l.ipAddress,
+                ]),
+              )
+            }
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            <Download className="w-4 h-4" /> Export
+          </button>
+        }
       />
     </div>
   );

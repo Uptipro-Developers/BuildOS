@@ -1,8 +1,11 @@
 import { useParams, useNavigate } from "react-router";
-import { useState } from "react";
-import { ArrowLeft, Award, CheckCircle, XCircle, AlertTriangle, DollarSign, Users, Briefcase, Calculator, Plus, BadgeCheck, Check } from "lucide-react";
-import { getProjectById, getTasksByProject, vendors, fmtCurrency } from "./mockData";
-import type { Vendor } from "./types";
+import { useState, useEffect } from "react";
+import { getCurrencySymbol, formatNumberByGeneralSettings } from "../../utils/generalSettings";
+import { ArrowLeft, CheckCircle, XCircle, AlertTriangle, DollarSign, Briefcase, Calculator, Plus, BadgeCheck, Check } from "lucide-react";
+import { getProjectById, fmtCurrency } from "./mockData";
+import { listVendors } from "../../api/vendors";
+import { listConstructionTasks } from "../../api/construction-tasks";
+import type { Vendor, Task } from "./types";
 
 const statusStyles: Record<string, { badge: string; label: string }> = {
   Awarded: { badge: "bg-blue-100 text-blue-700", label: "Awarded" },
@@ -16,15 +19,16 @@ export function ResourceDetailPage() {
   const projectId = id;
   const navigate = useNavigate();
   const project = getProjectById(projectId!);
-  const vendor = vendors.find(v => v.id === vendorId && v.projectId === projectId);
+  const [vendor, setVendor] = useState<Vendor | null>(null);
+  const [projectTasks, setProjectTasks] = useState<Task[]>([]);
 
-  const [skilledCount, setSkilledCount] = useState(vendor?.skilledCount ?? 0);
-  const [skilledDays, setSkilledDays] = useState(vendor?.skilledDays ?? 0);
-  const [skilledRate, setSkilledRate] = useState(vendor?.skilledRate ?? 0);
-  const [unskilledCount, setUnskilledCount] = useState(vendor?.unskilledCount ?? 0);
-  const [unskilledDays, setUnskilledDays] = useState(vendor?.unskilledDays ?? 0);
-  const [unskilledRate, setUnskilledRate] = useState(vendor?.unskilledRate ?? 0);
-  const [margin, setMargin] = useState(vendor?.vendorMargin ?? 30);
+  const [skilledCount, setSkilledCount] = useState(0);
+  const [skilledDays, setSkilledDays] = useState(0);
+  const [skilledRate, setSkilledRate] = useState(0);
+  const [unskilledCount, setUnskilledCount] = useState(0);
+  const [unskilledDays, setUnskilledDays] = useState(0);
+  const [unskilledRate, setUnskilledRate] = useState(0);
+  const [margin, setMargin] = useState(30);
   const [result, setResult] = useState<{
     expectedCost: number;
     quotedCost: number;
@@ -32,7 +36,36 @@ export function ResourceDetailPage() {
     verdict: "within" | "slightly-over" | "significantly-over";
   } | null>(null);
   const [selectedWPs, setSelectedWPs] = useState<string[]>([]);
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    listVendors(projectId)
+      .then((vs) => {
+        if (!active) return;
+        const v = vs.find((x) => x.id === vendorId) ?? null;
+        setVendor(v);
+        if (v) {
+          setSkilledCount(v.skilledCount ?? 0);
+          setSkilledDays(v.skilledDays ?? 0);
+          setSkilledRate(v.skilledRate ?? 0);
+          setUnskilledCount(v.unskilledCount ?? 0);
+          setUnskilledDays(v.unskilledDays ?? 0);
+          setUnskilledRate(v.unskilledRate ?? 0);
+          setMargin(v.vendorMargin ?? 30);
+        }
+      })
+      .catch(() => {});
+    listConstructionTasks(projectId)
+      .then((d) => {
+        if (active) setProjectTasks(d);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [projectId, vendorId]);
 
   if (!vendor) {
     return (
@@ -64,14 +97,14 @@ export function ResourceDetailPage() {
     );
   }
 
-  const tasks = getTasksByProject(projectId!).filter(t => t.vendorId === vendorId);
+  const tasks = projectTasks.filter(t => t.vendorId === vendorId);
   const workPackages = tasks.filter(t => t.level === 4);
 
   function handleCalculate() {
     const skilledLabor = skilledCount * skilledDays * skilledRate;
     const unskilledLabor = unskilledCount * unskilledDays * unskilledRate;
     const expectedCost = (skilledLabor + unskilledLabor) * (1 + margin / 100);
-    const quotedCost = vendor.contractSum;
+    const quotedCost = vendor?.contractSum ?? 0;
     const ratio = quotedCost / expectedCost;
     let verdict: "within" | "slightly-over" | "significantly-over";
     if (ratio <= 1.1) verdict = "within";
@@ -189,7 +222,7 @@ export function ResourceDetailPage() {
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-0.5">Man-days Estimate</p>
-                <p className="text-sm font-medium text-gray-900">{vendor.mandaysEstimate.toLocaleString()}</p>
+                <p className="text-sm font-medium text-gray-900">{formatNumberByGeneralSettings(vendor.mandaysEstimate)}</p>
               </div>
             </div>
           </div>
@@ -226,7 +259,7 @@ export function ResourceDetailPage() {
 
           {/* Available Work Packages */}
           {(() => {
-            const allTasks = getTasksByProject(projectId!);
+            const allTasks = projectTasks;
             const availableWPs = allTasks.filter(t => t.level === 4 && !vendor.assignedWorkPackages.includes(t.id));
             if (availableWPs.length === 0) return null;
             return (
@@ -310,7 +343,7 @@ export function ResourceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-0.5">Rate (₦/day)</label>
+                  <label className="block text-xs text-gray-500 mb-0.5">Rate ({getCurrencySymbol()}/day)</label>
                   <input
                     type="number" value={skilledRate}
                     onChange={e => setSkilledRate(Number(e.target.value))}
@@ -340,7 +373,7 @@ export function ResourceDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-0.5">Rate (₦/day)</label>
+                  <label className="block text-xs text-gray-500 mb-0.5">Rate ({getCurrencySymbol()}/day)</label>
                   <input
                     type="number" value={unskilledRate}
                     onChange={e => setUnskilledRate(Number(e.target.value))}

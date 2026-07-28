@@ -114,7 +114,7 @@ export function SearchableMultiSelect({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={searchPlaceholder}
                 className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2"
-                style={{ focusRing: "#E8973A" }}
+                style={{ ["--tw-ring-color" as any]: "#E8973A" }}
                 onKeyDown={(e) => {
                   if (e.key === "Escape") { setOpen(false); setQuery(""); }
                 }}

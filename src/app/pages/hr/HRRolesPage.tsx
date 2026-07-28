@@ -1,5 +1,19 @@
-import { useState } from "react";
-import { Briefcase, Plus, Search, Edit, Trash2, X, ChevronUp, ChevronDown, Users } from "lucide-react";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { getJobRoles, createJobRole, deleteJobRole } from "../../api/job-roles";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
+import { getCurrencySymbol } from "../../utils/generalSettings";
+import {
+  Briefcase,
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  X,
+  ChevronUp,
+  ChevronDown,
+  Users,
+} from "lucide-react";
 
 interface Role {
   id: string;
@@ -13,25 +27,7 @@ interface Role {
   skills: string[];
 }
 
-const initialRoles: Role[] = [
-  { id: "ROLE-001", title: "Project Manager", department: "Operations", gradeLevel: "Level 9", minSalary: "480,000", maxSalary: "650,000", headcount: 2, responsibilities: ["Lead project delivery from inception to completion", "Coordinate cross-functional teams", "Manage project budget and schedule", "Stakeholder reporting"], skills: ["PMP", "MS Project", "Risk Management", "Leadership"] },
-  { id: "ROLE-002", title: "Site Engineer", department: "Engineering", gradeLevel: "Level 7", minSalary: "280,000", maxSalary: "380,000", headcount: 6, responsibilities: ["Supervise day-to-day site activities", "Enforce quality standards", "Review technical drawings", "Site safety inspections"], skills: ["AutoCAD", "Civil Engineering", "Structural Analysis", "Quality Control"] },
-  { id: "ROLE-003", title: "Structural Engineer", department: "Engineering", gradeLevel: "Level 8", minSalary: "350,000", maxSalary: "480,000", headcount: 3, responsibilities: ["Structural design and analysis", "Review load calculations", "Coordinate with architects", "Produce structural drawings"], skills: ["STAAD.Pro", "SAP2000", "Revit Structure", "BS8110"] },
-  { id: "ROLE-004", title: "Site Foreman", department: "Engineering", gradeLevel: "Level 5", minSalary: "150,000", maxSalary: "220,000", headcount: 8, responsibilities: ["Direct daily labour activities", "Material quantity tracking", "Shift coordination", "Progress reporting"], skills: ["Team Supervision", "Blueprint Reading", "Material Management"] },
-  { id: "ROLE-005", title: "Site Supervisor", department: "Engineering", gradeLevel: "Level 6", minSalary: "200,000", maxSalary: "280,000", headcount: 5, responsibilities: ["Oversee multiple foremen", "Quality assurance checks", "Subcontractor coordination", "Daily logs and reporting"], skills: ["Construction Management", "QA/QC", "Safety Compliance"] },
-  { id: "ROLE-006", title: "Civil Engineer", department: "Engineering", gradeLevel: "Level 7", minSalary: "280,000", maxSalary: "370,000", headcount: 4, responsibilities: ["Design of civil infrastructure", "Land survey assessment", "Drainage and road design", "Technical specification writing"], skills: ["Civil 3D", "QGIS", "Drainage Design", "Survey"] },
-  { id: "ROLE-007", title: "MEP Engineer", department: "Engineering", gradeLevel: "Level 7", minSalary: "290,000", maxSalary: "390,000", headcount: 2, responsibilities: ["Mechanical, Electrical & Plumbing coordination", "M&E drawings review", "Commissioning support", "Technical compliance"], skills: ["MEP Design", "Revit MEP", "AutoCAD MEP"] },
-  { id: "ROLE-008", title: "Quantity Surveyor", department: "Procurement", gradeLevel: "Level 7", minSalary: "270,000", maxSalary: "360,000", headcount: 3, responsibilities: ["BoQ preparation and analysis", "Cost estimation", "Contract valuation", "Vendor cost comparison"], skills: ["CostX", "BoQ Preparation", "Tendering", "Contract Admin"] },
-  { id: "ROLE-009", title: "HSE Officer", department: "Health & Safety", gradeLevel: "Level 6", minSalary: "210,000", maxSalary: "290,000", headcount: 4, responsibilities: ["Site safety compliance auditing", "Incident investigation", "Safety induction for new hires", "PPE management"], skills: ["NEBOSH", "ISO 45001", "Incident Investigation", "HSE Auditing"] },
-  { id: "ROLE-010", title: "HR Officer", department: "Human Resources", gradeLevel: "Level 6", minSalary: "200,000", maxSalary: "270,000", headcount: 2, responsibilities: ["Recruitment and onboarding", "Employee records management", "Leave and attendance coordination", "Policy implementation"], skills: ["HRM", "HRIS", "Labour Law", "Recruitment"] },
-  { id: "ROLE-011", title: "Accountant", department: "Finance", gradeLevel: "Level 7", minSalary: "260,000", maxSalary: "340,000", headcount: 3, responsibilities: ["Budget tracking and reporting", "Accounts payable/receivable", "Monthly financial closes", "Audit support"], skills: ["ICAN", "QuickBooks", "Financial Reporting", "IFRS"] },
-  { id: "ROLE-012", title: "Finance Analyst", department: "Finance", gradeLevel: "Level 6", minSalary: "220,000", maxSalary: "300,000", headcount: 2, responsibilities: ["Data-driven financial analysis", "Variance reporting", "Forecasting and modelling", "Dashboard maintenance"], skills: ["Excel Advanced", "Power BI", "Financial Modeling"] },
-  { id: "ROLE-013", title: "IT Officer", department: "IT & Systems", gradeLevel: "Level 6", minSalary: "230,000", maxSalary: "310,000", headcount: 2, responsibilities: ["IT infrastructure and support", "ERP system administration", "Network and cybersecurity monitoring", "User account management"], skills: ["Linux", "Networking", "ERP Admin", "Cybersecurity"] },
-  { id: "ROLE-014", title: "Admin Officer", department: "Administration", gradeLevel: "Level 5", minSalary: "140,000", maxSalary: "200,000", headcount: 4, responsibilities: ["Office administration and facility management", "Vendor coordination", "Travel and logistics support", "Document management"], skills: ["Office Suite", "Facility Management", "Documentation"] },
-];
-
-const depts = ["All Departments", ...Array.from(new Set(initialRoles.map(r => r.department))).sort()];
-const grades = ["All Grades", ...Array.from(new Set(initialRoles.map(r => r.gradeLevel))).sort()];
+// depts and grades computed inside component from state
 
 const gradeColors: Record<string, string> = {
   "Level 9": "bg-purple-100 text-purple-700",
@@ -42,6 +38,7 @@ const gradeColors: Record<string, string> = {
 };
 
 export function HRRolesPage() {
+  const [roles, setRoles] = useState<Role[]>([]);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");
   const [gradeFilter, setGradeFilter] = useState("All Grades");
@@ -50,25 +47,80 @@ export function HRRolesPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newDept, setNewDept] = useState("");
   const [newGrade, setNewGrade] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
 
-  const filtered = initialRoles.filter(r => {
-    const matchS = r.title.toLowerCase().includes(search.toLowerCase()) || r.department.toLowerCase().includes(search.toLowerCase());
-    const matchD = deptFilter === "All Departments" || r.department === deptFilter;
+  function loadRoles() {
+    return getJobRoles()
+      .then((jr) =>
+        setRoles(
+          jr.map((r) => ({
+            id: r.id,
+            title: r.title,
+            department: r.department,
+            gradeLevel: r.gradeLevel ?? "",
+            minSalary: r.minSalary != null ? String(r.minSalary) : "",
+            maxSalary: r.maxSalary != null ? String(r.maxSalary) : "",
+            headcount: r.headcount,
+            responsibilities: r.responsibilities,
+            skills: r.skills,
+          })),
+        ),
+      )
+      .catch(() => {});
+  }
+
+  useEffect(() => {
+    loadRoles();
+  }, []);
+
+  function handleDeleteRole() {
+    if (!deleteTarget) return;
+    deleteJobRole(deleteTarget.id)
+      .then(() => loadRoles())
+      .then(() => {
+        setDeleteTarget(null);
+        toast.success("Role deleted");
+      })
+      .catch(() => toast.error("Failed to delete role. Please try again."));
+  }
+
+  const depts = [
+    "All Departments",
+    ...Array.from(new Set(roles.map((r) => r.department))).sort(),
+  ];
+  const grades = [
+    "All Grades",
+    ...Array.from(new Set(roles.map((r) => r.gradeLevel))).sort(),
+  ];
+
+  const filtered = roles.filter((r) => {
+    const matchS =
+      r.title.toLowerCase().includes(search.toLowerCase()) ||
+      r.department.toLowerCase().includes(search.toLowerCase());
+    const matchD =
+      deptFilter === "All Departments" || r.department === deptFilter;
     const matchG = gradeFilter === "All Grades" || r.gradeLevel === gradeFilter;
     return matchS && matchD && matchG;
   });
 
-  const totalHeadcount = initialRoles.reduce((s, r) => s + r.headcount, 0);
+  const totalHeadcount = roles.reduce((s, r) => s + r.headcount, 0);
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Roles & Positions</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{initialRoles.length} defined roles · {totalHeadcount} total positions filled</p>
+          <h1 className="text-2xl font-semibold text-gray-900">
+            Roles & Positions
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {roles.length} defined roles · {totalHeadcount} total positions
+            filled
+          </p>
         </div>
-        <button onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800">
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800"
+        >
           <Plus className="w-3.5 h-3.5" /> Add Role
         </button>
       </div>
@@ -76,11 +128,11 @@ export function HRRolesPage() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: "Total Roles Defined", value: initialRoles.length },
+          { label: "Total Roles Defined", value: roles.length },
           { label: "Positions Filled", value: totalHeadcount },
           { label: "Departments Covered", value: 8 },
           { label: "Grade Levels Used", value: 5 },
-        ].map(s => (
+        ].map((s) => (
           <div key={s.label} className="bg-indigo-50 rounded-lg p-4">
             <p className="text-xs text-gray-500">{s.label}</p>
             <p className="text-2xl font-bold text-indigo-700 mt-1">{s.value}</p>
@@ -92,17 +144,31 @@ export function HRRolesPage() {
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="Search roles or departments..."
-            value={search} onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+          <input
+            type="text"
+            placeholder="Search roles or departments..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+          />
         </div>
-        <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
-          {depts.map(d => <option key={d}>{d}</option>)}
+        <select
+          value={deptFilter}
+          onChange={(e) => setDeptFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+        >
+          {depts.map((d) => (
+            <option key={d}>{d}</option>
+          ))}
         </select>
-        <select value={gradeFilter} onChange={e => setGradeFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white">
-          {grades.map(g => <option key={g}>{g}</option>)}
+        <select
+          value={gradeFilter}
+          onChange={(e) => setGradeFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+        >
+          {grades.map((g) => (
+            <option key={g}>{g}</option>
+          ))}
         </select>
       </div>
 
@@ -111,42 +177,79 @@ export function HRRolesPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-left">
-              <th className="px-4 py-3 text-xs font-medium text-gray-500">Role / Position</th>
-              <th className="px-4 py-3 text-xs font-medium text-gray-500">Department</th>
-              <th className="px-4 py-3 text-xs font-medium text-gray-500">Grade Level</th>
-              <th className="px-4 py-3 text-xs font-medium text-gray-500">Salary Range</th>
-              <th className="px-4 py-3 text-xs font-medium text-gray-500">Headcount</th>
+              <th className="px-4 py-3 text-xs font-medium text-gray-500">
+                Role / Position
+              </th>
+              <th className="px-4 py-3 text-xs font-medium text-gray-500">
+                Department
+              </th>
+              <th className="px-4 py-3 text-xs font-medium text-gray-500">
+                Grade Level
+              </th>
+              <th className="px-4 py-3 text-xs font-medium text-gray-500">
+                Salary Range
+              </th>
+              <th className="px-4 py-3 text-xs font-medium text-gray-500">
+                Headcount
+              </th>
               <th className="px-4 py-3 w-24"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtered.map(role => {
+            {filtered.map((role) => {
               const isOpen = expanded === role.id;
               return (
                 <>
-                  <tr key={role.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpanded(isOpen ? null : role.id)}>
+                  <tr
+                    key={role.id}
+                    className="hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setExpanded(isOpen ? null : role.id)}
+                  >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Briefcase className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-                        <span className="font-medium text-gray-900">{role.title}</span>
+                        <span className="font-medium text-gray-900">
+                          {role.title}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{role.department}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded font-medium ${gradeColors[role.gradeLevel] ?? "bg-gray-100 text-gray-600"}`}>{role.gradeLevel}</span>
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      {role.department}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-600">{role.minSalary} – {role.maxSalary}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded font-medium ${gradeColors[role.gradeLevel] ?? "bg-gray-100 text-gray-600"}`}
+                      >
+                        {role.gradeLevel}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {role.minSalary} – {role.maxSalary}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-gray-400" />
-                        <span className="text-sm font-medium text-gray-700">{role.headcount}</span>
+                        <span className="text-sm font-medium text-gray-700">
+                          {role.headcount}
+                        </span>
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                        <button className="p-1 rounded hover:bg-gray-100 text-gray-400"><Edit className="w-3.5 h-3.5" /></button>
-                        <button className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                        {isOpen ? <ChevronUp className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+                      <div
+                        className="flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button className="p-1 rounded hover:bg-gray-100 text-gray-400">
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500" onClick={() => setDeleteTarget(role)}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        {isOpen ? (
+                          <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -155,15 +258,36 @@ export function HRRolesPage() {
                       <td colSpan={6} className="px-6 py-4">
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Key Responsibilities</p>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                              Key Responsibilities
+                            </p>
                             <ul className="space-y-1">
-                              {role.responsibilities.map(r => <li key={r} className="text-sm text-gray-700 flex gap-2"><span className="text-indigo-400 mt-1">•</span>{r}</li>)}
+                              {role.responsibilities.map((r) => (
+                                <li
+                                  key={r}
+                                  className="text-sm text-gray-700 flex gap-2"
+                                >
+                                  <span className="text-indigo-400 mt-1">
+                                    •
+                                  </span>
+                                  {r}
+                                </li>
+                              ))}
                             </ul>
                           </div>
                           <div>
-                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Required Skills</p>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                              Required Skills
+                            </p>
                             <div className="flex flex-wrap gap-2">
-                              {role.skills.map(s => <span key={s} className="text-xs bg-white border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded">{s}</span>)}
+                              {role.skills.map((s) => (
+                                <span
+                                  key={s}
+                                  className="text-xs bg-white border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded"
+                                >
+                                  {s}
+                                </span>
+                              ))}
                             </div>
                           </div>
                         </div>
@@ -183,48 +307,148 @@ export function HRRolesPage() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="font-semibold text-gray-900">Add New Role</h2>
-              <button onClick={() => setShowCreate(false)} className="p-1 rounded hover:bg-gray-100"><X className="w-4 h-4 text-gray-500" /></button>
+              <button
+                onClick={() => setShowCreate(false)}
+                className="p-1 rounded hover:bg-gray-100"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Job Title</label>
-                <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="e.g. Senior Civil Engineer"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Job Title
+                </label>
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="e.g. Senior Civil Engineer"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
-                <select value={newDept} onChange={e => setNewDept(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Department
+                </label>
+                <select
+                  value={newDept}
+                  onChange={(e) => setNewDept(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                >
                   <option value="">Select department...</option>
-                  {depts.slice(1).map(d => <option key={d}>{d}</option>)}
+                  {depts.slice(1).map((d) => (
+                    <option key={d}>{d}</option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Grade Level</label>
-                <select value={newGrade} onChange={e => setNewGrade(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Grade Level
+                </label>
+                <select
+                  value={newGrade}
+                  onChange={(e) => setNewGrade(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                >
                   <option value="">Select grade...</option>
-                  {["Level 5", "Level 6", "Level 7", "Level 8", "Level 9", "Level 10"].map(g => <option key={g}>{g}</option>)}
+                  {[
+                    "Level 5",
+                    "Level 6",
+                    "Level 7",
+                    "Level 8",
+                    "Level 9",
+                    "Level 10",
+                  ].map((g) => (
+                    <option key={g}>{g}</option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Min Salary</label>
-                  <input placeholder="₦150,000" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Min Salary
+                  </label>
+                  <input
+                    placeholder={`${getCurrencySymbol()}150,000`}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Max Salary</label>
-                  <input placeholder="₦280,000" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Max Salary
+                  </label>
+                  <input
+                    placeholder={`${getCurrencySymbol()}280,000`}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
                 </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-5">
-              <button onClick={() => setShowCreate(false)} className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800">Create Role</button>
+              <button
+                onClick={() => setShowCreate(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800"
+                onClick={() => {
+                  if (!newTitle || !newDept) return;
+                  createJobRole({
+                    title: newTitle,
+                    department: newDept,
+                    gradeLevel: newGrade,
+                    headcount: 1,
+                    responsibilities: [],
+                    skills: [],
+                  })
+                    .then((r) => {
+                      setRoles((prev) => [
+                        ...prev,
+                        {
+                          id: r.id,
+                          title: r.title,
+                          department: r.department,
+                          gradeLevel: r.gradeLevel ?? "",
+                          minSalary:
+                            r.minSalary != null ? String(r.minSalary) : "",
+                          maxSalary:
+                            r.maxSalary != null ? String(r.maxSalary) : "",
+                          headcount: r.headcount,
+                          responsibilities: r.responsibilities,
+                          skills: r.skills,
+                        },
+                      ]);
+                      toast.success("Role created");
+                    })
+                    .catch(() => toast.error("Failed to create role. Please try again."));
+                  setShowCreate(false);
+                  setNewTitle("");
+                  setNewDept("");
+                  setNewGrade("");
+                }}
+              >
+                Create Role
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Role?"
+        description={
+          deleteTarget
+            ? `This will permanently remove "${deleteTarget.title}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={handleDeleteRole}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

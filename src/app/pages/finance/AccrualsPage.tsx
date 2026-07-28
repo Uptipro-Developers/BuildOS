@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
-  ScrollText, Plus, Search, X, Save, CheckCircle, XCircle, RefreshCw,
-  ChevronDown, AlertTriangle, Send,
+  ScrollText, Plus, X, Save, CheckCircle, XCircle, RefreshCw,
+  AlertTriangle, Send,
 } from "lucide-react";
 import { useFinance } from "../../stores/financeStore";
 import { exportCSV } from "../../utils/exportCSV";
@@ -47,7 +47,6 @@ export function AccrualsPage() {
   const { getNextId } = useNumbering();
 
   // Filters
-  const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<AccrualType | "All">("All");
   const [statusFilter, setStatusFilter] = useState<AccrualStatus | "All">("All");
 
@@ -64,8 +63,6 @@ export function AccrualsPage() {
   const filtered = accruals.filter(a => {
     if (typeFilter !== "All" && a.type !== typeFilter) return false;
     if (statusFilter !== "All" && a.status !== statusFilter) return false;
-    if (search && ![a.title, a.description, a.reference, a.sourceRef, a.sourceModule]
-      .some(f => f.toLowerCase().includes(search.toLowerCase()))) return false;
     return true;
   });
 
@@ -202,7 +199,6 @@ export function AccrualsPage() {
       <span className="text-sm text-gray-500">{a.reversalDate}</span>
     ), sortable: true, filterable: false },
     { key: "actions", label: "Actions", render: a => {
-      const isPending = a.status === "draft" || a.status === "pending";
       return (
         <div className="flex items-center justify-end gap-1">
           {a.status === "draft" && (
@@ -351,7 +347,7 @@ export function AccrualsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {form.lines.map((line, i) => (
+                      {form.lines.map((line) => (
                         <tr key={line.id}>
                           <td className="px-4 py-2">
                             <select value={line.account} onChange={e => updateLine(line.id, "account", e.target.value)}
@@ -366,11 +362,11 @@ export function AccrualsPage() {
                           </td>
                           <td className="px-4 py-2">
                             <input type="number" value={line.debit || ""} onChange={e => updateLine(line.id, "debit", parseFloat(e.target.value) || 0)}
-                              placeholder="0.00" disabled={!!line.credit} className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right" min={0} />
+                              placeholder="0.00" className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right" min={0} />
                           </td>
                           <td className="px-4 py-2">
                             <input type="number" value={line.credit || ""} onChange={e => updateLine(line.id, "credit", parseFloat(e.target.value) || 0)}
-                              placeholder="0.00" disabled={!!line.debit} className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right" min={0} />
+                              placeholder="0.00" className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right" min={0} />
                           </td>
                           <td className="px-4 py-2 text-center">
                             {form.lines.length > 2 && (

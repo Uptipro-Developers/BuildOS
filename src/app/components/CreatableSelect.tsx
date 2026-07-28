@@ -11,7 +11,7 @@ interface CreatableSelectProps {
   options: Option[];
   value: string;
   onChange: (value: string, option?: Option) => void;
-  onCreateOption?: (inputValue: string) => Option | void;
+  onCreateOption?: (inputValue: string, metaValue?: string) => Option | void;
   placeholder?: string;
   label?: string;
   createLabel?: string; // e.g. "Add currency"
@@ -49,7 +49,10 @@ export function CreatableSelect({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
         setOpen(false);
         setQuery("");
         setCreating(false);
@@ -65,7 +68,7 @@ export function CreatableSelect({
     (o) =>
       o.label.toLowerCase().includes(query.toLowerCase()) ||
       o.value.toLowerCase().includes(query.toLowerCase()) ||
-      (o.meta && o.meta.toLowerCase().includes(query.toLowerCase()))
+      (o.meta && o.meta.toLowerCase().includes(query.toLowerCase())),
   );
 
   const handleSelect = (option: Option) => {
@@ -84,7 +87,7 @@ export function CreatableSelect({
 
     let resultOption = newOption;
     if (onCreateOption) {
-      const result = onCreateOption(newLabel.trim());
+      const result = onCreateOption(newLabel.trim(), newMeta.trim());
       if (result) resultOption = result;
     }
 
@@ -115,13 +118,19 @@ export function CreatableSelect({
           {selectedOption ? (
             <span className="flex items-center gap-2">
               {selectedOption.meta && (
-                <span className="inline-block w-6 text-center font-mono text-gray-500 text-xs">{selectedOption.meta}</span>
+                <span className="inline-block w-6 text-center font-mono text-gray-500 text-xs">
+                  {selectedOption.meta}
+                </span>
               )}
               {selectedOption.label}
             </span>
-          ) : placeholder}
+          ) : (
+            placeholder
+          )}
         </span>
-        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown
+          className={`w-4 h-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
 
       {/* Dropdown */}
@@ -148,7 +157,9 @@ export function CreatableSelect({
           {/* Options list */}
           <div className="max-h-52 overflow-y-auto">
             {filtered.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-gray-400">No results found</p>
+              <p className="px-3 py-2 text-sm text-gray-400">
+                No results found
+              </p>
             ) : (
               filtered.map((option) => (
                 <button
@@ -158,10 +169,14 @@ export function CreatableSelect({
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-indigo-50 transition-colors"
                 >
                   {option.meta && (
-                    <span className="inline-block w-6 text-center font-mono text-gray-500 text-xs shrink-0">{option.meta}</span>
+                    <span className="inline-block w-6 text-center font-mono text-gray-500 text-xs shrink-0">
+                      {option.meta}
+                    </span>
                   )}
                   <span className="flex-1">{option.label}</span>
-                  {option.value === value && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
+                  {option.value === value && (
+                    <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                  )}
                 </button>
               ))
             )}
@@ -203,7 +218,11 @@ export function CreatableSelect({
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setCreating(false); setNewLabel(""); setNewMeta(""); }}
+                      onClick={() => {
+                        setCreating(false);
+                        setNewLabel("");
+                        setNewMeta("");
+                      }}
                       className="flex items-center justify-center gap-1 px-2 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 transition-colors"
                     >
                       <X className="w-3 h-3" />

@@ -30,7 +30,11 @@ interface WorkflowConfig {
   workflows: ProcessWorkflow[];
 }
 
-const DEFAULT_PROCESSES: { label: string; app: string; requiresApproval: boolean }[] = [
+const DEFAULT_PROCESSES: {
+  label: string;
+  app: string;
+  requiresApproval: boolean;
+}[] = [
   { label: "Request Material", app: "ESS", requiresApproval: true },
   { label: "Submit Expense", app: "ESS", requiresApproval: true },
   { label: "Request Leave", app: "ESS", requiresApproval: true },
@@ -38,7 +42,10 @@ const DEFAULT_PROCESSES: { label: string; app: string; requiresApproval: boolean
   { label: "Request Change", app: "ESS", requiresApproval: true },
 ];
 
-export function getPipelineForRequest(requestType: string, workflows: ProcessWorkflow[]): PipelineStep[] {
+export function getPipelineForRequest(
+  requestType: string,
+  workflows: ProcessWorkflow[],
+): PipelineStep[] {
   const processLabel = {
     finance: "Submit Expense",
     leave: "Request Leave",
@@ -49,7 +56,7 @@ export function getPipelineForRequest(requestType: string, workflows: ProcessWor
 
   if (!processLabel) return [];
 
-  const wf = workflows.find(w => w.process === processLabel);
+  const wf = workflows.find((w) => w.process === processLabel);
   if (!wf) return defaultPipeline(processLabel);
 
   if (wf.workflowType === "single" && wf.approver) {
@@ -79,7 +86,11 @@ export function getPipelineForRequest(requestType: string, workflows: ProcessWor
   if (wf.workflowType === "group" && wf.groupApprovers) {
     return [
       { label: "Submit Request", actor: "You", status: "completed" },
-      { label: "Group Review", actor: wf.groupApprovers.join(", "), status: "active" },
+      {
+        label: "Group Review",
+        actor: wf.groupApprovers.join(", "),
+        status: "active",
+      },
       { label: "Complete", status: "pending" },
     ];
   }
@@ -120,11 +131,13 @@ function defaultPipeline(processLabel: string): PipelineStep[] {
       { label: "Implemented", status: "pending" },
     ],
   };
-  return steps[processLabel] ?? [
-    { label: "Submitted", actor: "You", status: "completed" },
-    { label: "Pending Review", status: "active" },
-    { label: "Approved", status: "pending" },
-  ];
+  return (
+    steps[processLabel] ?? [
+      { label: "Submitted", actor: "You", status: "completed" },
+      { label: "Pending Review", status: "active" },
+      { label: "Approved", status: "pending" },
+    ]
+  );
 }
 
 let _config: WorkflowConfig = {
@@ -134,7 +147,7 @@ let _config: WorkflowConfig = {
 const _listeners = new Set<() => void>();
 
 function notify() {
-  _listeners.forEach(l => l());
+  _listeners.forEach((l) => l());
 }
 
 export function getWorkflows(): ProcessWorkflow[] {
@@ -154,9 +167,11 @@ export function useWorkflows(): { workflows: ProcessWorkflow[] } {
   const [, forceUpdate] = useState(0);
 
   useEffect(() => {
-    const listener = () => forceUpdate(n => n + 1);
+    const listener = () => forceUpdate((n) => n + 1);
     _listeners.add(listener);
-    return () => { _listeners.delete(listener); };
+    return () => {
+      _listeners.delete(listener);
+    };
   }, []);
 
   return { workflows: _config.workflows };

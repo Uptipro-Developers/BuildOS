@@ -1,6 +1,10 @@
 import { Outlet, useParams, useNavigate, NavLink } from "react-router";
 import { ArrowLeft } from "lucide-react";
-import { getProjectById, ragColor, ragLabel } from "./mockData";
+import { useEffect, useState } from "react";
+import { ragColor, ragLabel } from "./mockData";
+import { getConstructionProject } from "../../api/projects";
+import { upsertProjectCache } from "./projectStore";
+import type { Project } from "./types";
 
 const tabs = [
   { label: "Overview", path: "overview", icon: "📋" },
@@ -22,6 +26,32 @@ const tabs = [
 export function ProjectTabsLayout() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    getConstructionProject(id)
+      .then((p) => {
+        if (!active) return;
+        upsertProjectCache(p as Project);
+        setProject(p as Project);
+      })
+      .catch(() => {
+        if (active) setProject(null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id]);
 
   if (!id) {
     return (
@@ -31,14 +61,21 @@ export function ProjectTabsLayout() {
     );
   }
 
-  const project = getProjectById(id);
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <p className="text-gray-500">Loading project…</p>
+      </div>
+    );
+  }
+
   if (!project) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
           <p className="text-lg font-semibold text-gray-900">Project not found</p>
           <p className="text-sm text-gray-500 mt-1">No project matches ID &ldquo;{id}&rdquo;.</p>
-          <button onClick={() => navigate("/apps/construction")} className="mt-4 px-4 py-2 text-white rounded-lg text-sm font-medium" style={{ backgroundColor: "#E8973A" }}>
+          <button onClick={() => navigate("/apps/construction/projects")} className="mt-4 px-4 py-2 text-white rounded-lg text-sm font-medium" style={{ backgroundColor: "#E8973A" }}>
             Back to Projects
           </button>
         </div>
@@ -52,7 +89,7 @@ export function ProjectTabsLayout() {
     <div style={{ backgroundColor: "#F7F8FA" }} className="min-h-full space-y-5">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate("/apps/construction")} className="flex items-center gap-1.5 text-sm" style={{ color: "#718096" }}>
+          <button onClick={() => navigate("/apps/construction/projects")} className="flex items-center gap-1.5 text-sm" style={{ color: "#718096" }}>
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
           <div className="w-px h-5" style={{ backgroundColor: "#E2E8F0" }} />

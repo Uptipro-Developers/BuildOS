@@ -1,6 +1,24 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from "react";
 import type { Vendor } from "../pages/construction/types";
-import { vendors as initialVendors } from "../pages/construction/mockData";
+import {
+  listContractors,
+  createContractor as apiCreateContractor,
+  updateContractor as apiUpdateContractor,
+  deleteContractor as apiDeleteContractor,
+} from "../api/contractors";
+import {
+  listVendors,
+  createVendor as apiCreateVendor,
+  updateVendor as apiUpdateVendor,
+  deleteVendor as apiDeleteVendor,
+} from "../api/vendors";
 
 export interface IndividualContractor {
   id: string;
@@ -29,45 +47,85 @@ interface ResourceContextType {
 
 const ResourceContext = createContext<ResourceContextType | null>(null);
 
-const initialContractors: IndividualContractor[] = [
-  { id: "IC-001", name: "Babatunde Welder", trade: "Welding", payRate: 25000, payRateUnit: "daily", skilledCount: 3, unskilledCount: 5, manDays: 120, status: "Active", mobile: "08023456789" },
-  { id: "IC-002", name: "Femi Scaffolder", trade: "Scaffolding", payRate: 18000, payRateUnit: "daily", skilledCount: 2, unskilledCount: 4, manDays: 90, status: "Active", mobile: "08034567890" },
-  { id: "IC-003", name: "Segun Mason", trade: "Masonry", payRate: 20000, payRateUnit: "daily", skilledCount: 4, unskilledCount: 6, manDays: 180, status: "Active", mobile: "08045678901" },
-  { id: "IC-004", name: "Kunle Electrician", trade: "Electrical", payRate: 30000, payRateUnit: "daily", skilledCount: 2, unskilledCount: 3, manDays: 60, status: "Completed", mobile: "08056789012" },
-];
-
 export function ResourceProvider({ children }: { children: ReactNode }) {
-  const [contractors, setContractors] = useState<IndividualContractor[]>(initialContractors);
-  const [vendors, setVendors] = useState<Vendor[]>(() => initialVendors.map(v => ({ ...v })));
+  const [contractors, setContractors] = useState<IndividualContractor[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+
+  useEffect(() => {
+    listContractors()
+      .then((rows) => {
+        if (rows.length > 0) setContractors(rows as IndividualContractor[]);
+      })
+      .catch(() => {});
+    listVendors()
+      .then((rows) => {
+        if (rows.length > 0) setVendors(rows);
+      })
+      .catch(() => {});
+  }, []);
 
   const addContractor = useCallback((c: Omit<IndividualContractor, "id">) => {
-    const id = `IC-${String(Date.now()).slice(-6)}`;
-    setContractors(prev => [...prev, { ...c, id }]);
+    const tempId = `IC-${String(Date.now()).slice(-6)}`;
+    setContractors((prev) => [...prev, { ...c, id: tempId }]);
+    apiCreateContractor(c as Record<string, any>)
+      .then((saved) => {
+        setContractors((prev) =>
+          prev.map((x) =>
+            x.id === tempId ? (saved as IndividualContractor) : x,
+          ),
+        );
+      })
+      .catch(() => {});
   }, []);
 
-  const updateContractor = useCallback((id: string, c: Partial<IndividualContractor>) => {
-    setContractors(prev => prev.map(x => x.id === id ? { ...x, ...c } : x));
-  }, []);
+  const updateContractor = useCallback(
+    (id: string, c: Partial<IndividualContractor>) => {
+      setContractors((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, ...c } : x)),
+      );
+      apiUpdateContractor(id, c as Record<string, any>).catch(() => {});
+    },
+    [],
+  );
 
   const removeContractor = useCallback((id: string) => {
-    setContractors(prev => prev.filter(x => x.id !== id));
+    setContractors((prev) => prev.filter((x) => x.id !== id));
+    apiDeleteContractor(id).catch(() => {});
   }, []);
 
   const addVendor = useCallback((v: Omit<Vendor, "id">) => {
-    const id = `V-${String(Date.now()).slice(-6)}`;
-    setVendors(prev => [...prev, { ...v, id }]);
+    const tempId = `V-${String(Date.now()).slice(-6)}`;
+    setVendors((prev) => [...prev, { ...v, id: tempId }]);
+    apiCreateVendor(v as Record<string, any>)
+      .then((saved) => {
+        setVendors((prev) => prev.map((x) => (x.id === tempId ? saved : x)));
+      })
+      .catch(() => {});
   }, []);
 
   const updateVendor = useCallback((id: string, v: Partial<Vendor>) => {
-    setVendors(prev => prev.map(x => x.id === id ? { ...x, ...v } : x));
+    setVendors((prev) => prev.map((x) => (x.id === id ? { ...x, ...v } : x)));
+    apiUpdateVendor(id, v as Record<string, any>).catch(() => {});
   }, []);
 
   const removeVendor = useCallback((id: string) => {
-    setVendors(prev => prev.filter(x => x.id !== id));
+    setVendors((prev) => prev.filter((x) => x.id !== id));
+    apiDeleteVendor(id).catch(() => {});
   }, []);
 
   return (
-    <ResourceContext.Provider value={{ contractors, vendors, addContractor, updateContractor, removeContractor, addVendor, updateVendor, removeVendor }}>
+    <ResourceContext.Provider
+      value={{
+        contractors,
+        vendors,
+        addContractor,
+        updateContractor,
+        removeContractor,
+        addVendor,
+        updateVendor,
+        removeVendor,
+      }}
+    >
       {children}
     </ResourceContext.Provider>
   );
@@ -75,7 +133,8 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
 
 export function useResources() {
   const ctx = useContext(ResourceContext);
-  if (!ctx) throw new Error("useResources must be used within ResourceProvider");
+  if (!ctx)
+    throw new Error("useResources must be used within ResourceProvider");
   return ctx;
 }
 

@@ -1,5 +1,5 @@
 import { useState, useMemo, type ReactNode } from "react";
-import { ChevronUp, ChevronDown, ArrowUpDown, Search, X, SlidersHorizontal } from "lucide-react";
+import { ChevronUp, ChevronDown, ArrowUpDown, Search, X } from "lucide-react";
 
 export interface Column<T> {
   key: string;

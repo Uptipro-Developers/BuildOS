@@ -11,6 +11,8 @@
  */
 
 import { useState, useEffect } from "react";
+import { fetchLeaveTypes } from "../api/leave-types";
+import { fetchClaimTypes } from "../api/claim-types";
 
 // ─── Leave Types ──────────────────────────────────────────────────────────────
 
@@ -98,6 +100,50 @@ export function setClaimTypes(types: ClaimType[]) {
   setHRConfig({ ..._config, claimTypes: types });
 }
 
+// ─── Backend hydration ──────────────────────────────────
+
+let _loaded = false;
+
+/**
+ * Load real leave/claim types from the backend once, so ESS submit forms use
+ * valid backend ids (the defaults above are only a fallback for first paint).
+ */
+export async function loadHRConfig(): Promise<void> {
+  if (_loaded) return;
+  _loaded = true;
+  try {
+    const [leaveTypes, claimTypes] = await Promise.all([
+      fetchLeaveTypes(),
+      fetchClaimTypes(),
+    ]);
+    setHRConfig({
+      leaveTypes: leaveTypes.length
+        ? leaveTypes.map((t) => ({
+            id: t.id,
+            name: t.name,
+            daysAllowed: t.daysAllowed,
+            carryOver: t.carryOver,
+            maxCarryOver: t.maxCarryOver,
+            paid: t.paid,
+            approvalsRequired: (t.approvalsRequired >= 2 ? 2 : 1) as 1 | 2,
+            color: t.color,
+            gender: (t.gender as LeaveGender) ?? "All",
+          }))
+        : _config.leaveTypes,
+      claimTypes: claimTypes.length
+        ? claimTypes.map((t) => ({
+            id: t.id,
+            name: t.name,
+            projectBased: t.isProjectBased,
+            description: t.description,
+          }))
+        : _config.claimTypes,
+    });
+  } catch {
+    _loaded = false; // allow a later retry
+  }
+}
+
 // ─── React hook ───────────────────────────────────────────────────────────────
 
 /**
@@ -107,9 +153,12 @@ export function useHRConfig(): HRConfig {
   const [, forceUpdate] = useState(0);
 
   useEffect(() => {
-    const listener = () => forceUpdate(n => n + 1);
+    void loadHRConfig();
+    const listener = () => forceUpdate((n) => n + 1);
     _listeners.add(listener);
-    return () => { _listeners.delete(listener); };
+    return () => {
+      _listeners.delete(listener);
+    };
   }, []);
 
   return _config;

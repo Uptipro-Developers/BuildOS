@@ -2,49 +2,114 @@ import { Outlet } from "react-router";
 import { AppHeader } from "../../components/AppHeader";
 import { CollapsibleSidebar } from "../../components/CollapsibleSidebar";
 import {
-  LayoutDashboard, FileText, PlusCircle, FolderKanban,
-  ListTodo, User, History, CheckSquare, ScrollText, Star,
+  LayoutDashboard,
+  FileText,
+  PlusCircle,
+  FolderKanban,
+  ListTodo,
+  User,
+  History,
+  CheckSquare,
+  ScrollText,
+  Star,
+  AlertTriangle,
 } from "lucide-react";
 
 const sidebarSections = [
   {
     label: "",
     items: [
-      { label: "Dashboard", href: "/apps/ess/dashboard", icon: <LayoutDashboard className="w-4 h-4" />, end: true },
+      {
+        label: "Dashboard",
+        href: "/apps/ess/dashboard",
+        icon: <LayoutDashboard className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
   {
     label: "My Work",
     items: [
-      { label: "My Projects", href: "/apps/ess/projects", icon: <FolderKanban className="w-4 h-4" />, end: true },
-      { label: "My Tasks",    href: "/apps/ess/tasks",    icon: <ListTodo     className="w-4 h-4" />, end: true },
+      {
+        label: "My Projects",
+        href: "/apps/ess/projects",
+        icon: <FolderKanban className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "My Tasks",
+        href: "/apps/ess/tasks",
+        icon: <ListTodo className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
   {
     label: "Requests",
     items: [
-      { label: "My Requests",    href: "/apps/ess",           icon: <FileText    className="w-4 h-4" />, end: true },
-      { label: "Create Request", href: "/apps/ess/submit",    icon: <PlusCircle  className="w-4 h-4" />, end: true },
-      { label: "Approvals",      href: "/apps/ess/approvals", icon: <CheckSquare className="w-4 h-4" />, end: true },
+      {
+        label: "My Requests",
+        href: "/apps/ess/requests",
+        icon: <FileText className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Create Request",
+        href: "/apps/ess/submit",
+        icon: <PlusCircle className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Approvals",
+        href: "/apps/ess/approvals",
+        icon: <CheckSquare className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
   {
     label: "Payroll",
     items: [
-      { label: "Payslip History", href: "/apps/ess/payslips", icon: <ScrollText className="w-4 h-4" />, end: true },
+      {
+        label: "Payslip History",
+        href: "/apps/ess/payslips",
+        icon: <ScrollText className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
   {
     label: "Performance",
     items: [
-      { label: "Appraisals", href: "/apps/ess/appraisals", icon: <Star className="w-4 h-4" />, end: true },
+      {
+        label: "Appraisals",
+        href: "/apps/ess/appraisals",
+        icon: <Star className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Log Issues",
+        href: "/apps/ess/log-issues",
+        icon: <AlertTriangle className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
   {
     label: "Account",
     items: [
-      { label: "My Profile",       href: "/apps/ess/profile",  icon: <User    className="w-4 h-4" />, end: true },
-      { label: "Activity History", href: "/apps/ess/activity", icon: <History className="w-4 h-4" />, end: true },
+      {
+        label: "My Profile",
+        href: "/apps/ess/profile",
+        icon: <User className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Activity History",
+        href: "/apps/ess/activity",
+        icon: <History className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
 ];
