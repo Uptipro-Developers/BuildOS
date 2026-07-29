@@ -17,6 +17,7 @@ import { Plus, Search, Eye, Edit, Trash2, X } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 
 type EntryStatus = "Draft" | "Posted" | "Reversed";
 
@@ -106,6 +107,8 @@ export function JournalEntryPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [viewEntry, setViewEntry] = useState<JournalEntry | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<JournalEntry | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [form, setForm] = useState<{
     date: string;
@@ -210,19 +213,33 @@ export function JournalEntryPage() {
         logChange({ module: "Finance", action: "Created", entityType: "JournalEntry", entityId: created.id, summary: `Journal Entry ${created.id}: ${form.description} [${status}]`, performedBy: "Current User" });
       }
       setModalOpen(false);
+      toast.success(
+        status === "Posted"
+          ? "Journal entry posted."
+          : editId
+            ? "Journal entry updated."
+            : "Journal entry saved as draft.",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save journal entry");
     }
   }
 
-  async function deleteEntry(id: string) {
+  async function deleteEntry() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
     const entry = entries.find((e) => e.id === id);
+    setDeleting(true);
     try {
       await deleteJournalEntry(id);
       setEntries((prev) => prev.filter((e) => e.id !== id));
       if (entry) logChange({ module: "Finance", action: "Deleted", entityType: "JournalEntry", entityId: entry.id, summary: `Journal Entry ${entry.id}: ${entry.description} deleted`, performedBy: "Current User" });
+      setDeleteTarget(null);
+      toast.success("Journal entry deleted.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete journal entry");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -257,6 +274,7 @@ export function JournalEntryPage() {
       ],
       rows,
     );
+    toast.success(`Exported ${filtered.length} journal entries.`);
   }
 
   const fmt = (n: number) =>
@@ -274,7 +292,7 @@ export function JournalEntryPage() {
       <div className="flex items-center justify-end gap-1">
         <button onClick={() => setViewEntry(e)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"><Eye className="w-3.5 h-3.5" /></button>
         {e.status === "Draft" && <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-emerald-50 rounded-lg text-gray-400 hover:text-emerald-600"><Edit className="w-3.5 h-3.5" /></button>}
-        {e.status === "Draft" && <button onClick={() => deleteEntry(e.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>}
+        {e.status === "Draft" && <button onClick={() => setDeleteTarget(e)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>}
       </div>
     ), sortable: false, filterable: false, className: "text-right", headerClassName: "text-right" },
   ];
@@ -702,6 +720,21 @@ export function JournalEntryPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Journal Entry?"
+        description={
+          deleteTarget
+            ? `This will permanently remove "${deleteTarget.reference || deleteTarget.description || deleteTarget.id}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={deleting}
+        onConfirm={deleteEntry}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

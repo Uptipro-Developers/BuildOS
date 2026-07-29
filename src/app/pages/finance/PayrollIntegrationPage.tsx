@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 import { useNumbering } from "../../stores/numberingStore";
 
@@ -85,6 +87,7 @@ export function PayrollIntegrationPage() {
   const [payrolls, setPayrolls] = useState<PayrollRun[]>([]);
   const [activeRun, setActiveRun] = useState<PayrollRun | null>(null);
   const [employees, setEmployees] = useState<PayrollEmployee[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<PayrollRun | null>(null);
 
   useEffect(() => {
     getPayrollRuns()
@@ -163,17 +166,24 @@ export function PayrollIntegrationPage() {
 
     if (action === "submit") {
       logChange({ module: "Finance", action: "Sent to Finance", entityType: "PayrollRun", entityId: id, summary: "Payroll run sent to finance", performedBy: "Current User" });
+      toast.success("Payroll run sent to finance.");
     } else if (action === "approve") {
       logChange({ module: "Finance", action: "Approved", entityType: "PayrollRun", entityId: id, summary: "Payroll run approved", performedBy: "Current User" });
+      toast.success("Payroll run approved.");
     } else if (action === "pay") {
       logChange({ module: "Finance", action: "Paid", entityType: "PayrollRun", entityId: id, summary: "Payroll run marked as paid", performedBy: "Current User" });
+      toast.success("Payroll run marked as paid.");
     }
   }
 
-  function handleDelete(id: string) {
+  function handleDelete() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
     setPayrolls((prev) => prev.filter((p) => p.id !== id));
     setActiveRun((prev) => (prev && prev.id === id ? payrolls.find((p) => p.id !== id) ?? null : prev));
     logChange({ module: "Finance", action: "Deleted", entityType: "PayrollRun", entityId: id, summary: "Payroll run deleted", performedBy: "Current User" });
+    setDeleteTarget(null);
+    toast.success("Payroll run deleted.");
   }
 
   function handleCreate() {
@@ -191,6 +201,7 @@ export function PayrollIntegrationPage() {
     setPayrolls((prev) => [newRun, ...prev]);
     setActiveRun(newRun);
     logChange({ module: "Finance", action: "Created", entityType: "PayrollRun", entityId: newRun.id, summary: `Payroll run ${newRun.period} created`, performedBy: "Current User" });
+    toast.success(`Payroll run for ${newRun.period} created.`);
   }
 
   function handleExport() {
@@ -215,6 +226,7 @@ export function PayrollIntegrationPage() {
         p.status,
       ]),
     );
+    toast.success(`Exported ${payrolls.length} payroll runs.`);
   }
 
   const payrollColumns: Column<PayrollRun>[] = [
@@ -276,7 +288,7 @@ export function PayrollIntegrationPage() {
           {r.status === "Draft" && (
             <>
               <button onClick={() => advance(r.id, "submit")} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Submit</button>
-              <button onClick={() => handleDelete(r.id)} className="p-1 text-xs text-red-500 hover:text-red-700"><Trash2 className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setDeleteTarget(r)} className="p-1 text-xs text-red-500 hover:text-red-700"><Trash2 className="w-3.5 h-3.5" /></button>
             </>
           )}
           {r.status === "Sent for Approval" && (
@@ -541,6 +553,20 @@ export function PayrollIntegrationPage() {
           </div>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Payroll Run?"
+        description={
+          deleteTarget
+            ? `This will permanently remove the payroll run "${deleteTarget.period} — ${deleteTarget.department}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

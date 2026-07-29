@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { getProcessMappings, saveProcessMappings } from "../../api/finance-extras";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import {
@@ -6,6 +7,7 @@ import {
   Info, Download,
 } from "lucide-react";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
 
@@ -435,6 +437,7 @@ export function ProcessMappingPage() {
   );
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<ProcessMapping | undefined>();
+  const [deleteTarget, setDeleteTarget] = useState<ProcessMapping | null>(null);
 
   useEffect(() => {
     getProcessMappings()
@@ -465,7 +468,15 @@ export function ProcessMappingPage() {
       ? [m, ...mappings]
       : mappings.map((x) => (x.id === m.id ? m : x));
     setMappings(next);
-    saveProcessMappings(next).catch(() => {});
+    saveProcessMappings(next)
+      .then(() =>
+        toast.success(isNew ? "Mapping created." : "Mapping updated."),
+      )
+      .catch((err) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save mapping.",
+        ),
+      );
     logChange({
       module: "finance",
       action: isNew ? "created" : "updated",
@@ -476,13 +487,21 @@ export function ProcessMappingPage() {
     });
   }
 
-  function remove(id: string) {
+  function remove() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
     const target = mappings.find((m) => m.id === id);
     const next = mappings.map((m) =>
       m.id === id ? { ...m, status: "unmapped" as const, lines: [] } : m,
     );
     setMappings(next);
-    saveProcessMappings(next).catch(() => {});
+    saveProcessMappings(next)
+      .then(() => toast.success("Mapping removed."))
+      .catch((err) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to remove mapping.",
+        ),
+      );
     if (target) {
       logChange({
         module: "finance",
@@ -493,6 +512,7 @@ export function ProcessMappingPage() {
         performedBy: "Sola Adeleke",
       });
     }
+    setDeleteTarget(null);
   }
 
   const tableData: TableRow[] = filtered.map((m) => ({
@@ -559,7 +579,7 @@ export function ProcessMappingPage() {
             <Edit className="w-3.5 h-3.5" />
           </button>
           {row.status === "mapped" && (
-            <button onClick={() => remove(row.mapping.id)}
+            <button onClick={() => setDeleteTarget(row.mapping)}
               className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -582,6 +602,7 @@ export function ProcessMappingPage() {
         m.lines.filter((l) => l.action === "credit").map((l) => l.account).join("; "),
       ]),
     );
+    toast.success(`Exported ${filtered.length} process mappings.`);
   }
 
   return (
@@ -718,6 +739,20 @@ export function ProcessMappingPage() {
           onSave={save}
         />
       )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Remove Mapping?"
+        description={
+          deleteTarget
+            ? `This will remove the account mapping for "${deleteTarget.application} / ${deleteTarget.process}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={remove}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

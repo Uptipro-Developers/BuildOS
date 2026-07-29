@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Search, Filter, Plus } from "lucide-react";
 import {
   fetchExpenses,
@@ -310,10 +311,15 @@ export function ExpensesPage() {
                       setShowApproveModal(false);
                       setSelectedExpense(null);
                       setApprovalNotes("");
+                      toast.success("Expense rejected.");
                     })
                     .catch((err) => {
                       console.error("Failed to reject expense:", err);
-                      alert("Failed to reject expense. Please try again.");
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Failed to reject expense.",
+                      );
                     })
                     .finally(() => setIsSubmitting(false));
                 }}
@@ -353,10 +359,15 @@ export function ExpensesPage() {
                       setShowApproveModal(false);
                       setSelectedExpense(null);
                       setApprovalNotes("");
+                      toast.success("Expense approved.");
                     })
                     .catch((err) => {
                       console.error("Failed to approve expense:", err);
-                      alert("Failed to approve expense. Please try again.");
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Failed to approve expense.",
+                      );
                     })
                     .finally(() => setIsSubmitting(false));
                 }}

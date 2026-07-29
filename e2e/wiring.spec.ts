@@ -106,15 +106,42 @@ test("Given an employee is onboarded, when Admin looks at Users, then a matching
   expect(createRes.ok(), `employee create failed: ${await createRes.text()}`).toBeTruthy();
   const employee = await createRes.json();
 
-  // Re-fetch — creation kicks off user-account linking as a side effect.
+  // Onboarding does NOT create the login account. Per the design, the employee
+  // lands in Admin › Users › Pending Sync, and an admin reviews the company
+  // email, role and app access before the account is created.
   const refetched = await (
     await page.request.get(`${API}/employees/${employee.id}`, {
       headers: { Authorization: `Bearer ${access_token}` },
     })
   ).json();
-  expect(refetched.userId, "Employee.userId should be linked to a User account").toBeTruthy();
+  expect(refetched.userId ?? null, "a new employee should not be auto-linked to a user").toBeNull();
 
-  const userRes = await page.request.get(`${API}/admin/users/${refetched.userId}`, {
+  const pending: { id: string }[] = await (
+    await page.request.get(`${API}/admin/users/pending-sync`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    })
+  ).json();
+  expect(
+    pending.some((p) => p.id === employee.id),
+    "the employee should be queued for sync in Admin › Users",
+  ).toBeTruthy();
+
+  // Once an admin syncs them, the account exists and is linked both ways.
+  const syncRes = await page.request.post(`${API}/admin/employees/${employee.id}/sync`, {
+    headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+    data: { role: "Employee", assignedApps: ["ess"] },
+  });
+  expect(syncRes.ok(), `sync failed: ${await syncRes.text()}`).toBeTruthy();
+  const created = await syncRes.json();
+
+  const linked = await (
+    await page.request.get(`${API}/employees/${employee.id}`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    })
+  ).json();
+  expect(linked.userId).toBe(created.id);
+
+  const userRes = await page.request.get(`${API}/admin/users/${created.id}`, {
     headers: { Authorization: `Bearer ${access_token}` },
   });
   expect(userRes.ok(), "linked user should be visible via the Admin Users API").toBeTruthy();

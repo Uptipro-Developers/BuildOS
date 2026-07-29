@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
@@ -131,9 +132,12 @@ export function ClaimsManagementPage() {
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
           .catch(console.error);
+        toast.success("Claim approved.");
       })
       .catch((err) => {
-        alert("Failed to approve claim. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to approve claim.",
+        );
         console.error(err);
       });
     setViewClaim(null);
@@ -147,9 +151,12 @@ export function ClaimsManagementPage() {
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
           .catch(console.error);
+        toast.success("Claim rejected.");
       })
       .catch((err) => {
-        alert("Failed to reject claim. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to reject claim.",
+        );
         console.error(err);
       });
     setRejectState(null);
@@ -163,9 +170,12 @@ export function ClaimsManagementPage() {
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
           .catch(console.error);
+        toast.success("Claim marked as paid.");
       })
       .catch((err) => {
-        alert("Failed to mark claim as paid. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to mark claim as paid.",
+        );
         console.error(err);
       });
     setViewClaim(null);
@@ -178,9 +188,14 @@ export function ClaimsManagementPage() {
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
           .catch(console.error);
+        toast.success("Claim moved to Under Review.");
       })
       .catch((err) => {
-        alert("Failed to set claim under review. Please try again.");
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Failed to set claim under review.",
+        );
         console.error(err);
       });
     setViewClaim(null);
@@ -208,6 +223,7 @@ export function ClaimsManagementPage() {
         c.status,
       ]),
     );
+    toast.success(`Exported ${claims.length} claims.`);
   }
 
   const totalApproved = claims

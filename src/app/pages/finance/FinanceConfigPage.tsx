@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
 import { getBankAccounts, getTaxConfigs } from "../../api/finance-extras";
+import { createAccrualType, updateAccrualType, deleteAccrualType } from "../../api/accruals";
 import { apiFetch } from "../../api/client";
 import { Save, Plus, Edit, Trash2, Settings2, Info, CreditCard, Building2, X, CheckCircle, Percent, Palette, Download, Hash } from "lucide-react";
 import { useFinance } from "../../stores/financeStore";
 import { useNumbering, type ModuleNumbering } from "../../stores/numberingStore";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { exportCSV } from "../../utils/exportCSV";
 import type { AccrualTypeConfig } from "./types";
 
@@ -54,6 +57,30 @@ const FISCAL_MONTHS = [
   "December",
 ];
 
+/**
+ * The page owns four unrelated delete actions, so one pending target carries a
+ * discriminator instead of four separate pieces of state.
+ */
+type ConfigDeleteTarget =
+  | { kind: "tax"; id: string; name: string }
+  | { kind: "accrualType"; id: string; name: string }
+  | { kind: "bank"; id: string; name: string }
+  | { kind: "numbering"; id: string; name: string };
+
+const DELETE_TITLES: Record<ConfigDeleteTarget["kind"], string> = {
+  tax: "Delete Tax Rule?",
+  accrualType: "Delete Accrual Type?",
+  bank: "Delete Bank Account?",
+  numbering: "Remove Numbering Entry?",
+};
+
+const DELETE_SUBJECTS: Record<ConfigDeleteTarget["kind"], string> = {
+  tax: "tax rule",
+  accrualType: "accrual type",
+  bank: "bank account",
+  numbering: "numbering configuration for",
+};
+
 const typeColors: Record<TaxType, string> = {
   VAT: "bg-blue-100 text-blue-700",
   WHT: "bg-purple-100 text-purple-700",
@@ -65,6 +92,8 @@ export function FinanceConfigPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [saved, setSaved] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ConfigDeleteTarget | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { configs, updateConfig, addConfig, removeConfig } = useNumbering();
   const [editingNumbering, setEditingNumbering] = useState<string | null>(null);
   const [numberingForm, setNumberingForm] = useState<ModuleNumbering | null>(null);
@@ -162,7 +191,17 @@ export function FinanceConfigPage() {
       setSaved(true);
       logChange({ module: "Finance", action: "Updated", entityType: "FinanceConfig", entityId: "global", summary: "Finance configuration saved (payment methods, bank accounts, tax entries)", performedBy: "Sola Adeleke" });
       setTimeout(() => setSaved(false), 2500);
-    });
+    })
+      // The button's "Saved!" state covers the success case, so only the
+      // failure needs a toast.
+      .catch((err) => {
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Failed to save finance configuration.",
+        );
+        console.error(err);
+      });
   }
 
   function openNumberingEdit(cfg: ModuleNumbering) {
@@ -175,13 +214,17 @@ export function FinanceConfigPage() {
       updateConfig(numberingForm.module, numberingForm);
       setEditingNumbering(null);
       setNumberingForm(null);
+      toast.success(`Numbering for ${numberingForm.module} updated.`);
     }
   }
 
   function toggleMethod(id: string) {
     setPaymentMethods((prev) => prev.map((m) => m.id === id ? { ...m, enabled: !m.enabled } : m));
     const method = paymentMethods.find(m => m.id === id);
-    if (method) logChange({ module: "Finance", action: method.enabled ? "Disabled" : "Enabled", entityType: "PaymentMethod", entityId: id, summary: `Payment method "${method.name}" ${method.enabled ? "disabled" : "enabled"}`, performedBy: "Sola Adeleke" });
+    if (method) {
+      logChange({ module: "Finance", action: method.enabled ? "Disabled" : "Enabled", entityType: "PaymentMethod", entityId: id, summary: `Payment method "${method.name}" ${method.enabled ? "disabled" : "enabled"}`, performedBy: "Sola Adeleke" });
+      toast.success(`${method.name} ${method.enabled ? "disabled" : "enabled"}.`);
+    }
   }
 
   function addBankAccount() {
@@ -217,9 +260,12 @@ export function FinanceConfigPage() {
         logChange({ module: "Finance", action: "Created", entityType: "BankAccount", entityId: acc.id, summary: `Bank account "${acc.name}" (${acc.bank}) added`, performedBy: "Sola Adeleke" });
         setShowBankModal(false);
         setBankForm({ name: "", bank: "", accountNumber: "", currency: "USD", balance: "" });
+        toast.success(`Bank account "${acc.name}" added.`);
       })
       .catch((err) => {
-        alert("Failed to add bank account. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to add bank account.",
+        );
         console.error(err);
       });
   }
@@ -227,13 +273,19 @@ export function FinanceConfigPage() {
   function setDefault(id: string) {
     setBankAccounts((prev) => prev.map((b) => ({ ...b, isDefault: b.id === id })));
     const acc = bankAccounts.find(b => b.id === id);
-    if (acc) logChange({ module: "Finance", action: "Set as Default", entityType: "BankAccount", entityId: id, summary: `Bank account "${acc.name}" set as default`, performedBy: "Sola Adeleke" });
+    if (acc) {
+      logChange({ module: "Finance", action: "Set as Default", entityType: "BankAccount", entityId: id, summary: `Bank account "${acc.name}" set as default`, performedBy: "Sola Adeleke" });
+      toast.success(`"${acc.name}" set as default account.`);
+    }
   }
 
   function toggleTax(id: string) {
     setTaxEntries((prev) => prev.map((t) => t.id === id ? { ...t, enabled: !t.enabled } : t));
     const tax = taxEntries.find(t => t.id === id);
-    if (tax) logChange({ module: "Finance", action: tax.enabled ? "Disabled" : "Enabled", entityType: "TaxRule", entityId: id, summary: `Tax rule "${tax.name}" ${tax.enabled ? "disabled" : "enabled"}`, performedBy: "Sola Adeleke" });
+    if (tax) {
+      logChange({ module: "Finance", action: tax.enabled ? "Disabled" : "Enabled", entityType: "TaxRule", entityId: id, summary: `Tax rule "${tax.name}" ${tax.enabled ? "disabled" : "enabled"}`, performedBy: "Sola Adeleke" });
+      toast.success(`Tax rule "${tax.name}" ${tax.enabled ? "disabled" : "enabled"}.`);
+    }
   }
 
   function openTaxEdit(t: TaxEntry) {
@@ -272,9 +324,12 @@ export function FinanceConfigPage() {
           );
           logChange({ module: "Finance", action: "Updated", entityType: "TaxRule", entityId: taxEditId, summary: `Tax rule "${entry.name}" updated`, performedBy: "Sola Adeleke" });
           setShowTaxModal(false);
+          toast.success(`Tax rule "${entry.name}" updated.`);
         })
         .catch((err) => {
-          alert("Failed to update tax config. Please try again.");
+          toast.error(
+            err instanceof Error ? err.message : "Failed to update tax rule.",
+          );
           console.error(err);
         });
     } else {
@@ -287,9 +342,12 @@ export function FinanceConfigPage() {
           setTaxEntries((prev) => [...prev, { id: taxId, ...entry }]);
           logChange({ module: "Finance", action: "Created", entityType: "TaxRule", entityId: taxId, summary: `Tax rule "${entry.name}" created`, performedBy: "Sola Adeleke" });
           setShowTaxModal(false);
+          toast.success(`Tax rule "${entry.name}" created.`);
         })
         .catch((err) => {
-          alert("Failed to create tax config. Please try again.");
+          toast.error(
+            err instanceof Error ? err.message : "Failed to create tax rule.",
+          );
           console.error(err);
         });
     }
@@ -297,6 +355,7 @@ export function FinanceConfigPage() {
 
   function handleTaxExport() {
     exportCSV("tax-rules", ["Tax Name", "Type", "Rate", "GL Code", "Applies To", "Active"], taxEntries.map(t => [t.name, t.type, t.type === "PAYE" ? "Variable" : t.rate + "%", t.glCode, t.appliesTo, t.enabled ? "Yes" : "No"]));
+    toast.success(`Exported ${taxEntries.length} tax rules.`);
   }
 
   const taxColumns: Column<TaxEntry>[] = [
@@ -315,7 +374,7 @@ export function FinanceConfigPage() {
     { key: "actions", label: "Actions", className: "text-right", render: t =>
       <div className="flex items-center justify-end gap-1">
         <button onClick={() => openTaxEdit(t)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"><Edit className="w-3.5 h-3.5" /></button>
-        <button onClick={() => { setTaxEntries((prev) => prev.filter((x) => x.id !== t.id)); logChange({ module: "Finance", action: "Deleted", entityType: "TaxRule", entityId: t.id, summary: `Tax rule "${t.name}" deleted`, performedBy: "Sola Adeleke" }); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+        <button onClick={() => setDeleteTarget({ kind: "tax", id: t.id, name: t.name })} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     },
   ];
@@ -345,20 +404,82 @@ export function FinanceConfigPage() {
   function saveAccrualType() {
     if (!accrualTypeForm.type.trim() || !accrualTypeForm.label.trim()) return;
     if (accrualTypeEditId) {
-      setAccrualTypeConfigs(prev => prev.map(tc =>
-        tc.id === accrualTypeEditId ? { ...tc, ...accrualTypeForm } : tc
-      ));
-      logChange({ module: "Finance", action: "Updated", entityType: "AccrualTypeConfig", entityId: accrualTypeEditId, summary: `Accrual type "${accrualTypeForm.label}" updated`, performedBy: "Sola Adeleke" });
+      const editId = accrualTypeEditId;
+      updateAccrualType(editId, accrualTypeForm)
+        .then((updated) => {
+          setAccrualTypeConfigs(prev => prev.map(tc => tc.id === editId ? updated : tc));
+          logChange({ module: "Finance", action: "Updated", entityType: "AccrualTypeConfig", entityId: editId, summary: `Accrual type "${updated.label}" updated`, performedBy: "Sola Adeleke" });
+          setShowAccrualTypeModal(false);
+          toast.success(`Accrual type "${updated.label}" updated.`);
+        })
+        .catch((err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to update accrual type.",
+          );
+          console.error(err);
+        });
     } else {
-      const atcId = `atc-${Date.now()}`;
-      setAccrualTypeConfigs(prev => [...prev, { id: atcId, ...accrualTypeForm }]);
-      logChange({ module: "Finance", action: "Created", entityType: "AccrualTypeConfig", entityId: atcId, summary: `Accrual type "${accrualTypeForm.label}" created`, performedBy: "Sola Adeleke" });
+      createAccrualType(accrualTypeForm)
+        .then((created) => {
+          setAccrualTypeConfigs(prev => [...prev, created]);
+          logChange({ module: "Finance", action: "Created", entityType: "AccrualTypeConfig", entityId: created.id, summary: `Accrual type "${created.label}" created`, performedBy: "Sola Adeleke" });
+          setShowAccrualTypeModal(false);
+          toast.success(`Accrual type "${created.label}" created.`);
+        })
+        .catch((err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to create accrual type.",
+          );
+          console.error(err);
+        });
     }
-    setShowAccrualTypeModal(false);
+  }
+
+  function confirmDelete() {
+    const target = deleteTarget;
+    if (!target) return;
+    switch (target.kind) {
+      case "tax":
+        setTaxEntries((prev) => prev.filter((x) => x.id !== target.id));
+        logChange({ module: "Finance", action: "Deleted", entityType: "TaxRule", entityId: target.id, summary: `Tax rule "${target.name}" deleted`, performedBy: "Sola Adeleke" });
+        setDeleteTarget(null);
+        toast.success(`Tax rule "${target.name}" deleted.`);
+        return;
+      case "bank":
+        setBankAccounts((prev) => prev.filter((x) => x.id !== target.id));
+        logChange({ module: "Finance", action: "Deleted", entityType: "BankAccount", entityId: target.id, summary: `Bank account "${target.name}" deleted`, performedBy: "Sola Adeleke" });
+        setDeleteTarget(null);
+        toast.success(`Bank account "${target.name}" deleted.`);
+        return;
+      case "numbering":
+        removeConfig(target.id);
+        setDeleteTarget(null);
+        toast.success(`Numbering for ${target.name} removed.`);
+        return;
+      case "accrualType":
+        // Server-backed, so the modal stays open (spinning) until it resolves.
+        setDeleting(true);
+        deleteAccrualType(target.id)
+          .then(() => {
+            setAccrualTypeConfigs(prev => prev.filter(x => x.id !== target.id));
+            logChange({ module: "Finance", action: "Deleted", entityType: "AccrualTypeConfig", entityId: target.id, summary: `Accrual type "${target.name}" deleted`, performedBy: "Sola Adeleke" });
+            setDeleteTarget(null);
+            toast.success(`Accrual type "${target.name}" deleted.`);
+          })
+          .catch((err) => {
+            toast.error(
+              err instanceof Error ? err.message : "Failed to delete accrual type.",
+            );
+            console.error(err);
+          })
+          .finally(() => setDeleting(false));
+        return;
+    }
   }
 
   function handleAccrualTypeExport() {
     exportCSV("accrual-types", ["Type Key", "Display Label", "Color", "Description"], accrualTypeConfigs.map(tc => [tc.type, tc.label, tc.color, tc.description || ""]));
+    toast.success(`Exported ${accrualTypeConfigs.length} accrual types.`);
   }
 
   const accrualTypeColumns: Column<AccrualTypeConfig>[] = [
@@ -369,7 +490,7 @@ export function FinanceConfigPage() {
     { key: "actions", label: "Actions", className: "text-right", render: tc =>
       <div className="flex items-center justify-end gap-1">
         <button onClick={() => openAccrualTypeEdit(tc)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"><Edit className="w-3.5 h-3.5" /></button>
-        <button onClick={() => { setAccrualTypeConfigs(prev => prev.filter(x => x.id !== tc.id)); logChange({ module: "Finance", action: "Deleted", entityType: "AccrualTypeConfig", entityId: tc.id, summary: `Accrual type "${tc.label}" deleted`, performedBy: "Sola Adeleke" }); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+        <button onClick={() => setDeleteTarget({ kind: "accrualType", id: tc.id, name: tc.label })} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     },
   ];
@@ -529,7 +650,7 @@ export function FinanceConfigPage() {
                     Set default
                   </button>
                 )}
-                <button onClick={() => { setBankAccounts((prev) => prev.filter((x) => x.id !== b.id)); logChange({ module: "Finance", action: "Deleted", entityType: "BankAccount", entityId: b.id, summary: `Bank account "${b.name}" deleted`, performedBy: "Sola Adeleke" }); }} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                <button onClick={() => setDeleteTarget({ kind: "bank", id: b.id, name: b.name })} className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -692,7 +813,7 @@ export function FinanceConfigPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       <button onClick={() => openNumberingEdit(cfg)} className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg"><Edit className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => removeConfig(cfg.module)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Remove entry"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => setDeleteTarget({ kind: "numbering", id: cfg.module, name: cfg.module })} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Remove entry"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   </>
                 )}
@@ -729,7 +850,7 @@ export function FinanceConfigPage() {
                       className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500" min={1} />
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => { addConfig(addForm); setAddForm({ module: "", prefix: "", separator: "-", padLength: 4, nextNumber: 1, description: "" }); setShowAddForm(false); }} className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><Save className="w-3 h-3 inline mr-1" />Save</button>
+                    <button onClick={() => { addConfig(addForm); toast.success(`Numbering for ${addForm.module} added.`); setAddForm({ module: "", prefix: "", separator: "-", padLength: 4, nextNumber: 1, description: "" }); setShowAddForm(false); }} className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><Save className="w-3 h-3 inline mr-1" />Save</button>
                     <button onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                   </div>
                 </div>
@@ -1010,6 +1131,21 @@ export function FinanceConfigPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title={deleteTarget ? DELETE_TITLES[deleteTarget.kind] : ""}
+        description={
+          deleteTarget
+            ? `This will permanently remove the ${DELETE_SUBJECTS[deleteTarget.kind]} "${deleteTarget.name}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -520,14 +520,14 @@ model Payment {
 // ─────────────── USERS ───────────────
 
 model User {
-  id       String  @id @default(cuid())
-  userId   String? @unique
-  email    String  @unique
-  password String
-  name     String
-  phone    String?
+  id        String  @id @default(cuid())
+  userId    String? @unique
+  email     String  @unique
+  password  String
+  name      String
+  phone     String?
   signature String?
-  status   String  @default("Active")
+  status    String  @default("Active")
 
   // Multi-role support
   assignedApps    String[] @default(["ess"])
@@ -548,11 +548,11 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  roles       UserRole[]
-  permissions Permission[]
-  auditLogs   AuditLog[]
+  roles           UserRole[]
+  permissions     Permission[]
+  auditLogs       AuditLog[]
   passwordHistory UserPasswordHistory[]
-  employee    Employee?
+  employee        Employee?
 }
 
 model UserRole {
@@ -1992,4 +1992,69 @@ model OrgUnit {
   updatedAt   DateTime @updatedAt
 
   @@index([kind])
+}
+
+// ─────────────── FINANCE: ACCRUALS ───────────────
+// Accruals were previously frontend-only seed data held in localStorage, so
+// nothing a user entered survived a refresh. These models give them real
+// persistence. fiscalYearId is a plain string rather than a relation because
+// fiscal years are not yet a database table.
+
+model Accrual {
+  id          String @id @default(cuid())
+  reference   String @unique
+  type        String
+  title       String
+  description String @default("")
+
+  amount         Float  @default(0)
+  status         String @default("draft") // draft|pending|active|partially-reversed|fully-reversed|cancelled
+  approvalStatus String @default("draft") // draft|pending|approved|rejected
+
+  // Variable-length approval trail; shape is owned by the UI.
+  approvalSteps Json?
+
+  createdBy      String
+  reversalDate   DateTime?
+  reversedAt     DateTime?
+  reversedAmount Float?
+
+  sourceModule String  @default("")
+  sourceRef    String  @default("")
+  fiscalYearId String?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines AccrualLine[]
+
+  @@index([status])
+  @@index([fiscalYearId])
+}
+
+model AccrualLine {
+  id          String @id @default(cuid())
+  account     String
+  description String @default("")
+  debit       Float  @default(0)
+  credit      Float  @default(0)
+
+  accrual   Accrual @relation(fields: [accrualId], references: [id], onDelete: Cascade)
+  accrualId String
+
+  createdAt DateTime @default(now())
+
+  @@index([accrualId])
+}
+
+model AccrualTypeConfig {
+  id          String @id @default(cuid())
+  type        String @unique
+  label       String
+  color       String @default("bg-gray-100 text-gray-700")
+  description String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

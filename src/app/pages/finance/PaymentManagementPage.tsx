@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
@@ -176,6 +177,11 @@ export function PaymentManagementPage() {
     });
 
     setViewPayment(null);
+    toast.success(
+      next === "Payment Completed"
+        ? "Payment recorded."
+        : `Payment moved to ${next}.`,
+    );
   }
 
   function handleExport() {
@@ -202,6 +208,7 @@ export function PaymentManagementPage() {
         p.status,
       ]),
     );
+    toast.success(`Exported ${payments.length} payments.`);
   }
 
   const totalCompleted = payments

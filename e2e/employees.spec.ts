@@ -140,12 +140,14 @@ test('Fix 4: editing an employee saves successfully without an error toast', asy
   await page.click('button:has-text("Edit Employee")');
   await expect(page.locator('h2:has-text("Edit Employee")')).toBeVisible({ timeout: 8_000 });
 
-  // Change the role field (Job Title / Role input inside the modal)
-  // 5th input in the modal (0-indexed: First, Last, Email, Phone, Role)
-  const modalInputs = page.locator('div.fixed input:not([type="date"]):not([type="number"])').all();
-  const inputs = await modalInputs;
-  if (inputs.length >= 5) await inputs[4].fill('Playwright Updated Role');
-  else await page.locator('div.fixed input').nth(4).fill('Playwright Updated Role');
+  // Target the Job Title / Role field by its label rather than by position.
+  // Indexing into the modal's inputs broke as soon as fields were added to the
+  // form, and could land on a read-only field (Employee ID, Date Hired).
+  const roleField = page
+    .locator('div.fixed div', { has: page.locator('label:text-is("Job Title / Role")') })
+    .locator('input')
+    .first();
+  await roleField.fill('Playwright Updated Role');
 
   // Save
   await page.click('button:has-text("Save Changes")');

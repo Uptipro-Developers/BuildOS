@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
+  getCurrencySymbol,
 } from "../../utils/generalSettings";
-import { fetchIncome, createIncome } from "../../api/income";
+import { fetchIncome, createIncome, updateIncome } from "../../api/income";
 import { fetchProjects } from "../../api/projects";
 import { getChartAccounts } from "../../api/finance-extras";
 import { Plus, Download, TrendingUp, CheckCircle, Clock, X, Save } from "lucide-react";
@@ -47,18 +49,38 @@ const emptyForm = {
   date: "",
 };
 
+/**
+ * Standard income sources offered on the Record Income form. Previously the
+ * dropdown was built only from existing records and Income chart accounts, so it
+ * was empty until someone had already recorded income by another route.
+ */
+const STANDARD_INCOME_SOURCES = [
+  "Client Payment",
+  "Client Milestone",
+  "Subcontractor Recovery",
+  "Insurance Claim",
+  "Government Grant",
+  "Others",
+];
+
 export function IncomeManagementPage() {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [projectNames, setProjectNames] = useState<string[]>([]);
-  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
+  const [sourceOptions, setSourceOptions] = useState<string[]>([
+    ...STANDARD_INCOME_SOURCES,
+  ]);
   useEffect(() => {
     Promise.all([fetchIncome(), fetchProjects(), getChartAccounts("Income")])
       .then(([incomeData, projects, accounts]) => {
         setIncomes(incomeData);
         setProjectNames(projects.map((p) => p.name));
+        // The standard sources always lead, so the dropdown is usable on a fresh
+        // system; anything already recorded or configured as an income account is
+        // appended rather than replacing them.
         setSourceOptions(
           Array.from(
             new Set([
+              ...STANDARD_INCOME_SOURCES,
               ...incomeData.map((i) => i.source).filter(Boolean),
               ...accounts.map((a) => a.name).filter(Boolean),
             ]),
@@ -95,20 +117,37 @@ export function IncomeManagementPage() {
         fetchIncome().then(setIncomes).catch(console.error);
         setShowAddModal(false);
         setForm(emptyForm);
+        toast.success("Income record created.");
       })
       .catch((err) => {
-        alert("Failed to create income. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to create income.",
+        );
         console.error(err);
       });
   }
 
   function advance(id: string) {
-    setIncomes((prev) => prev.map((i) => {
-      if (i.id !== id) return i;
-      const next: IncomeStatus = i.status === "Draft" ? "Confirmed" : i.status === "Confirmed" ? "Invoiced" : i.status === "Invoiced" ? "Received" : i.status;
-      logChange({ module: "Finance", action: "Advanced", entityType: "Income", entityId: id, summary: `Income ${id} advanced to ${next}`, performedBy: "Current User" });
-      return { ...i, status: next };
-    }));
+    const current = incomes.find((i) => i.id === id);
+    if (!current) return;
+    const next: IncomeStatus =
+      current.status === "Draft" ? "Confirmed"
+        : current.status === "Confirmed" ? "Invoiced"
+          : current.status === "Invoiced" ? "Received"
+            : current.status;
+    if (next === current.status) return;
+
+    // Persist the transition — this used to be local state only, so advancing a
+    // record silently reverted on refresh.
+    updateIncome(id, { status: next })
+      .then(() => {
+        setIncomes((prev) => prev.map((i) => (i.id === id ? { ...i, status: next } : i)));
+        logChange({ module: "Finance", action: "Advanced", entityType: "Income", entityId: id, summary: `Income ${id} advanced to ${next}`, performedBy: "Current User" });
+        toast.success(`Income marked ${next}.`);
+      })
+      .catch((err) =>
+        toast.error(err instanceof Error ? err.message : "Failed to update income status."),
+      );
   }
 
   function handleExport() {
@@ -124,6 +163,7 @@ export function IncomeManagementPage() {
         i.status,
       ]),
     );
+    toast.success(`Exported ${incomes.length} income records.`);
   }
 
   const totalReceived = incomes
@@ -166,7 +206,7 @@ export function IncomeManagementPage() {
     },
     {
       key: "amount",
-      label: "Amount ($)",
+      label: `Amount (${getCurrencySymbol()})`,
       sortable: true,
       className: "text-right",
       headerClassName: "text-right",
@@ -332,7 +372,7 @@ export function IncomeManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                    Amount (USD) *
+                    Amount *
                   </label>
                   <input
                     value={form.amount}

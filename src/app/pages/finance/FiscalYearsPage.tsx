@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Plus, X, Save, Lock, CheckCircle, Calendar, FileText, Download } from "lucide-react";
 import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../../stores/financeStore";
 import { useChangelog } from "../../stores/changelogStore";
@@ -70,12 +71,14 @@ export function FiscalYearsPage() {
     logChange({ module: "Finance", action: "Created", entityType: "FiscalYear", entityId: fy.id, summary: `Fiscal year ${fy.label} created`, performedBy: "Sola Adeleke" });
     setShowModal(false);
     setForm({ label: "", startDate: "", endDate: "" });
+    toast.success(`Fiscal year ${fy.label} created.`);
   }
 
   function handleSetCurrent(id: string) {
     const target = fiscalYears.find(fy => fy.id === id);
     setFiscalYears(prev => prev.map(fy => ({ ...fy, isCurrent: fy.id === id })));
     if (target) logChange({ module: "Finance", action: "Set as Current", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} set as current`, performedBy: "Sola Adeleke" });
+    toast.success(`${target?.label ?? "Fiscal year"} set as current.`);
   }
 
   function handleClose(id: string) {
@@ -84,6 +87,7 @@ export function FiscalYearsPage() {
       fy.id === id ? { ...fy, status: "closed", closedAt: new Date().toISOString().split("T")[0], closedBy: "Sola Adeleke" } : fy
     ));
     if (target) logChange({ module: "Finance", action: "Closed", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} closed`, performedBy: "Sola Adeleke" });
+    toast.success(`${target?.label ?? "Fiscal year"} closed.`);
   }
 
   function handleReopen(id: string) {
@@ -92,6 +96,7 @@ export function FiscalYearsPage() {
       fy.id === id ? { ...fy, status: "open", closedAt: undefined, closedBy: undefined } : fy
     ));
     if (target) logChange({ module: "Finance", action: "Reopened", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} reopened`, performedBy: "Sola Adeleke" });
+    toast.success(`${target?.label ?? "Fiscal year"} reopened.`);
   }
 
   const reportFy = reportFyId ? fiscalYears.find(fy => fy.id === reportFyId) : null;
@@ -230,6 +235,7 @@ export function FiscalYearsPage() {
                         const headers = ["Account", "Code", csvAmountHeader("Debit"), csvAmountHeader("Credit")];
                         const rows = tb.map(r => [r.accountName, r.code, r.debit, r.credit]);
                         exportCSV(`trial-balance-${reportFy.label}`, headers, rows);
+                        toast.success("Trial balance exported.");
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
                       </button>
@@ -250,6 +256,7 @@ export function FiscalYearsPage() {
                         const headers = ["Item", csvAmountHeader("Amount")];
                         const rows = income.map(r => [r.label, r.isSection ? "" : r.amount]);
                         exportCSV(`income-statement-${reportFy.label}`, headers, rows);
+                        toast.success("Income statement exported.");
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
                       </button>
@@ -274,6 +281,7 @@ export function FiscalYearsPage() {
                           s.items.forEach(i => rows.push(["", i.account, i.amount]));
                         });
                         exportCSV(`balance-sheet-${reportFy.label}`, headers, rows);
+                        toast.success("Balance sheet exported.");
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
                       </button>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   getChartAccounts,
   createChartAccount,
@@ -18,6 +19,7 @@ import {
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import type { Account, AccountType } from "./types";
 import { ACCOUNT_TYPES } from "./types";
 
@@ -73,7 +75,7 @@ export function ChartOfAccountsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
 
   const filtered = accounts.filter((a) => {
     if (typeFilter !== "All" && a.type !== typeFilter) return false;
@@ -111,41 +113,54 @@ export function ChartOfAccountsPage() {
       updateChartAccount(editId, payload)
         .then(() => {
           logChange({ module: "Finance", action: "Updated", entityType: "Account", entityId: editId, summary: `Account ${form.code} ${form.name} updated`, performedBy: "Current User" });
+          toast.success("Account updated.");
           return loadAccounts();
         })
         .catch((err) => {
           console.error(err);
           // Fall back to local update so the UI stays responsive.
           setAccounts((prev) => prev.map((a) => a.id === editId ? { ...a, ...form, parentId: form.parentId || null } : a));
+          toast.error(
+            err instanceof Error ? err.message : "Failed to update account.",
+          );
         });
     } else {
       createChartAccount(payload)
         .then((created: any) => {
           logChange({ module: "Finance", action: "Created", entityType: "Account", entityId: created?.id ?? form.code, summary: `Account ${form.code} ${form.name} created`, performedBy: "Current User" });
+          toast.success("Account created.");
           return loadAccounts();
         })
         .catch((err) => {
           console.error(err);
           const newAcc: Account = { id: `a${Date.now()}`, ...form, parentId: form.parentId || null };
           setAccounts((prev) => [...prev, newAcc]);
+          toast.error(
+            err instanceof Error ? err.message : "Failed to create account.",
+          );
         });
     }
     setShowModal(false);
   }
 
   function confirmDelete() {
-    if (!deleteId) return;
+    if (!deleteTarget) return;
+    const deleteId = deleteTarget.id;
     const del = accounts.find(a => a.id === deleteId);
     deleteChartAccount(deleteId)
       .then(() => {
         if (del) logChange({ module: "Finance", action: "Deleted", entityType: "Account", entityId: deleteId, summary: `Account ${del.code} ${del.name} and children deleted`, performedBy: "Current User" });
+        toast.success("Account deleted.");
         return loadAccounts();
       })
       .catch((err) => {
         console.error(err);
         setAccounts((prev) => prev.filter((a) => a.id !== deleteId && a.parentId !== deleteId));
+        toast.error(
+          err instanceof Error ? err.message : "Failed to delete account.",
+        );
       });
-    setDeleteId(null);
+    setDeleteTarget(null);
   }
 
   function getDepth(id: string): number {
@@ -159,6 +174,7 @@ export function ChartOfAccountsPage() {
   function handleExport() {
     exportCSV("chart-of-accounts", ["Code", "Name", "Type", "Balance", "Description"],
       accounts.map((a) => [a.code, a.name, a.type, String(a.balance ?? 0), a.description]));
+    toast.success(`Exported ${accounts.length} accounts.`);
   }
 
   const columns: Column<typeof accounts[0]>[] = [
@@ -189,7 +205,7 @@ export function ChartOfAccountsPage() {
     { key: "actions", label: "Actions", render: a => (
       <div className="flex items-center justify-end gap-1">
         <button onClick={e => { e.stopPropagation(); openEdit(a); }} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"><Edit className="w-3.5 h-3.5" /></button>
-        <button onClick={e => { e.stopPropagation(); setDeleteId(a.id); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+        <button onClick={e => { e.stopPropagation(); setDeleteTarget(a); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     ), sortable: false, filterable: false, className: "text-right", headerClassName: "text-right" },
   ];
@@ -369,37 +385,19 @@ export function ChartOfAccountsPage() {
         </div>
       )}
 
-      {/* Delete confirm */}
-      {deleteId && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 text-center">
-            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="w-5 h-5 text-red-600" />
-            </div>
-            <h3 className="text-sm font-semibold text-gray-900 mb-1">
-              Delete Account?
-            </h3>
-            <p className="text-sm text-gray-500 mb-5">
-              This will also delete all child accounts under it. This action
-              cannot be undone.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setDeleteId(null)}
-                className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Account?"
+        description={
+          deleteTarget
+            ? `This will permanently remove "${deleteTarget.code} — ${deleteTarget.name}" and all child accounts under it. This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

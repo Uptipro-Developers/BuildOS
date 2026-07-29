@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
   CheckCircle,
@@ -89,9 +90,12 @@ export function FinanceApprovalsPage() {
         getApprovals("finance")
           .then((items) => setApprovals(items as FinApproval[]))
           .catch(() => setApprovals([]));
+        toast.success("Request approved.");
       })
       .catch((err) => {
-        alert("Failed to approve. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to approve request.",
+        );
         console.error(err);
       });
   }
@@ -101,9 +105,12 @@ export function FinanceApprovalsPage() {
         getApprovals("finance")
           .then((items) => setApprovals(items as FinApproval[]))
           .catch(() => setApprovals([]));
+        toast.success("Request rejected.");
       })
       .catch((err) => {
-        alert("Failed to reject. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to reject request.",
+        );
         console.error(err);
       });
   }

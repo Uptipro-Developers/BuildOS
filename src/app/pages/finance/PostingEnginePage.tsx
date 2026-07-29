@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { getChartAccounts, getTransactions } from "../../api/finance-extras";
 import {
   getCurrencySymbol,
@@ -886,11 +887,13 @@ export function PostingEnginePage() {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, status: "approved", reviewedBy: "Sola Adeleke", reviewedDate: now } : t));
     const txn = transactions.find(t => t.id === id);
     if (txn) logChange({ module: "Finance", action: "Approved", entityType: "PostingEngineTxn", entityId: id, summary: `Posting Engine: "${txn.description}" approved`, performedBy: "Sola Adeleke" });
+    toast.success("Transaction approved.");
   }
   function rejectTransaction(id: string, notes: string) {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, status: "rejected", reviewedBy: "Sola Adeleke", reviewedDate: now, notes: notes || undefined } : t));
     const txn = transactions.find(t => t.id === id);
     if (txn) logChange({ module: "Finance", action: "Rejected", entityType: "PostingEngineTxn", entityId: id, summary: `Posting Engine: "${txn.description}" rejected`, performedBy: "Sola Adeleke" });
+    toast.success("Transaction rejected.");
   }
   function postToLedger(id: string) {
     const txn = transactions.find(t => t.id === id);
@@ -916,6 +919,7 @@ export function PostingEnginePage() {
       approvalStatus: "auto-approved" as const,
       linkedRecords: [{ label: "Posting Engine Ref", ref: txn.id }],
     }]);
+    toast.success(`Transaction posted to ledger (${ledgerRef}).`);
   }
 
   const filteredCategories = categories.filter((c) => {
@@ -1082,7 +1086,10 @@ export function PostingEnginePage() {
 
       {showNewCatModal && (
         <NewCategoryModal onClose={() => setShowNewCatModal(false)}
-          onSave={c => setCategories(prev => [...prev, c])}
+          onSave={c => {
+            setCategories(prev => [...prev, c]);
+            toast.success(`Process category "${c.name}" created.`);
+          }}
           accounts={accounts} />
       )}
     </div>

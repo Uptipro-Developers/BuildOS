@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   CheckCircle, AlertTriangle, Lock,
   ChevronRight, FileText, Database, LogOut, Download,
@@ -103,6 +104,7 @@ export function YearEndClosePage() {
     }
 
     setClosingEntries(entries);
+    toast.success(`Generated ${entries.length} closing entries.`);
   }
 
   function handleLockYear() {
@@ -115,6 +117,7 @@ export function YearEndClosePage() {
     logChange({ module: "Finance", action: "Closed Fiscal Year", entityType: "FiscalYear", entityId: selectedFyId, summary: `Fiscal year ${selectedFy.label} closed`, performedBy: "Sola Adeleke" });
     setLocked(true);
     setShowConfirmLock(false);
+    toast.success(`Fiscal year ${selectedFy.label} closed.`);
   }
 
   const bsRows: BSRow[] = [];
@@ -247,6 +250,7 @@ export function YearEndClosePage() {
                         const headers = ["Description", "Debit", "Credit", csvAmountHeader("Amount")];
                         const rows = closingEntries.map(e => [e.label, e.dr, e.cr, e.amount]);
                         exportCSV(`closing-entries-${selectedFy?.label ?? "fy"}`, headers, rows);
+                        toast.success("Closing entries exported.");
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
                       </button>
@@ -328,6 +332,7 @@ export function YearEndClosePage() {
                         const headers = ["Item", csvAmountHeader("Amount")];
                         const rows = incomeStatement.map(r => [r.label, r.isSection ? "" : r.amount]);
                         exportCSV(`income-statement-${selectedFy?.label ?? "fy"}`, headers, rows);
+                        toast.success("Income statement exported.");
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
                       </button>
@@ -349,6 +354,7 @@ export function YearEndClosePage() {
                           s.items.forEach(i => rows.push(["", i.account, i.amount]));
                         });
                         exportCSV(`balance-sheet-${selectedFy?.label ?? "fy"}`, headers, rows);
+                        toast.success("Balance sheet exported.");
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
                       </button>

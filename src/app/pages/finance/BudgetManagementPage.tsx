@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   fetchBudgetBreakdown,
   fetchBudgets,
   createBudget,
 } from "../../api/budgets";
+import { fetchProjects } from "../../api/projects";
+import { fetchDepartments } from "../../api/departments";
 import {
   Plus,
   Download,
@@ -22,6 +25,7 @@ import {
   formatCurrencyByGeneralSettings,
 } from "../../utils/generalSettings";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 import { useNumbering } from "../../stores/numberingStore";
 
@@ -100,7 +104,24 @@ export function BudgetManagementPage() {
   >([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingBudget, setEditingBudget] = useState<BudgetLine | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BudgetLine | null>(null);
   const [form, setForm] = useState(emptyForm);
+  // A budget is always for an existing project or department, so the Name field
+  // picks from real records instead of accepting free text that matches nothing.
+  const [projectNames, setProjectNames] = useState<string[]>([]);
+  const [departmentNames, setDepartmentNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetchProjects()
+      .then((items) => setProjectNames(items.map((p) => p.name)))
+      .catch(() => setProjectNames([]));
+    fetchDepartments()
+      .then((items) => setDepartmentNames(items.map((d) => d.name)))
+      .catch(() => setDepartmentNames([]));
+  }, []);
+
+  const scopeOptions =
+    form.scope === "Department" ? departmentNames : projectNames;
 
   useEffect(() => {
     fetchBudgetBreakdown()
@@ -133,9 +154,12 @@ export function BudgetManagementPage() {
           .catch(console.error);
         setShowAddModal(false);
         setForm(emptyForm);
+        toast.success("Budget created.");
       })
       .catch((err) => {
-        alert("Failed to create budget. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to create budget.",
+        );
         console.error(err);
       });
   }
@@ -153,13 +177,17 @@ export function BudgetManagementPage() {
     logChange({ module: "Finance", action: "Updated", entityType: "Budget", entityId: updated.id, summary: `Budget ${updated.name} updated`, performedBy: "Current User" });
     setEditingBudget(null);
     setForm(emptyForm);
+    toast.success("Budget updated.");
   }
 
-  function deleteBudget(b: BudgetLine) {
-    if (!window.confirm(`Delete budget "${b.name}"?`)) return;
+  function deleteBudget() {
+    const b = deleteTarget;
+    if (!b) return;
     setBudgets(budgets.filter(x => x.id !== b.id));
     logChange({ module: "Finance", action: "Deleted", entityType: "Budget", entityId: b.id, summary: `Budget ${b.name} deleted`, performedBy: "Current User" });
     if (selectedBudget?.id === b.id) setSelectedBudget(null);
+    setDeleteTarget(null);
+    toast.success("Budget deleted.");
   }
 
   function cloneBudget(b: BudgetLine) {
@@ -167,6 +195,7 @@ export function BudgetManagementPage() {
     const clone: BudgetLine = { ...b, id: newId, name: `${b.name} (Copy)`, spent: 0, committed: 0, status: "Active" };
     setBudgets([...budgets, clone]);
     logChange({ module: "Finance", action: "Created", entityType: "Budget", entityId: newId, summary: `Budget ${clone.name} created (cloned from ${b.name})`, performedBy: "Current User" });
+    toast.success(`Budget cloned as "${clone.name}".`);
   }
 
   function handleExport() {
@@ -195,6 +224,7 @@ export function BudgetManagementPage() {
         b.status,
       ]),
     );
+    toast.success(`Exported ${budgets.length} budgets.`);
   }
 
   const columns: Column<BudgetLine>[] = [
@@ -284,7 +314,7 @@ export function BudgetManagementPage() {
           <button onClick={(e) => { e.stopPropagation(); setSelectedBudget(b); }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="View"><Eye className="w-3.5 h-3.5 text-gray-500" /></button>
           <button onClick={(e) => { e.stopPropagation(); setEditingBudget(b); setForm({ name: b.name, scope: b.scope, totalBudget: String(b.totalBudget), period: b.period }); }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="Edit"><Pencil className="w-3.5 h-3.5 text-gray-500" /></button>
           <button onClick={(e) => { e.stopPropagation(); cloneBudget(b); }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="Clone"><Copy className="w-3.5 h-3.5 text-gray-500" /></button>
-          <button onClick={(e) => { e.stopPropagation(); deleteBudget(b); }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="Delete"><Trash2 className="w-3.5 h-3.5 text-red-400" /></button>
+          <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(b); }} className="p-1.5 hover:bg-gray-100 rounded-lg" title="Delete"><Trash2 className="w-3.5 h-3.5 text-red-400" /></button>
         </div>
       ),
     },
@@ -507,32 +537,48 @@ export function BudgetManagementPage() {
               </button>
             </div>
             <div className="px-6 py-5 space-y-4">
+              {/* Scope leads: it determines whether Name lists projects or
+                  departments, so choosing it first is the natural order. */}
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Name *
+                  Scope *
                 </label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Project Alpha"
+                <select
+                  value={form.scope}
+                  onChange={(e) =>
+                    // Clear the name — the previous selection belongs to the other scope.
+                    setForm({ ...form, scope: e.target.value as BudgetScope, name: "" })
+                  }
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+                >
+                  <option value="Project">Project</option>
+                  <option value="Department">Department</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                    Scope *
+                    {form.scope} *
                   </label>
                   <select
-                    value={form.scope}
-                    onChange={(e) =>
-                      setForm({ ...form, scope: e.target.value as BudgetScope })
-                    }
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
                   >
-                    <option value="Project">Project</option>
-                    <option value="Department">Department</option>
+                    <option value="">
+                      {scopeOptions.length
+                        ? `Select ${form.scope.toLowerCase()}…`
+                        : `No ${form.scope.toLowerCase()}s available`}
+                    </option>
+                    {scopeOptions.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
                   </select>
+                  {scopeOptions.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Create a {form.scope.toLowerCase()} first.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">
@@ -550,7 +596,7 @@ export function BudgetManagementPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Total Budget (USD) *
+                  Total Budget *
                 </label>
                 <input
                   value={form.totalBudget}
@@ -607,7 +653,7 @@ export function BudgetManagementPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Total Budget (USD) *</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Total Budget *</label>
                 <input value={form.totalBudget} onChange={(e) => setForm({ ...form, totalBudget: e.target.value })} placeholder="e.g. 5000000" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
               </div>
             </div>
@@ -620,6 +666,20 @@ export function BudgetManagementPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Budget?"
+        description={
+          deleteTarget
+            ? `This will permanently remove "${deleteTarget.name}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={deleteBudget}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

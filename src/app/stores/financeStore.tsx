@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
+import { fetchAccruals, fetchAccrualTypes } from "../api/accruals";
 import type {
   Account, AccountType, FiscalYear,
   Accrual, TxnType, AccrualTypeConfig,
@@ -28,6 +29,8 @@ interface FinanceContextValue {
   setAccruals: React.Dispatch<React.SetStateAction<Accrual[]>>;
   accrualTypeConfigs: AccrualTypeConfig[];
   setAccrualTypeConfigs: React.Dispatch<React.SetStateAction<AccrualTypeConfig[]>>;
+  /** Re-reads accruals from the backend after a mutation. */
+  reloadAccruals: () => Promise<void>;
 
   getAccountBalance: (accountId: string) => number;
   getAccountsByType: (type: AccountType) => Account[];
@@ -88,62 +91,7 @@ const SEED_FISCAL_YEARS: FiscalYear[] = [
   { id: "fy2", label: "FY 2026", startDate: "2026-01-01", endDate: "2026-12-31", status: "open", isCurrent: true },
 ];
 
-// ── Seed Accruals ──────────────────────────────────────────────────────────
-const SEED_ACCRUALS: Accrual[] = [
-  {
-    id: "acc-001", type: "goods-received-not-invoiced",
-    title: "GRNI — CemCo Cement Delivery",
-    description: "400 bags cement received, invoice pending from CemCo Nigeria Ltd",
-    lines: [{ id: "al-1", account: "5200 Material Costs", description: "Cement stock", debit: 3400000, credit: 0 }, { id: "al-2", account: "2120 Accrued Expenses", description: "Accrual for unpaid invoice", debit: 0, credit: 3400000 }],
-    amount: 3400000,
-    status: "active", approvalStatus: "approved", approvalSteps: [],
-    createdAt: "2026-04-10", createdBy: "Amaka Osei",
-    reversalDate: "2026-05-10", reference: "PO-0031", sourceModule: "Procurement",
-    sourceRef: "PO-0031", fiscalYearId: "fy2",
-  },
-  {
-    id: "acc-002", type: "accrued-expense",
-    title: "April Payroll Accrual",
-    description: "Unpaid salaries for last week of April",
-    lines: [{ id: "al-3", account: "5100 Labour Costs", description: "Salary accrual", debit: 1250000, credit: 0 }, { id: "al-4", account: "2120 Accrued Expenses", description: "Liability for unpaid salaries", debit: 0, credit: 1250000 }],
-    amount: 1250000,
-    status: "active", approvalStatus: "approved", approvalSteps: [],
-    createdAt: "2026-04-30", createdBy: "Ngozi Okafor",
-    reversalDate: "2026-05-07", reference: "PRLL-APR26-ACCRUAL", sourceModule: "HR",
-    sourceRef: "PRLL-APR26", fiscalYearId: "fy2",
-  },
-  {
-    id: "acc-003", type: "prepaid-expense",
-    title: "Q2 Insurance Premium",
-    description: "Prepaid insurance for April–June 2026",
-    lines: [{ id: "al-5", account: "1100 Current Assets", description: "Prepaid insurance", debit: 240000, credit: 0 }, { id: "al-6", account: "1110 Cash & Bank", description: "Payment", debit: 0, credit: 240000 }],
-    amount: 240000,
-    status: "partially-reversed", approvalStatus: "approved", approvalSteps: [],
-    createdAt: "2026-04-01", createdBy: "Sola Adeleke",
-    reversalDate: "2026-07-01", reversedAmount: 80000, reference: "INS-Q2-2026",
-    sourceModule: "Finance", sourceRef: "JRN-0032", fiscalYearId: "fy2",
-  },
-  {
-    id: "acc-004", type: "deferred-revenue",
-    title: "Mobilisation Fee — Riverside Phase 2",
-    description: "Client advance payment for project mobilisation",
-    lines: [{ id: "al-7", account: "1110 Cash & Bank", description: "Client advance received", debit: 5000000, credit: 0 }, { id: "al-8", account: "2100 Current Liabilities", description: "Deferred revenue liability", debit: 0, credit: 5000000 }],
-    amount: 5000000,
-    status: "active", approvalStatus: "approved", approvalSteps: [],
-    createdAt: "2026-03-15", createdBy: "Sola Adeleke",
-    reversalDate: "2026-09-15", reference: "INC-0016", sourceModule: "Projects",
-    sourceRef: "PROJ-0008", fiscalYearId: "fy2",
-  },
-];
 
-// ── Seed Accrual Type Configs ─────────────────────────────────────────────
-const SEED_ACCRUAL_TYPE_CONFIGS: AccrualTypeConfig[] = [
-  { id: "atc-1", type: "goods-received-not-invoiced", label: "Goods Received Not Invoiced", color: "bg-blue-100 text-blue-700", description: "Goods received but invoice not yet processed" },
-  { id: "atc-2", type: "accrued-expense",              label: "Accrued Expense",              color: "bg-amber-100 text-amber-700", description: "Expenses incurred but not yet paid" },
-  { id: "atc-3", type: "prepaid-expense",              label: "Prepaid Expense",              color: "bg-purple-100 text-purple-700", description: "Expenses paid in advance" },
-  { id: "atc-4", type: "accrued-revenue",             label: "Accrued Revenue",              color: "bg-emerald-100 text-emerald-700", description: "Revenue earned but not yet billed" },
-  { id: "atc-5", type: "deferred-revenue",            label: "Deferred Revenue",            color: "bg-orange-100 text-orange-700", description: "Revenue received but not yet earned" },
-];
 
 // ── Context ────────────────────────────────────────────────────────────────
 const FinanceContext = createContext<FinanceContextValue | null>(null);
@@ -152,24 +100,23 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>(SEED_ACCOUNTS);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>(SEED_FISCAL_YEARS);
-  const [accruals, setAccruals] = useState<Accrual[]>(() => {
-    try {
-      const raw = localStorage.getItem("buildos_accruals");
-      if (raw) return JSON.parse(raw) as Accrual[];
-    } catch {
-      /* ignore */
-    }
-    return SEED_ACCRUALS;
-  });
+  // Accruals and their type catalogue are persisted server-side. They used to be
+  // seeded from a hardcoded array and mirrored into localStorage, so nothing a
+  // user entered survived a refresh (and every session showed the same demo rows).
+  const [accruals, setAccruals] = useState<Accrual[]>([]);
+  const [accrualTypeConfigs, setAccrualTypeConfigs] = useState<AccrualTypeConfig[]>([]);
+
+  const reloadAccruals = useCallback(
+    () => fetchAccruals().then(setAccruals),
+    [],
+  );
 
   useEffect(() => {
-    try {
-      localStorage.setItem("buildos_accruals", JSON.stringify(accruals));
-    } catch {
-      /* ignore */
-    }
-  }, [accruals]);
-  const [accrualTypeConfigs, setAccrualTypeConfigs] = useState<AccrualTypeConfig[]>(SEED_ACCRUAL_TYPE_CONFIGS);
+    reloadAccruals().catch(() => setAccruals([]));
+    fetchAccrualTypes()
+      .then(setAccrualTypeConfigs)
+      .catch(() => setAccrualTypeConfigs([]));
+  }, [reloadAccruals]);
 
   const getDescendantIds = useCallback((parentId: string): string[] => {
     const children = accounts.filter(a => a.parentId === parentId);
@@ -322,11 +269,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     accounts, setAccounts,
     transactions, setTransactions,
     fiscalYears, setFiscalYears,
-    accruals, setAccruals,
+    accruals, setAccruals, reloadAccruals,
     accrualTypeConfigs, setAccrualTypeConfigs,
     getAccountBalance, getAccountsByType, getDescendantIds,
     getTrialBalance, getBalanceSheet, getIncomeStatement,
-  }), [accounts, transactions, fiscalYears, accruals, accrualTypeConfigs, getAccountBalance, getAccountsByType, getDescendantIds, getTrialBalance, getBalanceSheet, getIncomeStatement]);
+  }), [accounts, transactions, fiscalYears, accruals, reloadAccruals, accrualTypeConfigs, getAccountBalance, getAccountsByType, getDescendantIds, getTrialBalance, getBalanceSheet, getIncomeStatement]);
 
   return (
     <FinanceContext.Provider value={value}>

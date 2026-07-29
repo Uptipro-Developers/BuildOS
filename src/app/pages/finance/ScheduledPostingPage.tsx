@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { getChartAccounts } from "../../api/finance-extras";
 import { apiFetch } from "../../api/client";
 import {
@@ -379,12 +380,14 @@ export function ScheduledPostingPage() {
         p.id === id ? { ...p, status: "processed", processedDate: today } : p,
       ),
     );
+    toast.success("Scheduled posting processed.");
   }
 
   function cancelPosting(id: string) {
     setPostings((prev) =>
       prev.map((p) => (p.id === id ? { ...p, status: "cancelled" } : p)),
     );
+    toast.success("Scheduled posting cancelled.");
   }
 
   return (
@@ -616,9 +619,14 @@ export function ScheduledPostingPage() {
               .then((created) => {
                 setPostings((prev) => [created ?? p, ...prev]);
                 setShowModal(false);
+                toast.success("Scheduled posting created.");
               })
               .catch((err) => {
-                alert("Failed to create scheduled posting. Please try again.");
+                toast.error(
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to create scheduled posting.",
+                );
                 console.error(err);
               });
           }}

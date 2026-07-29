@@ -26,6 +26,7 @@ import { BudgetsModule } from './budgets/budgets.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AuthModule } from './auth/auth.module';
 import { MaterialsModule } from './materials/materials.module';
+import { AccrualsModule } from './accruals/accruals.module';
 import { ProcurementRequestsModule } from './procurement-requests/procurement-requests.module';
 import { ConstructionExtrasModule } from './construction-extras/construction-extras.module';
 import { HrExtrasModule } from './hr-extras/hr-extras.module';
@@ -102,6 +103,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         BudgetsModule,
         PaymentsModule,
         MaterialsModule,
+        AccrualsModule,
         ProcurementRequestsModule,
         ConstructionExtrasModule,
         HrExtrasModule,

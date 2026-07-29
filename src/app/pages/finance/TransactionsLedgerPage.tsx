@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
@@ -325,6 +326,7 @@ export function TransactionsLedgerPage() {
         t.createdBy,
       ]),
     );
+    toast.success(`Exported ${allTransactions.length} transactions.`);
   }
 
   const columns: Column<Transaction>[] = [

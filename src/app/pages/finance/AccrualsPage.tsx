@@ -1,13 +1,21 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   ScrollText, Plus, X, Save, CheckCircle, XCircle, RefreshCw,
   AlertTriangle, Send,
 } from "lucide-react";
 import { useFinance } from "../../stores/financeStore";
+import {
+  createAccrual,
+  updateAccrual,
+  approveAccrual,
+  rejectAccrual,
+  reverseAccrual,
+} from "../../api/accruals";
+import { getAuthUserName } from "../../utils/useAuthUser";
 import { exportCSV } from "../../utils/exportCSV";
 import { csvAmountHeader } from "../../utils/generalSettings";
 import { useChangelog } from "../../stores/changelogStore";
-import { useNumbering } from "../../stores/numberingStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import type {
   Accrual, AccrualType, AccrualStatus, AccrualLine,
@@ -45,7 +53,6 @@ function emptyLine(): AccrualLine {
 export function AccrualsPage() {
   const { accruals, setAccruals, fiscalYears, accounts, accrualTypeConfigs } = useFinance();
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<AccrualType | "All">("All");
@@ -82,8 +89,9 @@ export function AccrualsPage() {
 
   const totalDebits = form.lines.reduce((s, l) => s + (l.debit || 0), 0);
   const totalCredits = form.lines.reduce((s, l) => s + (l.credit || 0), 0);
+  // The accrual's amount is derived server-side from the line debits, so it is
+  // not computed here.
   const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
-  const totalAmount = totalDebits || totalCredits;
 
   function handleCreate() {
     if (!form.title.trim() || !form.reversalDate || !form.type) return;
@@ -91,65 +99,87 @@ export function AccrualsPage() {
     const lines = form.lines.filter(l => l.account && (l.debit || l.credit));
     if (lines.length === 0) return;
 
-    const accrual: Accrual = {
-      id: getNextId("Accrual"),
+    // Only send a reference the user actually typed. Leaving it blank lets the
+    // backend mint a guaranteed-unique one — the client-side counter restarts each
+    // session, so auto-filling it here collided with previously saved accruals.
+    const reference = form.reference.trim();
+    createAccrual({
+      ...(reference ? { reference, sourceRef: reference } : {}),
       type: form.type,
       title: form.title.trim(),
       description: form.description.trim(),
-      lines,
-      amount: totalAmount,
+      createdBy: getAuthUserName() || "Current User",
+      reversalDate: form.reversalDate,
+      sourceModule: form.sourceModule,
+      fiscalYearId: currentFy?.id,
       status: "draft",
       approvalStatus: "draft",
-      approvalSteps: [],
-      createdAt: new Date().toISOString().split("T")[0],
-      createdBy: "Sola Adeleke",
-      reversalDate: form.reversalDate,
-      reference: form.reference.trim() || getNextId("Accrual"),
-      sourceModule: form.sourceModule,
-      sourceRef: form.reference.trim() || getNextId("Accrual"),
-      fiscalYearId: currentFy?.id ?? "fy2",
-    };
-    setAccruals(prev => [accrual, ...prev]);
-    logChange({ module: "Finance", action: "Created", entityType: "Accrual", entityId: accrual.id, summary: `Accrual "${accrual.title}" (${accrual.type}) created`, performedBy: "Sola Adeleke" });
-    setShowModal(false);
-    setForm({ type: "", title: "", description: "", reversalDate: "", reference: "", sourceModule: "Procurement", lines: [emptyLine(), emptyLine()] });
+      lines: lines.map(l => ({ account: l.account, description: l.description, debit: l.debit || 0, credit: l.credit || 0 })),
+    })
+      .then((created) => {
+        setAccruals(prev => [created, ...prev]);
+        logChange({ module: "Finance", action: "Created", entityType: "Accrual", entityId: created.id, summary: `Accrual "${created.title}" (${created.type}) created`, performedBy: getAuthUserName() || "Current User" });
+        setShowModal(false);
+        setForm({ type: "", title: "", description: "", reversalDate: "", reference: "", sourceModule: "Procurement", lines: [emptyLine(), emptyLine()] });
+        toast.success("Accrual created.");
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to create accrual."));
+  }
+
+  /** Applies a server-returned accrual back into the list. */
+  function applyUpdated(updated: Accrual) {
+    setAccruals(prev => prev.map(a => (a.id === updated.id ? updated : a)));
   }
 
   function handleSubmitForApproval(id: string) {
-    setAccruals(prev => prev.map(a =>
-      a.id === id ? { ...a, status: "pending" as AccrualStatus, approvalStatus: "pending", approvalSteps: [{ role: "Finance Manager", action: "pending" }] } : a
-    ));
-    logChange({ module: "Finance", action: "Submitted for Approval", entityType: "Accrual", entityId: id, summary: `Accrual submitted for approval`, performedBy: "Sola Adeleke" });
+    updateAccrual(id, { status: "pending", approvalStatus: "pending" })
+      .then((updated) => {
+        applyUpdated(updated);
+        logChange({ module: "Finance", action: "Submitted for Approval", entityType: "Accrual", entityId: id, summary: `Accrual submitted for approval`, performedBy: getAuthUserName() || "Current User" });
+        toast.success("Accrual submitted for approval.");
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to submit accrual."));
   }
 
   function handleApprove(id: string) {
-    setAccruals(prev => prev.map(a =>
-      a.id === id ? { ...a, status: "active" as AccrualStatus, approvalStatus: "approved", approvalSteps: a.approvalSteps.map(s => s.action === "pending" ? { ...s, action: "approved" as const, actedBy: "Sola Adeleke", actedAt: new Date().toISOString() } : s) } : a
-    ));
-    logChange({ module: "Finance", action: "Approved", entityType: "Accrual", entityId: id, summary: `Accrual approved`, performedBy: "Sola Adeleke" });
+    approveAccrual(id, getAuthUserName() || "Current User")
+      .then((updated) => {
+        applyUpdated(updated);
+        logChange({ module: "Finance", action: "Approved", entityType: "Accrual", entityId: id, summary: `Accrual approved`, performedBy: getAuthUserName() || "Current User" });
+        toast.success("Accrual approved.");
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to approve accrual."));
   }
 
   function handleReject(id: string) {
-    setAccruals(prev => prev.map(a =>
-      a.id === id ? { ...a, status: "cancelled" as AccrualStatus, approvalStatus: "rejected", approvalSteps: a.approvalSteps.map(s => s.action === "pending" ? { ...s, action: "rejected" as const, actedBy: "Sola Adeleke", actedAt: new Date().toISOString() } : s) } : a
-    ));
-    logChange({ module: "Finance", action: "Rejected", entityType: "Accrual", entityId: id, summary: `Accrual rejected`, performedBy: "Sola Adeleke" });
+    rejectAccrual(id, getAuthUserName() || "Current User")
+      .then((updated) => {
+        applyUpdated(updated);
+        logChange({ module: "Finance", action: "Rejected", entityType: "Accrual", entityId: id, summary: `Accrual rejected`, performedBy: getAuthUserName() || "Current User" });
+        toast.success("Accrual rejected.");
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to reject accrual."));
   }
 
   function handleReverse(id: string) {
-    setAccruals(prev => prev.map(a =>
-      a.id === id
-        ? { ...a, status: "fully-reversed" as AccrualStatus, reversedAt: new Date().toISOString().split("T")[0], reversedAmount: a.amount }
-        : a
-    ));
-    logChange({ module: "Finance", action: "Reversed", entityType: "Accrual", entityId: id, summary: `Accrual fully reversed`, performedBy: "Sola Adeleke" });
+    // Omitting the amount reverses the whole outstanding balance.
+    reverseAccrual(id)
+      .then((updated) => {
+        applyUpdated(updated);
+        logChange({ module: "Finance", action: "Reversed", entityType: "Accrual", entityId: id, summary: `Accrual fully reversed`, performedBy: getAuthUserName() || "Current User" });
+        toast.success("Accrual reversed.");
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to reverse accrual."));
   }
 
   function handleCancel(id: string) {
-    setAccruals(prev => prev.map(a =>
-      a.id === id ? { ...a, status: "cancelled" as AccrualStatus } : a
-    ));
-    logChange({ module: "Finance", action: "Cancelled", entityType: "Accrual", entityId: id, summary: `Accrual cancelled`, performedBy: "Sola Adeleke" });
+    updateAccrual(id, { status: "cancelled" })
+      .then((updated) => {
+        applyUpdated(updated);
+        logChange({ module: "Finance", action: "Cancelled", entityType: "Accrual", entityId: id, summary: `Accrual cancelled`, performedBy: getAuthUserName() || "Current User" });
+        toast.success("Accrual cancelled.");
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to cancel accrual."));
   }
 
   function handleExport() {
@@ -157,6 +187,7 @@ export function AccrualsPage() {
       ["ID", "Type", "Title", csvAmountHeader("Amount"), "Status", "Approval", "Created", "Reversal Date", "Source", "Reference"],
       filtered.map(a => [a.id, accrualTypeConfigs.find(tc => tc.type === a.type)?.label ?? a.type, a.title, a.amount, ACCRUAL_STATUS_LABELS[a.status], APPROVAL_LABELS[a.approvalStatus] ?? a.approvalStatus, a.createdAt, a.reversalDate, a.sourceModule, a.reference]),
     );
+    toast.success(`Exported ${filtered.length} accruals.`);
   }
 
   function getAccountOptions() {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { toast } from "sonner";
 import { BarChart3, Download, TrendingUp, TrendingDown, DollarSign, ScrollText } from "lucide-react";
 import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../../stores/financeStore";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -198,6 +199,7 @@ export function FinanceReportsPage() {
       incomeStatement.forEach(r => rows.push([r.label, r.isSection ? "" : r.amount]));
     }
     exportCSV(`finance-report-${selectedReport}-${selectedFy?.label ?? "all"}`, headers, rows);
+    toast.success("Report exported.");
   }
 
   function exportTB() {
@@ -205,6 +207,7 @@ export function FinanceReportsPage() {
     const rows: CsvCell[][] = tb.map(r => [r.code, r.accountName, r.type, r.debit, r.credit]);
     rows.push(["", "", "Total", totalDebits, totalCredits]);
     exportCSV(`trial-balance-${selectedFy?.label ?? "all"}`, headers, rows);
+    toast.success("Trial balance exported.");
   }
 
   function exportBS() {
@@ -215,24 +218,28 @@ export function FinanceReportsPage() {
       s.items.forEach(i => rows.push(["", i.account, i.amount]));
     });
     exportCSV(`balance-sheet-${selectedFy?.label ?? "all"}`, headers, rows);
+    toast.success("Balance sheet exported.");
   }
 
   function exportIS() {
     const headers = ["Item", csvAmountHeader("Amount")];
     const rows = incomeStatement.map(r => [r.label, r.isSection ? "" : r.amount]);
     exportCSV(`income-statement-${selectedFy?.label ?? "all"}`, headers, rows);
+    toast.success("Income statement exported.");
   }
 
   function exportCF() {
     const headers = ["Metric", "Value"];
     const rows = cashflowRows.map(r => [r.label, r.value]);
     exportCSV("cash-flow", headers, rows);
+    toast.success("Cash flow report exported.");
   }
 
   function exportBudget() {
     const headers = ["Project", "Utilisation", "Details"];
     const rows = budgetRows.map(r => [r.label, r.value, r.sub ?? ""]);
     exportCSV("budget-vs-actual", headers, rows);
+    toast.success("Budget vs actual report exported.");
   }
 
   const active = templates.find((t) => t.id === selectedReport) ?? templates[0];

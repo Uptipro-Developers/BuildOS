@@ -21,7 +21,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // ── Configuration ──────────────────────────────────────────────────────────
-const BUILDOS_API = process.env.BUILDOS_API || "http://127.0.0.1:8080";
+// This spec appends "/api" itself, whereas the other specs take BUILDOS_API with
+// the "/api" suffix already included. Strip it so one env var works for all of them.
+const BUILDOS_API = (process.env.BUILDOS_API || "http://127.0.0.1:8080").replace(/\/api\/?$/, "");
 const INVOICE_API = process.env.INVOICE_API || "http://127.0.0.1:4000";
 const BUILDOS_ADMIN_EMAIL =
   process.env.BUILDOS_ADMIN_EMAIL || "admin@buildos.ng";

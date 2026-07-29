@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 
 type ExpenseStatus =
@@ -165,6 +166,8 @@ export function ExpenseManagementPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [viewExpense, setViewExpense] = useState<Expense | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [rejectState, setRejectState] = useState<{
     id: string;
@@ -253,7 +256,7 @@ export function ExpenseManagementPage() {
           {e.status === "Draft" && (
             <>
               <button onClick={() => openEditExpense(e)} title="Edit" className="p-1.5 hover:bg-emerald-50 rounded-lg text-gray-400 hover:text-emerald-600"><Edit className="w-3.5 h-3.5" /></button>
-              <button onClick={() => deleteExpenseRow(e.id)} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setDeleteTarget(e)} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
             </>
           )}
         </div>
@@ -317,18 +320,32 @@ export function ExpenseManagementPage() {
       setExpenses(items.map(toExpense));
       setShowAddModal(false);
       setForm(emptyForm);
+      toast.success(
+        status === "Submitted"
+          ? "Expense submitted."
+          : editId
+            ? "Expense updated."
+            : "Expense saved as draft.",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save expense");
     }
   }
 
-  async function deleteExpenseRow(id: string) {
+  async function deleteExpenseRow() {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleting(true);
     try {
       await deleteExpense(id);
       setExpenses((prev) => prev.filter((e) => e.id !== id));
       logChange({ module: "Finance", action: "Deleted", entityType: "Expense", entityId: id, summary: `Expense ${id} deleted`, performedBy: "Current User" });
+      setDeleteTarget(null);
+      toast.success("Expense deleted.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete expense");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -339,9 +356,12 @@ export function ExpenseManagementPage() {
         fetchExpenses()
           .then((items) => setExpenses(items.map(toExpense)))
           .catch(console.error);
+        toast.success("Expense approved.");
       })
       .catch((err) => {
-        alert("Failed to approve expense. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to approve expense.",
+        );
         console.error(err);
       });
     setViewExpense(null);
@@ -355,9 +375,12 @@ export function ExpenseManagementPage() {
         fetchExpenses()
           .then((items) => setExpenses(items.map(toExpense)))
           .catch(console.error);
+        toast.success("Expense rejected.");
       })
       .catch((err) => {
-        alert("Failed to reject expense. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to reject expense.",
+        );
         console.error(err);
       });
     setRejectState(null);
@@ -369,6 +392,7 @@ export function ExpenseManagementPage() {
       await updateExpense(id, { status: "Sent to Finance" });
       setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, status: "Sent to Finance" } : e));
       logChange({ module: "Finance", action: "Sent to Finance", entityType: "Expense", entityId: id, summary: `Expense ${id} sent to finance`, performedBy: "Current User" });
+      toast.success("Expense sent to finance.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send expense to finance");
     }
@@ -380,6 +404,7 @@ export function ExpenseManagementPage() {
       await updateExpense(id, { status: "Paid" });
       setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, status: "Paid" } : e));
       logChange({ module: "Finance", action: "Paid", entityType: "Expense", entityId: id, summary: `Expense ${id} marked as paid`, performedBy: "Current User" });
+      toast.success("Expense marked as paid.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to mark expense as paid");
     }
@@ -408,6 +433,7 @@ export function ExpenseManagementPage() {
         e.date,
       ]),
     );
+    toast.success(`Exported ${expenses.length} expenses.`);
   }
 
   const counts = {
@@ -590,25 +616,69 @@ export function ExpenseManagementPage() {
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
                   Receipt Upload
                 </label>
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.png,.jpg,.jpeg"
-                    className="hidden"
-                    onChange={handleReceiptChange}
-                  />
-                  <Upload className="w-5 h-5 text-gray-300 mx-auto mb-1" />
-                  <p className="text-xs text-gray-500">
-                    {form.receiptName || "Click to upload or drag and drop"}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    PDF, PNG, JPG up to 10MB
-                  </p>
-                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  className="hidden"
+                  onChange={handleReceiptChange}
+                />
+                {form.receipt ? (
+                  // Confirm the attachment explicitly — a filename alone in the
+                  // drop zone read as placeholder text and left users unsure
+                  // whether anything had actually been attached.
+                  <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 flex items-center gap-3">
+                    {form.receipt.startsWith("data:image/") ? (
+                      <img
+                        src={form.receipt}
+                        alt="Receipt preview"
+                        className="w-12 h-12 object-cover rounded border border-emerald-200 bg-white"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded border border-emerald-200 bg-white flex items-center justify-center">
+                        <Receipt className="w-5 h-5 text-emerald-600" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-emerald-800 flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5" /> Receipt attached
+                      </p>
+                      <p className="text-xs text-emerald-700 truncate">
+                        {form.receiptName || "Existing receipt"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-2 py-1 text-xs border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-100"
+                      >
+                        Replace
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, receipt: "", receiptName: "" }))}
+                        className="p-1 text-emerald-700 hover:bg-emerald-100 rounded"
+                        title="Remove receipt"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+                  >
+                    <Upload className="w-5 h-5 text-gray-300 mx-auto mb-1" />
+                    <p className="text-xs text-gray-500">
+                      Click to upload or drag and drop
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      PDF, PNG, JPG up to 10MB
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
@@ -696,6 +766,42 @@ export function ExpenseManagementPage() {
                   {viewExpense.createdBy}
                 </p>
               </div>
+
+              {/* Receipt preview — reviewers need to see the attachment without
+                  leaving the expense. Images render inline; anything else (e.g. a
+                  PDF) opens in a new tab. */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs text-gray-500 mb-2">Receipt</p>
+                {viewExpense.receipt ? (
+                  <div className="space-y-2">
+                    {viewExpense.receipt.startsWith("data:image/") ? (
+                      <a href={viewExpense.receipt} target="_blank" rel="noreferrer">
+                        <img
+                          src={viewExpense.receipt}
+                          alt="Expense receipt"
+                          className="max-h-48 w-auto rounded border border-gray-200 bg-white object-contain"
+                        />
+                      </a>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-gray-700">
+                        <Receipt className="w-4 h-4 text-gray-400" />
+                        <span>Attached document</span>
+                      </div>
+                    )}
+                    <a
+                      href={viewExpense.receipt}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-emerald-700 hover:underline"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Open full size
+                    </a>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">No receipt attached</p>
+                )}
+              </div>
+
               {viewExpense.approvedBy && (
                 <div className="bg-emerald-50 rounded-lg p-3 flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-emerald-600 mt-0.5" />
@@ -803,6 +909,21 @@ export function ExpenseManagementPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Expense?"
+        description={
+          deleteTarget
+            ? `This will permanently remove "${deleteTarget.description || deleteTarget.id}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={deleting}
+        onConfirm={deleteExpenseRow}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
