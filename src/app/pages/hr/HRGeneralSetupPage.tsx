@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   Save,
   CheckCircle,
@@ -123,9 +124,12 @@ export function HRGeneralSetupPage() {
       .then(() => {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+        toast.success("General setup saved.");
       })
       .catch((err) => {
-        alert("Failed to save setup. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save setup.",
+        );
         console.error(err);
       });
   }
@@ -140,6 +144,7 @@ export function HRGeneralSetupPage() {
       updateConfig(numberingForm.module, numberingForm);
       setEditingNumbering(null);
       setNumberingForm(null);
+      toast.success("Numbering entry updated.");
     }
   }
 
@@ -585,6 +590,7 @@ export function HRGeneralSetupPage() {
                           description: "",
                         });
                         setShowAddForm(false);
+                        toast.success("Numbering entry added.");
                       }}
                       className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                     >
@@ -638,6 +644,7 @@ export function HRGeneralSetupPage() {
           if (!deleteTargetModule) return;
           removeConfig(deleteTargetModule);
           setDeleteTargetModule(null);
+          toast.success("Numbering entry deleted.");
         }}
         onCancel={() => setDeleteTargetModule(null)}
       />

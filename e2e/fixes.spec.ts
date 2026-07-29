@@ -19,7 +19,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 
-const API = "http://localhost:8080/api";
+const API = process.env.BUILDOS_API || "http://localhost:8080/api";
 
 // ── Auth helper ─────────────────────────────────────────────────────────────
 async function injectAuth(page: Page) {

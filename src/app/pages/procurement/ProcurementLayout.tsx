@@ -17,6 +17,7 @@ import {
   Inbox,
   ShieldCheck,
   Settings,
+  Boxes,
 } from "lucide-react";
 
 const sidebarSections = [
@@ -51,6 +52,14 @@ const sidebarSections = [
   {
     label: "Inventory",
     items: [
+      {
+        // Previously only reachable as the module's index route, which now
+        // lands on the dashboard like every other module.
+        label: "Inventory Overview",
+        href: "/apps/procurement/inventory",
+        end: true,
+        icon: <Boxes className="w-4 h-4" />,
+      },
       {
         label: "Stock Movement",
         href: "/apps/procurement/stock-movement",

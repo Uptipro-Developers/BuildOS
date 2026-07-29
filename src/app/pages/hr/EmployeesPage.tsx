@@ -22,6 +22,7 @@ import {
   CheckCircle,
   XCircle,
   UserCheck,
+  Clock,
   X,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
@@ -627,6 +628,7 @@ export function EmployeesPage() {
       (e.projects ?? []).join("; "),
     ]);
     exportCSV("employees", headers, rows);
+    toast.success(`Exported ${rows.length} employees.`);
   }
 
   const initials = (e: EmployeeRow) => `${e.firstName[0]}${e.lastName[0]}`;

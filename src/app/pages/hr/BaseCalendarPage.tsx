@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { apiFetch } from "../../api/client";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
@@ -99,9 +100,12 @@ export function BaseCalendarPage() {
         ]);
         setNewHol({ name: "", date: "", recurring: false });
         setShowAdd(false);
+        toast.success("Holiday added.");
       })
       .catch((err) => {
-        alert("Failed to add holiday. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to add holiday.",
+        );
         console.error(err);
       });
   }
@@ -122,9 +126,14 @@ export function BaseCalendarPage() {
 
   function removeHoliday(id: string) {
     apiFetch(`/holidays/${id}`, { method: "DELETE" })
-      .then(() => setHolidays((prev) => prev.filter((x) => x.id !== id)))
+      .then(() => {
+        setHolidays((prev) => prev.filter((x) => x.id !== id));
+        toast.success("Holiday deleted.");
+      })
       .catch((err) => {
-        alert("Failed to delete holiday. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to delete holiday.",
+        );
         console.error(err);
       });
   }

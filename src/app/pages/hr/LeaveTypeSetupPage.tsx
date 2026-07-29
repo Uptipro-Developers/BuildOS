@@ -83,18 +83,26 @@ export function LeaveTypeSetupPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    if (editId) {
-      const updated = await updateLeaveType(editId, form);
-      setLeaveTypes((prev) =>
-        prev.map((t) => (t.id === editId ? normalizeLeaveType(updated) : t)),
+    try {
+      if (editId) {
+        const updated = await updateLeaveType(editId, form);
+        setLeaveTypes((prev) =>
+          prev.map((t) => (t.id === editId ? normalizeLeaveType(updated) : t)),
+        );
+        setEditId(null);
+        toast.success("Leave type updated.");
+      } else {
+        const created = await createLeaveType(form);
+        setLeaveTypes((prev) => [...prev, normalizeLeaveType(created)]);
+        toast.success("Leave type created.");
+      }
+      setForm(EMPTY);
+      setShowForm(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save leave type.",
       );
-      setEditId(null);
-    } else {
-      const created = await createLeaveType(form);
-      setLeaveTypes((prev) => [...prev, normalizeLeaveType(created)]);
     }
-    setForm(EMPTY);
-    setShowForm(false);
   }
 
   function startEdit(t: UILeaveType) {

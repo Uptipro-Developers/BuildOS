@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -129,8 +130,14 @@ export class MaterialsService {
     }
 
     createRequest(data: any) {
-        const ref = `MRQ-${Date.now()}`;
-        return this.prisma.materialRequest.create({ data: { ...data, reference: ref } });
+        // Honour a client-supplied reference so the numbering configured in
+        // Admin is preserved, and so a multi-item request can write its rows
+        // under related references. Fall back to a generated value that cannot
+        // collide when several rows are created in the same millisecond
+        // (Date.now() alone did, breaking the UNIQUE constraint).
+        const supplied = String(data?.reference ?? '').trim();
+        const reference = supplied || `MRQ-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        return this.prisma.materialRequest.create({ data: { ...data, reference } });
     }
 
     updateRequest(id: string, data: any) {

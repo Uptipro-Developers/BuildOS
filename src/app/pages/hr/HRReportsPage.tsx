@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
   getAttendance,
@@ -218,6 +219,8 @@ export function HRReportsPage() {
     setTimeout(() => {
       setGenerating(false);
       setGenerated(type);
+      const title = reports.find((r) => r.type === type)?.title ?? "Report";
+      toast.success(`${title} generated for ${period}.`);
     }, 1500);
   }
 

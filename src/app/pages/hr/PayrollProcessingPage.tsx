@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   formatCurrencyByGeneralSettings,
   formatTimeByGeneralSettings,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   FileText,
   ArrowRight,
+  Clock,
 } from "lucide-react";
 
 type RunStatus = "idle" | "running" | "complete" | "error";
@@ -23,6 +25,15 @@ type ApprovalStage =
   | "sent_to_finance"
   | "finance_confirmed"
   | "paid";
+
+const STAGE_MESSAGES: Record<ApprovalStage, string> = {
+  draft: "Payroll draft created.",
+  sent_for_approval: "Payroll processed and sent for approval.",
+  manager_approved: "Payroll approved as manager.",
+  sent_to_finance: "Payroll sent to Finance.",
+  finance_confirmed: "Payment confirmed by Finance.",
+  paid: "Payroll marked as paid.",
+};
 
 interface ProcessEntry {
   id: string;
@@ -101,6 +112,7 @@ export function PayrollProcessingPage() {
   function advanceStage(to: ApprovalStage) {
     setApprovalStage(to);
     setStageTimestamps((t) => ({ ...t, [to]: now() }));
+    toast.success(STAGE_MESSAGES[to]);
   }
 
   function runPayroll() {

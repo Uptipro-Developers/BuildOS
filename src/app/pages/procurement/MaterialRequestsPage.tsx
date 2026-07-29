@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   getMaterialRequests,
+  createMaterialRequest,
+  updateMaterialRequest,
+  getStores,
   MaterialRequest as ApiMR,
 } from "../../api/materials";
 import {
@@ -29,12 +33,20 @@ import {
 } from "../../components/AdvancedFilter";
 import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
+import { getAuthUserName } from "../../utils/useAuthUser";
 
 type ReqStatus =
   "pending" | "approved" | "rejected" | "in_procurement" | "fulfilled";
 
 type LocalMR = {
   id: string;
+  /**
+   * Database ids of every MaterialRequest row behind this card. The API stores
+   * one row per material while the UI presents a single multi-item request, so
+   * the rows are grouped by shared `reference` and status changes must be
+   * applied to all of them.
+   */
+  apiIds: string[];
   project: string;
   requestedBy: string;
   department: string;
@@ -44,6 +56,9 @@ type LocalMR = {
   neededBy: string;
   totalItems: number;
   justification: string;
+  /** Fulfilling store — required by the backend MaterialRequest model. */
+  storeId?: string;
+  storeName?: string;
   items: {
     material: string;
     qty: number;
@@ -71,6 +86,7 @@ function fromApiMR(r: ApiMR): LocalMR {
   ) as "urgent" | "high" | "normal";
   return {
     id: r.reference ?? r.id,
+    apiIds: [r.id],
     project: r.projectName ?? "Unknown Project",
     requestedBy: r.requestedBy ?? "Unknown",
     department: "Site",
@@ -92,6 +108,46 @@ function fromApiMR(r: ApiMR): LocalMR {
       },
     ],
   };
+}
+
+/**
+ * MaterialRequest.reference is UNIQUE in the schema, so a multi-item request
+ * cannot store one shared reference across its rows. Each row is written as
+ * `<requestRef>/<n>` instead, and the base reference is what the UI groups on.
+ */
+const ITEM_REF_SEPARATOR = "/";
+
+export function itemReference(requestRef: string, index: number): string {
+  return `${requestRef}${ITEM_REF_SEPARATOR}${index + 1}`;
+}
+
+function baseReference(reference: string): string {
+  const cut = reference.lastIndexOf(ITEM_REF_SEPARATOR);
+  if (cut <= 0) return reference;
+  // Only strip the suffix when it really is an item counter.
+  return /^\d+$/.test(reference.slice(cut + 1)) ? reference.slice(0, cut) : reference;
+}
+
+/**
+ * Collapses the API's one-row-per-material records into the multi-item requests
+ * the UI shows, grouping the `<ref>/<n>` rows a single submission writes.
+ */
+function groupApiRequests(rows: ApiMR[]): LocalMR[] {
+  const grouped = new Map<string, LocalMR>();
+  for (const row of rows) {
+    const mapped = fromApiMR(row);
+    const key = baseReference(mapped.id);
+    mapped.id = key;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.apiIds.push(...mapped.apiIds);
+      existing.items.push(...mapped.items);
+      existing.totalItems = existing.items.length;
+    } else {
+      grouped.set(key, mapped);
+    }
+  }
+  return [...grouped.values()];
 }
 
 const statusConfig: Record<
@@ -183,7 +239,7 @@ function NewMRModal({
   onSave,
 }: {
   onClose: () => void;
-  onSave: (req: LocalMR) => void;
+  onSave: (req: LocalMR) => void | Promise<void>;
 }) {
   const today = new Date();
   const fmtDate = (d: Date) => formatDateByGeneralSettings(d);
@@ -195,8 +251,13 @@ function NewMRModal({
 
   const [projects, setProjects] = useState<string[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
+  // MaterialRequest.storeName is required by the backend, so the fulfilling
+  // store has to be captured here rather than defaulted server-side.
+  const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
+  const [storeId, setStoreId] = useState("");
   const [project, setProject] = useState("");
   const [department, setDepartment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [neededDays, setNeededDays] = useState("5");
   const [priority, setPriority] = useState<"urgent" | "high" | "normal">(
     "normal",
@@ -217,6 +278,13 @@ function NewMRModal({
         setDepartment((prev) => prev || departmentNames[0] || "");
       })
       .catch(() => {});
+    getStores()
+      .then((list) => {
+        const options = list.map((s) => ({ id: s.id, name: s.name }));
+        setStores(options);
+        setStoreId((prev) => prev || options[0]?.id || "");
+      })
+      .catch(() => setStores([]));
   }, []);
 
   const addItem = () =>
@@ -231,31 +299,41 @@ function NewMRModal({
   const { getNextId } = useNumbering();
   const valid =
     project &&
+    storeId &&
     justification.trim() &&
     items.every((it) => it.material.trim() && it.qty.trim());
 
-  function handleSave() {
-    if (!valid) return;
+  async function handleSave() {
+    if (!valid || submitting) return;
+    setSubmitting(true);
     const nextId = getNextId("MaterialRequest");
-    onSave({
-      id: nextId,
-      project,
-      requestedBy: "Amaka Osei",
-      department,
-      status: "pending",
-      priority,
-      submittedDate: fmtDate(today),
-      neededBy: addDays(parseInt(neededDays) || 5),
-      totalItems: items.length,
-      justification: justification.trim(),
-      items: items.map((it) => ({
-        material: it.material,
-        qty: parseFloat(it.qty) || 0,
-        unit: it.unit,
-        available: parseFloat(it.available) || 0,
-        notes: it.notes,
-      })),
-    });
+    try {
+      await onSave({
+        id: nextId,
+        // Filled in by the caller once the backend rows are created.
+        apiIds: [],
+        storeId,
+        storeName: stores.find((s) => s.id === storeId)?.name ?? "",
+        project,
+        requestedBy: getAuthUserName() || "Current User",
+        department,
+        status: "pending",
+        priority,
+        submittedDate: fmtDate(today),
+        neededBy: addDays(parseInt(neededDays) || 5),
+        totalItems: items.length,
+        justification: justification.trim(),
+        items: items.map((it) => ({
+          material: it.material,
+          qty: parseFloat(it.qty) || 0,
+          unit: it.unit,
+          available: parseFloat(it.available) || 0,
+          notes: it.notes,
+        })),
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -299,6 +377,23 @@ function NewMRModal({
               >
                 {departments.map((d) => (
                   <option key={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Fulfilling Store <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={storeId}
+                onChange={(e) => setStoreId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select store…</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -698,12 +793,37 @@ export function MaterialRequestsPage() {
   const [showNewMR, setShowNewMR] = useState(false);
   const [rejectReq, setRejectReq] = useState<LocalMR | null>(null);
 
+  function loadRequests() {
+    return getMaterialRequests()
+      .then((data) => setReqList(groupApiRequests(data)))
+      .catch(console.error);
+  }
+
   useEffect(() => {
-    getMaterialRequests()
-      .then((data) => setReqList(data.map(fromApiMR)))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    loadRequests().finally(() => setLoading(false));
   }, []);
+
+  /** Applies a status change to every API row behind a request card. */
+  async function persistStatus(req: LocalMR, status: ReqStatus) {
+    const previous = reqList;
+    // Optimistic: the card reflects the new status immediately, and rolls back
+    // if the backend rejects it.
+    setReqList((prev) =>
+      prev.map((r) => (r.id === req.id ? { ...r, status } : r)),
+    );
+    try {
+      await Promise.all(
+        req.apiIds.map((apiId) => updateMaterialRequest(apiId, { status })),
+      );
+    } catch (error) {
+      setReqList(previous);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to update the material request.",
+      );
+    }
+  }
 
   const filtered = applyFiltersAndSort(
     reqList.filter((r) => {
@@ -963,15 +1083,7 @@ export function MaterialRequestsPage() {
                           Request More Info
                         </button>
                         <button
-                          onClick={() =>
-                            setReqList((prev) =>
-                              prev.map((r) =>
-                                r.id === req.id
-                                  ? { ...r, status: "approved" as const }
-                                  : r,
-                              ),
-                            )
-                          }
+                          onClick={() => persistStatus(req, "approved")}
                           className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700"
                         >
                           Approve Request
@@ -1009,9 +1121,43 @@ export function MaterialRequestsPage() {
       {showNewMR && (
         <NewMRModal
           onClose={() => setShowNewMR(false)}
-          onSave={(req) => {
-            setReqList((prev) => [req, ...prev]);
-            setShowNewMR(false);
+          onSave={async (req) => {
+            // The API stores one row per material; every row of a single
+            // submission shares the request's reference so the list can group
+            // them back into one card after a reload.
+            try {
+              await Promise.all(
+                req.items.map((item, index) =>
+                  createMaterialRequest({
+                    // reference is UNIQUE per row, so each item gets `<ref>/<n>`.
+                    reference: itemReference(req.id, index),
+                    materialName: item.material,
+                    unit: item.unit || "unit",
+                    qty: item.qty,
+                    storeId: req.storeId,
+                    storeName: req.storeName,
+                    projectName: req.project,
+                    purpose: req.justification,
+                    priority: req.priority,
+                    status: "pending",
+                    requestedBy: req.requestedBy,
+                    requestDate: new Date().toISOString(),
+                    notes: item.notes || undefined,
+                  }),
+                ),
+              );
+              // Re-read so the card carries the real database ids that later
+              // status changes need.
+              await loadRequests();
+              setShowNewMR(false);
+              toast.success(`Material request ${req.id} submitted.`);
+            } catch (error) {
+              toast.error(
+                error instanceof Error
+                  ? error.message
+                  : "Failed to submit the material request.",
+              );
+            }
           }}
         />
       )}
@@ -1020,13 +1166,7 @@ export function MaterialRequestsPage() {
           req={rejectReq}
           onClose={() => setRejectReq(null)}
           onDone={(_reason) => {
-            setReqList((prev) =>
-              prev.map((r) =>
-                r.id === rejectReq.id
-                  ? { ...r, status: "rejected" as const }
-                  : r,
-              ),
-            );
+            void persistStatus(rejectReq, "rejected");
             setRejectReq(null);
           }}
         />
@@ -1036,13 +1176,7 @@ export function MaterialRequestsPage() {
           req={raisePRFor}
           onClose={() => setRaisePRFor(null)}
           onDone={(prId, _type, _suppliers) => {
-            setReqList((prev) =>
-              prev.map((r) =>
-                r.id === raisePRFor.id
-                  ? { ...r, status: "in_procurement" as const }
-                  : r,
-              ),
-            );
+            void persistStatus(raisePRFor, "in_procurement");
             setPrToast(prId);
             setTimeout(() => setPrToast(null), 5000);
           }}

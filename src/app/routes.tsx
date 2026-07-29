@@ -340,8 +340,11 @@ export const router = createBrowserRouter([
             path: "procurement",
             Component: ProcurementLayout,
             children: [
-              { index: true, Component: InventoryPage },
+              // Every module lands on its dashboard; Procurement previously
+              // opened the Inventory list instead.
+              { index: true, Component: ProcurementDashboardPage },
               { path: "dashboard", Component: ProcurementDashboardPage },
+              { path: "inventory", Component: InventoryPage },
               { path: "stock-levels", Component: StockLevelsPage },
               { path: "stock-movement", Component: StockMovementPage },
               { path: "material-requests", Component: MaterialRequestsPage },

@@ -1,5 +1,11 @@
 import { useState, useEffect } from "react";
-import { fetchSuppliers } from "../../api/suppliers";
+import { toast } from "sonner";
+import {
+  fetchSuppliers,
+  createSupplier,
+  updateSupplier,
+  deleteSupplier,
+} from "../../api/suppliers";
 import { fetchPurchaseOrders } from "../../api/purchase-orders";
 import {
   Building,
@@ -73,8 +79,11 @@ const BLANK_MODAL_DOCS: Record<string, File | null> = Object.fromEntries(
 
 export function SuppliersPage() {
   const [supplierList, setSupplierList] = useState<Supplier[]>([]);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
-    fetchSuppliers().then(setSupplierList);
+    fetchSuppliers()
+      .then(setSupplierList)
+      .catch(() => toast.error("Failed to load suppliers."));
   }, []);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -165,43 +174,58 @@ export function SuppliersPage() {
     setShowModal(true);
   }
 
-  function handleAdd() {
-    if (modalMode === "edit" && editTarget) {
-      setSupplierList((prev) =>
-        prev.map((s) => (s.id === editTarget.id ? { ...s, ...form } : s)),
-      );
+  async function handleAdd() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      if (modalMode === "edit" && editTarget) {
+        const updated = await updateSupplier(editTarget.id, form);
+        setSupplierList((prev) =>
+          prev.map((s) => (s.id === editTarget.id ? { ...s, ...updated } : s)),
+        );
+        setShowModal(false);
+        toast.success(`${updated.name} updated.`);
+        return;
+      }
+
+      const created = await createSupplier(form);
+      setSupplierList((prev) => [...prev, created]);
+
+      const docEntries = Object.entries(modalDocs)
+        .filter(([, file]) => file !== null)
+        .reduce<Record<string, { fileName: string }>>((acc, [docName, file]) => {
+          acc[docName] = { fileName: file!.name };
+          return acc;
+        }, {});
+      if (Object.keys(docEntries).length > 0) {
+        // Keyed by the real id the backend assigned.
+        setUploadedDocs((prev) => ({ ...prev, [created.id]: docEntries }));
+      }
       setShowModal(false);
-      return;
+      toast.success(`${created.name} added.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save the supplier.",
+      );
+    } finally {
+      setSaving(false);
     }
-    const newId = `SUP-${String(supplierList.length + 1).padStart(3, "0")}`;
-    const newSup = {
-      ...form,
-      id: newId,
-      rating: 0,
-      onTimeDeliveryRate: 0,
-      rejectRate: 0,
-      activePOs: 0,
-      totalSpend: 0,
-      lastOrder: "—",
-      status: "active" as const,
-      materials: [],
-    };
-    setSupplierList([...supplierList, newSup]);
-    const docEntries = Object.entries(modalDocs)
-      .filter(([, file]) => file !== null)
-      .reduce<Record<string, { fileName: string }>>((acc, [docName, file]) => {
-        acc[docName] = { fileName: file!.name };
-        return acc;
-      }, {});
-    if (Object.keys(docEntries).length > 0) {
-      setUploadedDocs((prev) => ({ ...prev, [newId]: docEntries }));
-    }
-    setShowModal(false);
   }
 
-  function confirmDelete(id: string) {
-    setSupplierList((prev) => prev.filter((s) => s.id !== id));
-    setDeleteTarget(null);
+  async function confirmDelete(id: string) {
+    const target = supplierList.find((s) => s.id === id);
+    try {
+      await deleteSupplier(id);
+      setSupplierList((prev) => prev.filter((s) => s.id !== id));
+      setDeleteTarget(null);
+      toast.success(`${target?.name ?? "Supplier"} deleted.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to delete the supplier. It may have linked purchase orders.",
+      );
+    }
   }
 
   function toggleCategory(cat: Category) {

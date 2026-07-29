@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   formatCurrencyByGeneralSettings,
   csvAmountHeader,
@@ -191,6 +192,7 @@ export function PayrollPage() {
                 headers,
                 rows,
               );
+              toast.success(`Payroll exported for ${currentMonth}.`);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
           >

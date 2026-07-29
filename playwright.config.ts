@@ -6,7 +6,7 @@ export default defineConfig({
   retries: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: process.env.BUILDOS_URL || 'http://localhost:5173',
     trace: 'on-first-retry',
     headless: true,
     video: 'on-first-retry',
@@ -20,7 +20,7 @@ export default defineConfig({
   // Servers are already running — reuse them
   webServer: {
     command: 'echo "servers already running"',
-    url: 'http://localhost:5173',
+    url: process.env.BUILDOS_URL || 'http://localhost:5173',
     reuseExistingServer: true,
     timeout: 5_000,
   },

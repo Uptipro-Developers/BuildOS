@@ -204,7 +204,9 @@ export function AttendancePage() {
 
   function markOne(id: string, status: AttStatus) {
     const rec = records.find((r) => r.id === id);
-    if (rec) persistStatus(rec, status);
+    if (!rec) return;
+    persistStatus(rec, status);
+    toast.success(`${rec.name} marked as ${statusConfig[status].label}`);
   }
 
   const avatarColors = [
@@ -260,6 +262,7 @@ export function AttendancePage() {
                 headers,
                 rows,
               );
+              toast.success(`Attendance exported for ${today}.`);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
           >

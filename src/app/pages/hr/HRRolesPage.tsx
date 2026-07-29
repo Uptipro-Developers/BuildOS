@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { getJobRoles, createJobRole, deleteJobRole } from "../../api/job-roles";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
+  ArrowLeft,
   Briefcase,
   Plus,
   Search,
@@ -38,6 +40,7 @@ const gradeColors: Record<string, string> = {
 };
 
 export function HRRolesPage() {
+  const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>([]);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");
@@ -108,14 +111,23 @@ export function HRRolesPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Roles & Positions
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {roles.length} defined roles · {totalHeadcount} total positions
-            filled
-          </p>
+        <div className="flex items-center gap-3">
+          {/* Roles is a sub-page with no sidebar entry, so fall back to history. */}
+          <button
+            onClick={() => navigate(-1)}
+            className="p-1.5 rounded hover:bg-gray-100 text-gray-500"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">
+              Roles & Positions
+            </h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {roles.length} defined roles · {totalHeadcount} total positions
+              filled
+            </p>
+          </div>
         </div>
         <button
           onClick={() => setShowCreate(true)}

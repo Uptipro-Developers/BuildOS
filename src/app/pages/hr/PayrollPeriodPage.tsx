@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import { getPayrollPeriods, createPayrollPeriod } from "../../api/hr-extras";
 import { Plus, Lock, Unlock, Clock } from "lucide-react";
@@ -79,6 +80,7 @@ export function PayrollPeriodPage() {
   }, []);
 
   function toggleStatus(id: string) {
+    const current = periods.find((p) => p.id === id);
     setPeriods((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
@@ -86,12 +88,20 @@ export function PayrollPeriodPage() {
         return { ...p, status: next };
       }),
     );
+    if (current) {
+      toast.success(
+        current.status === "open"
+          ? `${current.name} closed.`
+          : `${current.name} reopened.`,
+      );
+    }
   }
 
   function addPeriod() {
     if (!newName.trim() || !newStart || !newEnd) return;
+    const name = newName.trim();
     createPayrollPeriod({
-      name: newName.trim(),
+      name,
       startDate: newStart,
       endDate: newEnd,
     })
@@ -118,9 +128,14 @@ export function PayrollPeriodPage() {
         setNewName("");
         setNewStart("");
         setNewEnd("");
+        toast.success(`Payroll period "${name}" created.`);
       })
       .catch((err) => {
-        alert("Failed to create payroll period. Please try again.");
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Failed to create payroll period.",
+        );
         console.error(err);
       });
   }

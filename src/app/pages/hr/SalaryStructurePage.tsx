@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { apiFetch } from "../../api/client";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
@@ -471,6 +473,9 @@ export function SalaryStructurePage() {
   };
 
   const saveComponent = (bandId: string, comp: SalaryComponent) => {
+    const isExisting = bands
+      .find((b) => b.id === bandId)
+      ?.components.some((c) => c.id === comp.id);
     setBands((prev) =>
       prev.map((b) => {
         if (b.id !== bandId) return b;
@@ -485,9 +490,15 @@ export function SalaryStructurePage() {
     );
     setModalBand(null);
     setEditComp(null);
+    toast.success(
+      isExisting ? `"${comp.name}" updated.` : `"${comp.name}" added.`,
+    );
   };
 
   const deleteComponent = (bandId: string, compId: string) => {
+    const name = bands
+      .find((b) => b.id === bandId)
+      ?.components.find((c) => c.id === compId)?.name;
     setBands((prev) =>
       prev.map((b) =>
         b.id !== bandId
@@ -496,13 +507,16 @@ export function SalaryStructurePage() {
       ),
     );
     setDeleteTarget(null);
+    toast.success(name ? `"${name}" deleted.` : "Component deleted.");
   };
 
   const addBand = () => {
     if (!newBand.gradeName.trim()) return;
+    const gradeName = newBand.gradeName.trim();
     setBands((p) => [...p, { ...newBand, id: `band-${Date.now()}`, components: [] }]);
     setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0 });
     setAddBandOpen(false);
+    toast.success(`Salary band "${gradeName}" created.`);
   };
 
   return (
@@ -918,37 +932,22 @@ export function SalaryStructurePage() {
         />
       )}
 
-      {/* Delete confirmation */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              Delete Component
-            </h3>
-            <p className="text-sm text-gray-500 mb-5">
-              Are you sure you want to delete{" "}
-              <strong>{deleteTarget.comp.name}</strong>? This action cannot be
-              undone.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 text-sm text-gray-600 border rounded-lg hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  deleteComponent(deleteTarget.bandId, deleteTarget.comp.id)
-                }
-                className="px-4 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmationModal
+        isOpen={deleteTarget !== null}
+        title="Delete Component?"
+        description={
+          deleteTarget
+            ? `This will permanently remove "${deleteTarget.comp.name}". This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          deleteComponent(deleteTarget.bandId, deleteTarget.comp.id);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

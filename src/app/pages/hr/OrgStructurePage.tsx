@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { useHRConfig } from "../../stores/hrConfigStore";
 import {
   fetchOrgUnits,
@@ -103,12 +104,14 @@ export function OrgStructurePage() {
   function save() {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+    toast.success("Organizational structure saved.");
   }
 
   function applyTemplate(t: StructureTemplate) {
     setActiveTemplate(t.id);
     setCustomTemplate(null);
     setOrgLevels(t.levels);
+    toast.success(`Applied the "${t.name}" structure template.`);
   }
 
   function startCustomTemplate() {
@@ -126,6 +129,7 @@ export function OrgStructurePage() {
     });
     setOrgLevels(levels);
     setShowCustomModal(false);
+    toast.success("Custom structure applied.");
   }
 
   function addCustomLevel() {
@@ -151,9 +155,11 @@ export function OrgStructurePage() {
 
   function addOrgLevel(levelIdx: number) {
     if (!newOrgName.trim()) return;
-    createOrgUnit({ name: newOrgName.trim(), description: newOrgDesc.trim(), kind: TIER_KINDS[levelIdx], members: 0, archived: false })
+    const name = newOrgName.trim();
+    createOrgUnit({ name, description: newOrgDesc.trim(), kind: TIER_KINDS[levelIdx], members: 0, archived: false })
       .then(loadUnits)
-      .catch(err => alert((err as Error)?.message || "Failed to add unit"));
+      .then(() => toast.success(`"${name}" added.`))
+      .catch(err => toast.error(err instanceof Error ? err.message : "Failed to add unit"));
     setNewOrgName("");
     setNewOrgDesc("");
     setAddingTo(null);
@@ -164,7 +170,8 @@ export function OrgStructurePage() {
     if (!current) return;
     updateOrgUnit(id, { archived: !current.archived })
       .then(loadUnits)
-      .catch(err => alert((err as Error)?.message || "Failed to update unit"));
+      .then(() => toast.success(current.archived ? `"${current.name}" restored.` : `"${current.name}" archived.`))
+      .catch(err => toast.error(err instanceof Error ? err.message : "Failed to update unit"));
   }
 
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
@@ -181,20 +188,28 @@ export function OrgStructurePage() {
   function saveRename() {
     if (!renameTarget || !renameValue.trim()) return;
     setRenaming(true);
-    updateOrgUnit(renameTarget.id, { name: renameValue.trim() })
+    const nextName = renameValue.trim();
+    updateOrgUnit(renameTarget.id, { name: nextName })
       .then(loadUnits)
-      .then(() => setRenameTarget(null))
-      .catch(err => alert((err as Error)?.message || "Failed to rename unit"))
+      .then(() => {
+        setRenameTarget(null);
+        toast.success(`Renamed to "${nextName}".`);
+      })
+      .catch(err => toast.error(err instanceof Error ? err.message : "Failed to rename unit"))
       .finally(() => setRenaming(false));
   }
 
   function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    const name = deleteTarget.name;
     deleteOrgUnit(deleteTarget.id)
       .then(loadUnits)
-      .then(() => setDeleteTarget(null))
-      .catch(err => alert((err as Error)?.message || "Failed to delete unit"))
+      .then(() => {
+        setDeleteTarget(null);
+        toast.success(`"${name}" deleted.`);
+      })
+      .catch(err => toast.error(err instanceof Error ? err.message : "Failed to delete unit"))
       .finally(() => setDeleting(false));
   }
 
@@ -204,7 +219,8 @@ export function OrgStructurePage() {
     if (!name.trim()) return;
     createOrgUnit({ name: name.trim(), description: desc.trim(), kind: type, members: 0, archived: false })
       .then(loadUnits)
-      .catch(err => alert((err as Error)?.message || "Failed to add unit"));
+      .then(() => toast.success(type === "craft" ? `Craft "${name.trim()}" added.` : `Circle "${name.trim()}" added.`))
+      .catch(err => toast.error(err instanceof Error ? err.message : "Failed to add unit"));
     if (type === "craft") { setNewCraftName(""); setNewCraftDesc(""); }
     else { setNewCircleName(""); setNewCircleDesc(""); }
   }
@@ -226,6 +242,25 @@ export function OrgStructurePage() {
         </button>
         <button onClick={() => archiveOrg(levelIdx, item.id)} className={`p-1 rounded ${item.archived ? "text-green-500 hover:bg-green-50" : "text-gray-400 hover:bg-gray-100"}`} title={item.archived ? "Restore" : "Archive"}>
           <Archive className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+
+  // Crafts and Circles are supporting units rather than hierarchy tiers, so they
+  // get rename/delete but no archive toggle.
+  const SupportingUnitRow = ({ unit }: { unit: ApiOrgUnit }) => (
+    <div className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: "#E2E8F0" }}>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-gray-900">{unit.name}</p>
+        <p className="text-xs text-gray-500 truncate">{unit.description} · {unit.members} members</p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0 ml-3">
+        <button onClick={() => openRename(unit)} className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-indigo-600" title="Rename">
+          <Edit className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => setDeleteTarget({ id: unit.id, name: unit.name })} className="p-1 rounded text-gray-400 hover:bg-red-50 hover:text-red-600" title="Delete">
+          <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
@@ -444,14 +479,7 @@ export function OrgStructurePage() {
           </h2>
           <p className="text-xs text-gray-400 mb-3">Cross-functional professional groups for knowledge sharing and standardization</p>
           <div className="space-y-2 mb-3">
-            {crafts.map(c => (
-              <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: "#E2E8F0" }}>
-                <div>
-                  <p className="font-medium text-gray-900">{c.name}</p>
-                  <p className="text-xs text-gray-500">{c.description} · {c.members} members</p>
-                </div>
-              </div>
-            ))}
+            {crafts.map(c => <SupportingUnitRow key={c.id} unit={c} />)}
             {crafts.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No crafts configured</p>}
           </div>
           <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
@@ -467,14 +495,7 @@ export function OrgStructurePage() {
           </h2>
           <p className="text-xs text-gray-400 mb-3">Learning and collaboration communities for mentorship and development</p>
           <div className="space-y-2 mb-3">
-            {circles.map(c => (
-              <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm" style={{ borderColor: "#E2E8F0" }}>
-                <div>
-                  <p className="font-medium text-gray-900">{c.name}</p>
-                  <p className="text-xs text-gray-500">{c.description} · {c.members} members</p>
-                </div>
-              </div>
-            ))}
+            {circles.map(c => <SupportingUnitRow key={c.id} unit={c} />)}
             {circles.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No circles configured</p>}
           </div>
           <div className="flex items-center gap-2 pt-2 border-t border-gray-100">

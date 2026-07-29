@@ -25,16 +25,26 @@ export function ClaimTypeSetupPage() {
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    if (editId) {
-      const updated = await updateClaimType(editId, form);
-      setClaimTypes((prev) => prev.map((c) => (c.id === editId ? updated : c)));
-      setEditId(null);
-    } else {
-      const created = await createClaimType(form);
-      setClaimTypes((prev) => [...prev, created]);
+    try {
+      if (editId) {
+        const updated = await updateClaimType(editId, form);
+        setClaimTypes((prev) =>
+          prev.map((c) => (c.id === editId ? updated : c)),
+        );
+        setEditId(null);
+        toast.success("Claim type updated.");
+      } else {
+        const created = await createClaimType(form);
+        setClaimTypes((prev) => [...prev, created]);
+        toast.success("Claim type created.");
+      }
+      setForm(EMPTY);
+      setShowForm(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save claim type.",
+      );
     }
-    setForm(EMPTY);
-    setShowForm(false);
   }
 
   function startEdit(c: ClaimType) {

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   fetchLeaveRequests,
   approveLeaveRequest,
@@ -63,10 +64,15 @@ export function LeaveRequestsPage() {
     approveLeaveRequest(id)
       .then(() => {
         fetchLeaveRequests().then(setRequests);
+        toast.success("Leave request approved.");
       })
       .catch((err) => {
         console.error("Failed to approve leave request:", err);
-        alert("Failed to approve leave request. Please try again.");
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Failed to approve leave request.",
+        );
       });
   }
 
@@ -74,10 +80,13 @@ export function LeaveRequestsPage() {
     rejectLeaveRequest(id)
       .then(() => {
         fetchLeaveRequests().then(setRequests);
+        toast.success("Leave request rejected.");
       })
       .catch((err) => {
         console.error("Failed to reject leave request:", err);
-        alert("Failed to reject leave request. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to reject leave request.",
+        );
       });
   }
 

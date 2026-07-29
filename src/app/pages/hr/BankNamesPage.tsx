@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Plus,
   Search,
@@ -69,9 +70,12 @@ export function BankNamesPage() {
           setEditId(null);
           setForm(EMPTY_FORM);
           setShowAdd(false);
+          toast.success("Bank updated.");
         })
         .catch((err) => {
-          alert("Failed to update bank. Please try again.");
+          toast.error(
+            err instanceof Error ? err.message : "Failed to update bank.",
+          );
           console.error(err);
         });
     } else {
@@ -83,9 +87,12 @@ export function BankNamesPage() {
           setBanks((prev) => [...prev, toBank(created)]);
           setForm(EMPTY_FORM);
           setShowAdd(false);
+          toast.success("Bank added.");
         })
         .catch((err) => {
-          alert("Failed to add bank. Please try again.");
+          toast.error(
+            err instanceof Error ? err.message : "Failed to add bank.",
+          );
           console.error(err);
         });
     }
@@ -107,21 +114,30 @@ export function BankNamesPage() {
       method: "PATCH",
     })
       .then((updated) => {
-        setBanks((prev) =>
-          prev.map((b) => (b.id === id ? toBank(updated) : b)),
+        const next = toBank(updated);
+        setBanks((prev) => prev.map((b) => (b.id === id ? next : b)));
+        toast.success(
+          next.active ? "Bank activated." : "Bank deactivated.",
         );
       })
       .catch((err) => {
-        alert("Failed to toggle bank status. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to toggle bank status.",
+        );
         console.error(err);
       });
   }
 
   function removeBank(id: string) {
     apiFetch(`/bank-names/${id}`, { method: "DELETE" })
-      .then(() => setBanks((prev) => prev.filter((x) => x.id !== id)))
+      .then(() => {
+        setBanks((prev) => prev.filter((x) => x.id !== id));
+        toast.success("Bank deleted.");
+      })
       .catch((err) => {
-        alert("Failed to delete bank. Please try again.");
+        toast.error(
+          err instanceof Error ? err.message : "Failed to delete bank.",
+        );
         console.error(err);
       });
   }
