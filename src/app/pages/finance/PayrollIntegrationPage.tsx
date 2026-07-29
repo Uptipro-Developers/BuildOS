@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   getPayrollEntries,
@@ -197,18 +200,18 @@ export function PayrollIntegrationPage() {
         "ID",
         "Period",
         "Headcount",
-        "Gross Pay",
-        "Deductions",
-        "Net Pay",
+        csvAmountHeader("Gross Pay"),
+        csvAmountHeader("Deductions"),
+        csvAmountHeader("Net Pay"),
         "Status",
       ],
       payrolls.map((p) => [
         p.id,
         p.period,
-        String(p.headcount),
-        fmt(p.grossPay),
-        fmt(p.deductions),
-        fmt(p.netPay),
+        p.headcount,
+        p.grossPay,
+        p.deductions,
+        p.netPay,
         p.status,
       ]),
     );

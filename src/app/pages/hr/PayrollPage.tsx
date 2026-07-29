@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  formatCurrencyByGeneralSettings,
+  csvAmountHeader,
+} from "../../utils/generalSettings";
 import { getPayslips } from "../../api/hr-extras";
 import {
   Download,
@@ -163,9 +166,9 @@ export function PayrollPage() {
                 "Role",
                 "Department",
                 "Grade",
-                "Gross Pay",
-                "Deductions",
-                "Net Pay",
+                csvAmountHeader("Gross Pay"),
+                csvAmountHeader("Deductions"),
+                csvAmountHeader("Net Pay"),
                 "Bank",
                 "Payment Method",
                 "Status",
@@ -176,9 +179,9 @@ export function PayrollPage() {
                 p.role,
                 p.department,
                 p.gradeLevel,
-                fmt(p.grossPay),
-                fmt(p.deductions),
-                fmt(p.netPay),
+                p.grossPay,
+                p.deductions,
+                p.netPay,
                 p.bankName,
                 p.paymentMethod,
                 statusConfig[p.status].label,

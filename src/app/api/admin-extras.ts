@@ -184,6 +184,31 @@ export const activateUser = (id: string) =>
 export const deactivateUser = (id: string) =>
     apiFetch<AppUser>(`/admin/users/${id}`, { method: 'PUT', body: JSON.stringify({ status: 'Inactive' }) });
 
+// Employee → User sync (Admin › Users › Pending Sync from HR)
+export interface PendingSyncEmployee {
+    id: string;
+    firstName: string;
+    lastName: string;
+    name: string;
+    email: string;
+    jobTitle: string;
+    department: string;
+    departmentId: string | null;
+    dateHired: string;
+    phone: string;
+    syncStatus: 'unsynced';
+}
+export const getPendingSyncEmployees = () =>
+    apiFetch<PendingSyncEmployee[]>('/admin/users/pending-sync');
+export const syncEmployeeToUser = (
+    employeeId: string,
+    data: { email?: string; role?: string; assignedApps?: string[] },
+) =>
+    apiFetch<AppUser>(`/admin/employees/${employeeId}/sync`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+
 // App Roles
 export const getAppRoles = () => apiFetch<AppRole[]>('/admin/roles');
 export const getAppRole = (id: string) => apiFetch<AppRole>(`/admin/roles/${id}`);

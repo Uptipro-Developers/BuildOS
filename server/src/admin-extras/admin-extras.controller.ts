@@ -50,7 +50,20 @@ export class AdminExtrasController {
     @Get('users')
     @Roles('admin')
     getAllUsers(@Query('search') search?: string) { return this.svc.findAllUsers(search); }
-    
+
+    // ── Employee → User sync (Admin › Users › Pending Sync from HR) ──
+    // Declared before 'users/:id' so "pending-sync" is not captured as an :id.
+    @Get('users/pending-sync')
+    @Roles('admin')
+    getPendingSyncEmployees() { return this.svc.findPendingSyncEmployees(); }
+
+    @Post('employees/:id/sync')
+    @Roles('admin')
+    syncEmployeeToUser(
+        @Param('id') id: string,
+        @Body() body: { email?: string; role?: string; assignedApps?: string[] },
+    ) { return this.svc.syncEmployeeToUser(id, body); }
+
     @Get('users/:id')
     @Roles('admin')
     getUser(@Param('id') id: string) { return this.svc.findUser(id); }

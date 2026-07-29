@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import { fetchIncome, createIncome } from "../../api/income";
 import { fetchProjects } from "../../api/projects";
 import { getChartAccounts } from "../../api/finance-extras";
@@ -111,12 +114,12 @@ export function IncomeManagementPage() {
   function handleExport() {
     exportCSV(
       "income",
-      ["Income ID", "Source", "Project", "Amount", "Date", "Status"],
+      ["Income ID", "Source", "Project", csvAmountHeader("Amount"), "Date", "Status"],
       incomes.map((i) => [
         i.id,
         i.source,
         i.project,
-        fmt(i.amount),
+        i.amount,
         i.date,
         i.status,
       ]),

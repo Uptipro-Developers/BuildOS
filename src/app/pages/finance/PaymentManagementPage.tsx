@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import { fetchPayments } from "../../api/payments";
 import { Download, CreditCard, Clock, CheckCircle, XCircle, Send, Eye, X } from "lucide-react";
@@ -183,7 +186,7 @@ export function PaymentManagementPage() {
         "Type",
         "Reference",
         "Recipient",
-        "Amount",
+        csvAmountHeader("Amount"),
         "Method",
         "Date",
         "Status",
@@ -193,7 +196,7 @@ export function PaymentManagementPage() {
         p.type,
         p.reference,
         p.recipient,
-        fmt(p.amount),
+        p.amount,
         p.method,
         p.date,
         p.status,

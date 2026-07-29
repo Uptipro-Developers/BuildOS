@@ -3,8 +3,11 @@ import { useParams, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import {
   getCurrencySymbol,
+  getCurrencyCode,
   formatNumberByGeneralSettings,
+  formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
+import { exportCSV } from "../../utils/exportCSV";
 import {
   getActivityHistory,
   type ActivityRecord,
@@ -31,6 +34,7 @@ import {
 } from "lucide-react";
 import {
   fetchEmployee,
+  fetchEmployees,
   updateEmployee,
   toEmployeeUpdatePayload,
 } from "../../api/employees";
@@ -119,6 +123,9 @@ export function EmployeeProfilePage() {
   const [departments, setDepartments] = useState<
     { id: string; name: string }[]
   >([]);
+  const [supervisorOptions, setSupervisorOptions] = useState<
+    { id: string; firstName: string; lastName: string }[]
+  >([]);
 
   // Human-friendly display ID passed from the list page
   const displayId = searchParams.get("displayId") ?? emp?.id ?? "";
@@ -130,6 +137,24 @@ export function EmployeeProfilePage() {
       )
       .catch(() => {});
   }, []);
+
+  // Supervisor candidates: active employees other than this one (an employee
+  // cannot report to themselves).
+  useEffect(() => {
+    fetchEmployees({ status: "active" })
+      .then((list: any[]) =>
+        setSupervisorOptions(
+          list
+            .filter((e) => e.id !== id)
+            .map((e) => ({
+              id: e.id,
+              firstName: e.firstName,
+              lastName: e.lastName,
+            })),
+        ),
+      )
+      .catch(() => setSupervisorOptions([]));
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -222,6 +247,47 @@ export function EmployeeProfilePage() {
 
   const initials = `${emp.firstName?.[0] ?? ""}${emp.lastName?.[0] ?? ""}`;
   const statusCfg = statusConfig[emp.status] ?? statusConfig.active;
+  // True once an admin has synced this employee into a login account.
+  const isSynced = emp.syncStatus === "synced";
+
+  function handleExportProfile() {
+    const rows: [string, string | number][] = [
+      ["Employee ID", displayId],
+      ["First Name", emp.firstName ?? ""],
+      ["Middle Name", emp.middleName ?? ""],
+      ["Last Name", emp.lastName ?? ""],
+      ["Job Title", emp.role ?? ""],
+      ["Department", emp.department ?? ""],
+      ["Supervisor", emp.primarySupervisor ?? ""],
+      ["Status", statusCfg.label ?? emp.status ?? ""],
+      ["Employment Type", emp.employmentType ?? ""],
+      ["Date Hired", emp.dateHiredISO || emp.dateHired || ""],
+      ["Date of Birth", emp.dateOfBirth ?? ""],
+      ["Gender", emp.gender ?? ""],
+      ["Email", emp.email ?? ""],
+      ["Phone", emp.phone ?? ""],
+      ["Address", emp.address ?? ""],
+      ["City", emp.city ?? ""],
+      ["State", emp.state ?? ""],
+      ["Zip Code", emp.zipCode ?? ""],
+      ["Next of Kin Contact", emp.emergencyContact ?? ""],
+      ["Emergency Phone", emp.emergencyPhone ?? ""],
+      ["Salary Grade", emp.gradeLevel ?? ""],
+      [`Base Salary (${getCurrencyCode()})`, Number(emp.baseSalary ?? 0)],
+      ["Bank Name", emp.bankName ?? ""],
+      ["Account Number", emp.accountNumber ?? ""],
+      ["Account Holder", emp.accountHolder ?? ""],
+      ["Tax ID", emp.taxId ?? ""],
+      ["PFA / Pension ID", emp.pensionId ?? ""],
+      ["System Access", isSynced ? "Synced to user account" : "Pending sync"],
+    ];
+    const slug = `${emp.firstName ?? "employee"}-${emp.lastName ?? ""}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    exportCSV(`employee-profile-${slug}`, ["Field", "Value"], rows);
+    toast.success("Profile exported.");
+  }
   const avatarColors = [
     "bg-indigo-100 text-indigo-700",
     "bg-blue-100 text-blue-700",
@@ -259,6 +325,16 @@ export function EmployeeProfilePage() {
               >
                 {statusCfg.label}
               </span>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full font-medium ${isSynced ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                title={
+                  isSynced
+                    ? "A user account is linked to this employee"
+                    : "Awaiting sync to a user account in Admin › Users"
+                }
+              >
+                {isSynced ? "Synced to User" : "Pending Sync"}
+              </span>
             </div>
             <p className="text-sm text-gray-500">
               {emp.role} · {emp.department}
@@ -267,7 +343,10 @@ export function EmployeeProfilePage() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">
+          <button
+            onClick={handleExportProfile}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+          >
             <Download className="w-3.5 h-3.5" /> Export Profile
           </button>
           <button
@@ -310,22 +389,29 @@ export function EmployeeProfilePage() {
               },
               {
                 label: "Date of Birth",
-                value: "—",
+                value: emp.dateOfBirth
+                  ? formatDateByGeneralSettings(emp.dateOfBirth)
+                  : "—",
                 icon: <Calendar className="w-4 h-4 text-indigo-500" />,
               },
               {
                 label: "Gender",
-                value: "—",
+                value: emp.gender || "—",
                 icon: <BadgeCheck className="w-4 h-4 text-indigo-500" />,
               },
               {
-                label: "Nationality",
-                value: "—",
+                label: "Address",
+                value: emp.address || "—",
                 icon: <MapPin className="w-4 h-4 text-indigo-500" />,
               },
               {
-                label: "Address",
-                value: "—",
+                label: "City / State",
+                value: [emp.city, emp.state].filter(Boolean).join(", ") || "—",
+                icon: <MapPin className="w-4 h-4 text-indigo-500" />,
+              },
+              {
+                label: "ZIP / Postal Code",
+                value: emp.zipCode || "—",
                 icon: <MapPin className="w-4 h-4 text-indigo-500" />,
               },
             ].map((r) => (
@@ -710,12 +796,69 @@ export function EmployeeProfilePage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Middle Name
+                  </label>
+                  <input
+                    value={editDraft.middleName ?? ""}
+                    onChange={(e) => df("middleName", e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Employee ID
+                  </label>
+                  {/* Identity fields are display-only: the record's own key must
+                      not change, and the hire date anchors payroll history. */}
+                  <input
+                    value={displayId}
+                    readOnly
+                    disabled
+                    className="w-full border border-gray-200 bg-gray-50 text-gray-500 rounded-lg px-3 py-2 text-sm cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Supervisor
+                  </label>
+                  <select
+                    value={editDraft.supervisorId ?? ""}
+                    onChange={(e) => df("supervisorId", e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Select supervisor…</option>
+                    {supervisorOptions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.firstName} {s.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Date Hired
+                  </label>
+                  <input
+                    value={emp.dateHired || "—"}
+                    readOnly
+                    disabled
+                    className="w-full border border-gray-200 bg-gray-50 text-gray-500 rounded-lg px-3 py-2 text-sm cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
               {/* Contact */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     Email
                   </label>
+                  {/* Once synced, this address is the user's login identity —
+                      changing it here would desync it from the User record, so
+                      it becomes read-only and must be changed in Admin › Users. */}
                   <input
                     value={editDraft.email}
                     onChange={(e) => {
@@ -723,12 +866,24 @@ export function EmployeeProfilePage() {
                       setEditErrors((p) => ({ ...p, email: "" }));
                     }}
                     type="email"
-                    className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${editErrors.email ? "border-red-400" : "border-gray-300"}`}
+                    readOnly={isSynced}
+                    disabled={isSynced}
+                    className={
+                      isSynced
+                        ? "w-full border border-gray-200 bg-gray-50 text-gray-500 rounded-lg px-3 py-2 text-sm cursor-not-allowed"
+                        : `w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${editErrors.email ? "border-red-400" : "border-gray-300"}`
+                    }
                   />
-                  {editErrors.email && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {editErrors.email}
+                  {isSynced ? (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Linked to a user account — change it in Admin › Users.
                     </p>
+                  ) : (
+                    editErrors.email && (
+                      <p className="text-xs text-red-500 mt-1">
+                        {editErrors.email}
+                      </p>
+                    )
                   )}
                 </div>
                 <div>
@@ -889,10 +1044,43 @@ export function EmployeeProfilePage() {
                 />
               </div>
 
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    City
+                  </label>
+                  <input
+                    value={editDraft.city ?? ""}
+                    onChange={(e) => df("city", e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    State
+                  </label>
+                  <input
+                    value={editDraft.state ?? ""}
+                    onChange={(e) => df("state", e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Zip Code
+                  </label>
+                  <input
+                    value={editDraft.zipCode ?? ""}
+                    onChange={(e) => df("zipCode", e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Emergency Contact
+                    Next of Kin Contact
                   </label>
                   <input
                     value={editDraft.emergencyContact ?? ""}
@@ -909,6 +1097,74 @@ export function EmployeeProfilePage() {
                     onChange={(e) => df("emergencyPhone", e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
+                </div>
+              </div>
+
+              {/* Payment details — parity with the Add New Employee form */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-3 pt-2 border-t border-gray-100">
+                  Payment
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Bank Name
+                    </label>
+                    <input
+                      value={editDraft.bankName ?? ""}
+                      onChange={(e) => df("bankName", e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Account Number
+                    </label>
+                    <input
+                      value={editDraft.accountNumber ?? ""}
+                      onChange={(e) => df("accountNumber", e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Account Holder
+                    </label>
+                    <input
+                      value={editDraft.accountHolder ?? ""}
+                      onChange={(e) => df("accountHolder", e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Tax ID
+                    </label>
+                    <input
+                      value={editDraft.taxId ?? ""}
+                      onChange={(e) => df("taxId", e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      PFA / Pension ID
+                    </label>
+                    <input
+                      value={editDraft.pensionId ?? ""}
+                      onChange={(e) => {
+                        // mapEmployee exposes this column under three aliases;
+                        // keep them in step so the update payload is unambiguous.
+                        setEditDraft((prev: any) => ({
+                          ...prev,
+                          pensionId: e.target.value,
+                          pfa: e.target.value,
+                          rsaNumber: e.target.value,
+                        }));
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

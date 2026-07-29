@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import {
   fetchClaims,
   approveClaim,
@@ -191,7 +194,7 @@ export function ClaimsManagementPage() {
         "Employee",
         "Department",
         "Type",
-        "Amount",
+        csvAmountHeader("Amount"),
         "Date",
         "Status",
       ],
@@ -200,7 +203,7 @@ export function ClaimsManagementPage() {
         c.employee,
         c.department,
         c.type,
-        fmt(c.amount),
+        c.amount,
         c.date,
         c.status,
       ]),

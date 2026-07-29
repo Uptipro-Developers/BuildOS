@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useFinance } from "../../stores/financeStore";
 import { exportCSV } from "../../utils/exportCSV";
+import { csvAmountHeader } from "../../utils/generalSettings";
 import { useChangelog } from "../../stores/changelogStore";
 import { useNumbering } from "../../stores/numberingStore";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -153,8 +154,8 @@ export function AccrualsPage() {
 
   function handleExport() {
     exportCSV("accruals",
-      ["ID", "Type", "Title", "Amount", "Status", "Approval", "Created", "Reversal Date", "Source", "Reference"],
-      filtered.map(a => [a.id, accrualTypeConfigs.find(tc => tc.type === a.type)?.label ?? a.type, a.title, fmt(a.amount), ACCRUAL_STATUS_LABELS[a.status], APPROVAL_LABELS[a.approvalStatus] ?? a.approvalStatus, a.createdAt, a.reversalDate, a.sourceModule, a.reference]),
+      ["ID", "Type", "Title", csvAmountHeader("Amount"), "Status", "Approval", "Created", "Reversal Date", "Source", "Reference"],
+      filtered.map(a => [a.id, accrualTypeConfigs.find(tc => tc.type === a.type)?.label ?? a.type, a.title, a.amount, ACCRUAL_STATUS_LABELS[a.status], APPROVAL_LABELS[a.approvalStatus] ?? a.approvalStatus, a.createdAt, a.reversalDate, a.sourceModule, a.reference]),
     );
   }
 

@@ -76,6 +76,20 @@ export function getCurrencySymbol(): string {
   return getGeneralSettings().currencySymbol || "$";
 }
 
+/** ISO currency code (e.g. "NGN"), for contexts where a symbol won't do. */
+export function getCurrencyCode(): string {
+  return getGeneralSettings().currency || "USD";
+}
+
+/**
+ * Column header for a money column in a CSV export, e.g. "Amount (NGN)".
+ * Exports must carry raw numbers so spreadsheets can total them, which means the
+ * currency has to live in the header rather than in every cell.
+ */
+export function csvAmountHeader(label: string): string {
+  return `${label} (${getCurrencyCode()})`;
+}
+
 function toDate(value: string | number | Date | null | undefined): Date | null {
   if (value === null || value === undefined || value === "") return null;
   const d = value instanceof Date ? value : new Date(value);

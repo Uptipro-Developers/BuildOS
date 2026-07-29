@@ -127,6 +127,8 @@ interface EmployeeRow {
   employmentType: string;
   projectCount: number;
   projects: string[];
+  /** Derived from the linked login account: 'synced' once a User row exists. */
+  syncStatus: "synced" | "unsynced";
 }
 
 const emptyEmpForm: AddEmpForm = {
@@ -159,10 +161,14 @@ const emptyEmpForm: AddEmpForm = {
 function FormField({
   label,
   required,
+  error,
+  hint,
   children,
 }: {
   label: string;
   required?: boolean;
+  error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -171,12 +177,83 @@ function FormField({
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       {children}
+      {error ? (
+        <p className="mt-1 text-xs text-red-600">{error}</p>
+      ) : hint ? (
+        <p className="mt-1 text-xs text-gray-400">{hint}</p>
+      ) : null}
     </div>
   );
 }
 
 const inputClass =
   "w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
+const errorInputClass =
+  "w-full border border-red-400 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400";
+
+type EmpFormErrors = Partial<Record<keyof AddEmpForm, string>>;
+
+/**
+ * Fields HR must capture before an employee record is considered complete.
+ * Supervisor is validated conditionally by the caller: it can only be required
+ * once at least one active employee exists to pick, otherwise the very first
+ * employee in a company could never be created.
+ */
+function validateEmployeeForm(
+  form: AddEmpForm,
+  opts: { supervisorRequired: boolean },
+): EmpFormErrors {
+  const errors: EmpFormErrors = {};
+  const req = (key: keyof AddEmpForm, label: string) => {
+    if (!String(form[key] ?? "").trim()) errors[key] = `${label} is required.`;
+  };
+
+  req("firstName", "First name");
+  req("lastName", "Last name");
+  req("role", "Role / position");
+  req("gender", "Gender");
+  req("dateOfBirth", "Date of birth");
+  req("address", "Address");
+  req("city", "City");
+  req("state", "State");
+  req("emergencyContact", "Next of kin contact");
+  req("emergencyPhone", "Emergency phone");
+  req("gradeLevel", "Salary grade");
+
+  if (opts.supervisorRequired) req("supervisorId", "Supervisor");
+
+  const email = form.email.trim();
+  if (!email) {
+    errors.email = "Email is required.";
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = "Enter a valid email address.";
+  }
+
+  const phone = form.phone.trim();
+  if (!phone) {
+    errors.phone = "Phone is required.";
+  } else if (!/^[+\d][\d\s\-().]{5,19}$/.test(phone)) {
+    errors.phone = "Enter a valid phone number.";
+  }
+
+  const salary = form.baseSalary.trim();
+  if (!salary) {
+    errors.baseSalary = "Base salary is required.";
+  } else if (!Number.isFinite(Number(salary)) || Number(salary) <= 0) {
+    errors.baseSalary = "Enter a base salary greater than zero.";
+  }
+
+  if (form.dateOfBirth.trim()) {
+    const dob = new Date(form.dateOfBirth);
+    if (Number.isNaN(dob.getTime())) {
+      errors.dateOfBirth = "Enter a valid date of birth.";
+    } else if (dob > new Date()) {
+      errors.dateOfBirth = "Date of birth cannot be in the future.";
+    }
+  }
+
+  return errors;
+}
 
 function AddEmployeeModal({
   onSave,
@@ -192,10 +269,29 @@ function AddEmployeeModal({
   saving: boolean;
 }) {
   const [form, setForm] = useState<AddEmpForm>({ ...emptyEmpForm });
-  const set = (k: keyof AddEmpForm, v: string) =>
+  const [errors, setErrors] = useState<EmpFormErrors>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const set = (k: keyof AddEmpForm, v: string) => {
     setForm((f) => ({ ...f, [k]: v }));
-  const valid =
-    form.firstName.trim() && form.lastName.trim() && form.role.trim();
+    // Clear the field's error as soon as the user starts correcting it.
+    setErrors((prev) => (prev[k] ? { ...prev, [k]: undefined } : prev));
+  };
+
+  // The first employee in a company has nobody to report to, so Supervisor only
+  // becomes mandatory once there is at least one active employee to select.
+  const supervisorRequired = activeEmployees.length > 0;
+  const cls = (k: keyof AddEmpForm) => (errors[k] ? errorInputClass : inputClass);
+
+  const handleSubmit = () => {
+    const found = validateEmployeeForm(form, { supervisorRequired });
+    setErrors(found);
+    setSubmitted(true);
+    if (Object.keys(found).length === 0) onSave(form);
+  };
+
+  const errorCount = Object.values(errors).filter(Boolean).length;
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
@@ -211,20 +307,25 @@ function AddEmployeeModal({
           </button>
         </div>
         <div className="px-6 py-5 space-y-6 overflow-y-auto">
+          {submitted && errorCount > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              Please correct {errorCount} highlighted {errorCount === 1 ? "field" : "fields"} before creating this employee.
+            </div>
+          )}
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase mb-3">General</p>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="First Name" required>
-                <input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} className={inputClass} />
+              <FormField label="First Name" required error={errors.firstName}>
+                <input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} className={cls("firstName")} />
               </FormField>
-              <FormField label="Last Name" required>
-                <input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} className={inputClass} />
+              <FormField label="Last Name" required error={errors.lastName}>
+                <input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} className={cls("lastName")} />
               </FormField>
               <FormField label="Middle Name">
                 <input value={form.middleName} onChange={(e) => set("middleName", e.target.value)} className={inputClass} />
               </FormField>
-              <FormField label="Role / Position" required>
-                <input value={form.role} onChange={(e) => set("role", e.target.value)} className={inputClass} />
+              <FormField label="Role / Position" required error={errors.role}>
+                <input value={form.role} onChange={(e) => set("role", e.target.value)} className={cls("role")} />
               </FormField>
               <FormField label="Department">
                 <select value={form.departmentId} onChange={(e) => set("departmentId", e.target.value)} className={`${inputClass} bg-white`}>
@@ -232,22 +333,33 @@ function AddEmployeeModal({
                   {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </FormField>
-              <FormField label="Supervisor">
-                <select value={form.supervisorId} onChange={(e) => set("supervisorId", e.target.value)} className={`${inputClass} bg-white`}>
+              <FormField
+                label="Supervisor"
+                required={supervisorRequired}
+                error={errors.supervisorId}
+                hint={supervisorRequired ? undefined : "No eligible supervisors yet — optional for the first employee."}
+              >
+                <select
+                  value={form.supervisorId}
+                  onChange={(e) => set("supervisorId", e.target.value)}
+                  disabled={!supervisorRequired}
+                  className={`${cls("supervisorId")} bg-white disabled:bg-gray-50 disabled:text-gray-400`}
+                >
                   <option value="">Select supervisor…</option>
                   {activeEmployees.map((e) => (
                     <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>
                   ))}
                 </select>
               </FormField>
-              <FormField label="Date of Birth">
-                <input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className={inputClass} />
+              <FormField label="Date of Birth" required error={errors.dateOfBirth}>
+                <input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} className={cls("dateOfBirth")} />
               </FormField>
-              <FormField label="Gender">
-                <select value={form.gender} onChange={(e) => set("gender", e.target.value)} className={`${inputClass} bg-white`}>
+              <FormField label="Gender" required error={errors.gender}>
+                <select value={form.gender} onChange={(e) => set("gender", e.target.value)} className={`${cls("gender")} bg-white`}>
                   <option value="">Select…</option>
                   <option value="Male">Male</option>
                   <option value="Female">Female</option>
+                  <option value="Other">Other</option>
                 </select>
               </FormField>
               <div className="col-span-2">
@@ -267,29 +379,29 @@ function AddEmployeeModal({
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Contact</p>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Email">
-                <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} className={inputClass} />
+              <FormField label="Email" required error={errors.email}>
+                <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} className={cls("email")} />
               </FormField>
-              <FormField label="Phone">
-                <input value={form.phone} onChange={(e) => set("phone", e.target.value)} className={inputClass} />
+              <FormField label="Phone" required error={errors.phone}>
+                <input value={form.phone} onChange={(e) => set("phone", e.target.value)} className={cls("phone")} />
               </FormField>
-              <FormField label="Address">
-                <input value={form.address} onChange={(e) => set("address", e.target.value)} className={inputClass} />
+              <FormField label="Address" required error={errors.address}>
+                <input value={form.address} onChange={(e) => set("address", e.target.value)} className={cls("address")} />
               </FormField>
-              <FormField label="City">
-                <input value={form.city} onChange={(e) => set("city", e.target.value)} className={inputClass} />
+              <FormField label="City" required error={errors.city}>
+                <input value={form.city} onChange={(e) => set("city", e.target.value)} className={cls("city")} />
               </FormField>
-              <FormField label="State">
-                <input value={form.state} onChange={(e) => set("state", e.target.value)} className={inputClass} />
+              <FormField label="State" required error={errors.state}>
+                <input value={form.state} onChange={(e) => set("state", e.target.value)} className={cls("state")} />
               </FormField>
               <FormField label="Zip Code">
                 <input value={form.zipCode} onChange={(e) => set("zipCode", e.target.value)} className={inputClass} />
               </FormField>
-              <FormField label="Next of Kin / Emergency Contact">
-                <input value={form.emergencyContact} onChange={(e) => set("emergencyContact", e.target.value)} className={inputClass} />
+              <FormField label="Next of Kin Contact" required error={errors.emergencyContact}>
+                <input value={form.emergencyContact} onChange={(e) => set("emergencyContact", e.target.value)} className={cls("emergencyContact")} />
               </FormField>
-              <FormField label="Emergency Phone">
-                <input value={form.emergencyPhone} onChange={(e) => set("emergencyPhone", e.target.value)} className={inputClass} />
+              <FormField label="Emergency Phone" required error={errors.emergencyPhone}>
+                <input value={form.emergencyPhone} onChange={(e) => set("emergencyPhone", e.target.value)} className={cls("emergencyPhone")} />
               </FormField>
             </div>
           </div>
@@ -297,11 +409,11 @@ function AddEmployeeModal({
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Payment</p>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Salary Grade">
-                <input value={form.gradeLevel} onChange={(e) => set("gradeLevel", e.target.value)} className={inputClass} />
+              <FormField label="Salary Grade" required error={errors.gradeLevel}>
+                <input value={form.gradeLevel} onChange={(e) => set("gradeLevel", e.target.value)} className={cls("gradeLevel")} />
               </FormField>
-              <FormField label="Base Salary">
-                <input type="number" value={form.baseSalary} onChange={(e) => set("baseSalary", e.target.value)} className={inputClass} />
+              <FormField label="Base Salary" required error={errors.baseSalary}>
+                <input type="number" min="0" value={form.baseSalary} onChange={(e) => set("baseSalary", e.target.value)} className={cls("baseSalary")} />
               </FormField>
               <FormField label="Bank Name">
                 <input value={form.bankName} onChange={(e) => set("bankName", e.target.value)} className={inputClass} />
@@ -329,8 +441,8 @@ function AddEmployeeModal({
             Cancel
           </button>
           <button
-            onClick={() => valid && onSave(form)}
-            disabled={!valid || saving}
+            onClick={handleSubmit}
+            disabled={saving}
             className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm font-medium hover:bg-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {saving ? "Creating\u2026" : "Create Employee"}
@@ -363,6 +475,7 @@ export function EmployeesPage() {
               : "active",
           projects: Array.isArray(e.projects) ? e.projects : [],
           dateHiredISO: e.dateHiredISO ?? "",
+          syncStatus: e.syncStatus === "synced" ? "synced" : "unsynced",
         })),
       ),
     );
@@ -614,6 +727,9 @@ export function EmployeesPage() {
               <th className="px-4 py-3 text-xs font-medium text-gray-500">
                 Type
               </th>
+              <th className="px-4 py-3 text-xs font-medium text-gray-500">
+                System Access
+              </th>
               <th className="px-4 py-3 w-10"></th>
             </tr>
           </thead>
@@ -685,6 +801,23 @@ export function EmployeesPage() {
                     >
                       {emp.employmentType}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {emp.syncStatus === "synced" ? (
+                      <span
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium w-fit bg-emerald-100 text-emerald-700"
+                        title="A login account has been created for this employee"
+                      >
+                        <CheckCircle className="w-3.5 h-3.5" /> Synced
+                      </span>
+                    ) : (
+                      <span
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium w-fit bg-amber-100 text-amber-700"
+                        title="Awaiting sync to a user account in Admin › Users"
+                      >
+                        <Clock className="w-3.5 h-3.5" /> Pending sync
+                      </span>
+                    )}
                   </td>
                   <td
                     className="px-4 py-3 relative"

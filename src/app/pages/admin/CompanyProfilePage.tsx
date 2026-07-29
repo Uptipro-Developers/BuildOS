@@ -93,6 +93,7 @@ export function CompanyProfilePage() {
   });
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState(false);
   const [countries, setCountries] = useState<string[]>(FALLBACK_COUNTRIES);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -118,7 +119,18 @@ export function CompanyProfilePage() {
           zipCode: p.zipCode ?? "",
           country: p.country ?? "",
         });
-        if (p.logoUrl) setLogoPreview(p.logoUrl);
+        if (p.logoUrl) {
+          setLogoPreview(p.logoUrl);
+          // Flag a stored value that clearly isn't an image up front (older
+          // uploads bypassed type validation), so the placeholder explains
+          // itself rather than waiting on a failed <img> load.
+          const isDataUrl = p.logoUrl.startsWith("data:");
+          setLogoError(isDataUrl && !p.logoUrl.startsWith("data:image/"));
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        toast.error("Failed to load the company profile.");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -163,20 +175,50 @@ export function CompanyProfilePage() {
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset the input so re-picking the same file after an error still fires onChange.
+    e.target.value = "";
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setSaveMessage("Logo is too large. Please upload an image up to 5MB.");
+
+    // The accept="image/*" attribute is only a picker hint — a user can still
+    // choose any file (and previously did: a non-image fell through to the
+    // catch-all below and was persisted as the logo, which then rendered blank).
+    // Validate the type here so only real images can ever reach the backend.
+    if (!file.type.startsWith("image/")) {
+      toast.error("That file isn't an image. Please upload a PNG, JPG or SVG.");
       return;
     }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Logo is too large. Please upload an image up to 5MB.");
+      return;
+    }
+
+    const readAsDataUrl = () =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Could not read the selected file."));
+        reader.readAsDataURL(file);
+      });
+
     try {
-      const compressed = await compressImage(file);
-      setLogoPreview(compressed);
+      // SVGs are already compact and vector — compressing them through a canvas
+      // would rasterise them, so store them as-is.
+      const dataUrl =
+        file.type === "image/svg+xml" ? await readAsDataUrl() : await compressImage(file);
+      setLogoPreview(dataUrl);
+      setLogoError(false);
       setSaveMessage(null);
     } catch {
-      // Fallback for unsupported image formats.
-      const reader = new FileReader();
-      reader.onloadend = () => setLogoPreview(reader.result as string);
-      reader.readAsDataURL(file);
+      // A genuine image that this browser cannot decode (e.g. an exotic codec):
+      // fall back to the raw data URL, but only because the type check above has
+      // already established it really is an image.
+      try {
+        setLogoPreview(await readAsDataUrl());
+        setLogoError(false);
+        setSaveMessage(null);
+      } catch {
+        toast.error("Could not read that image. Please try a different file.");
+      }
     }
   };
 
@@ -258,14 +300,25 @@ export function CompanyProfilePage() {
         </h2>
         <div className="flex flex-col sm:flex-row items-start gap-6">
           <div className="w-28 h-28 sm:w-32 sm:h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50">
-            {logoPreview ? (
+            {logoPreview && !logoError ? (
               <img
                 src={logoPreview}
                 alt="Company Logo"
                 className="w-full h-full object-contain rounded-lg"
+                // A previously-saved value may not be a decodable image (older
+                // uploads were not type-checked). Fall back to the placeholder
+                // instead of rendering an empty box with no explanation.
+                onError={() => setLogoError(true)}
               />
             ) : (
-              <Building2 className="w-12 h-12 text-gray-400" />
+              <div className="flex flex-col items-center justify-center text-center px-2">
+                <Building2 className="w-10 h-10 text-gray-400" />
+                {logoError && (
+                  <p className="mt-1 text-[10px] leading-tight text-amber-600">
+                    Saved logo can't be displayed — please re-upload.
+                  </p>
+                )}
+              </div>
             )}
           </div>
           <div className="w-full sm:w-auto">

@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   getJournalEntries,
@@ -233,8 +236,8 @@ export function JournalEntryPage() {
         e.status,
         l.account,
         l.glCode,
-        String(l.debit || ""),
-        String(l.credit || ""),
+        l.debit || null,
+        l.credit || null,
         l.description,
       ]),
     );
@@ -248,8 +251,8 @@ export function JournalEntryPage() {
         "Status",
         "Account",
         "GL Code",
-        "Debit",
-        "Credit",
+        csvAmountHeader("Debit"),
+        csvAmountHeader("Credit"),
         "Line Note",
       ],
       rows,

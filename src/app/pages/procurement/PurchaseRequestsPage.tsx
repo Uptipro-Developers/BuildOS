@@ -26,6 +26,7 @@ import {
 import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
 import {
+  csvAmountHeader,
   getCurrencySymbol,
   formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
@@ -830,7 +831,7 @@ export function PurchaseRequestsPage() {
         "Title / Description",
         "Requester",
         "Department",
-        "Total",
+        csvAmountHeader("Total"),
         "Date",
         "Status",
       ],
@@ -839,7 +840,7 @@ export function PurchaseRequestsPage() {
         pr.project,
         pr.raisedBy,
         pr.project,
-        fmt(pr.estimatedValue),
+        pr.estimatedValue,
         pr.raisedDate,
         PR_STATUS_CFG[pr.status].label,
       ]),

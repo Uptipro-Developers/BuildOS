@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   fetchExpenses,
@@ -390,7 +393,7 @@ export function ExpenseManagementPage() {
         "Expense ID",
         "Project",
         "Category",
-        "Amount",
+        csvAmountHeader("Amount"),
         "Status",
         "Created By",
         "Date",
@@ -399,7 +402,7 @@ export function ExpenseManagementPage() {
         e.id,
         e.project,
         e.category,
-        fmt(e.amount),
+        e.amount,
         e.status,
         e.createdBy,
         e.date,

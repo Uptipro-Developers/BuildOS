@@ -52,14 +52,22 @@ function mapEmployee(e: any) {
         bankName: e.bankName ?? '',
         bankAccount: e.accountNumber ?? '',
         accountNumber: e.accountNumber ?? '',
+        accountHolder: e.accountHolder ?? '',
         taxId: e.taxId ?? '',
         pfa: e.pensionId ?? '',
         rsaNumber: e.pensionId ?? '',
-        primarySupervisor: '',
+        pensionId: e.pensionId ?? '',
+        supervisorId: e.supervisorId ?? '',
+        primarySupervisor: e.supervisor
+            ? `${e.supervisor.firstName ?? ''} ${e.supervisor.lastName ?? ''}`.trim()
+            : '',
         maritalStatus: '',
         orgLevel: '',
         nationality: '',
-        syncStatus: 'unsynced',
+        // Sync state is derived from the linked login account rather than stored
+        // separately: an employee with no userId is still awaiting admin sync.
+        userId: e.userId ?? null,
+        syncStatus: e.userId ? 'synced' : 'unsynced',
         onboardingWarning: e.onboardingWarning as string | undefined,
     };
 }
@@ -103,15 +111,32 @@ export function toEmployeeCreatePayload(form: any) {
  * shape the backend accepts (enum values + departmentId instead of names).
  */
 export function toEmployeeUpdatePayload(draft: any) {
-    const { department, dateHired, dateHiredISO, projectCount, projects, id, status, employmentType, departmentId, ...rest } = draft;
+    const {
+        department, dateHired, dateHiredISO, projectCount, projects, id, status,
+        employmentType, departmentId, baseSalary, supervisorId,
+        // Display-only aliases and derived state that must never be written back.
+        syncStatus, userId, primarySupervisor, bankAccount, pfa, rsaNumber,
+        maritalStatus, orgLevel, nationality, name, jobTitle, personalEmail,
+        personalPhone, employmentDate, nextOfKin, grade, onboardingWarning,
+        ...rest
+    } = draft;
     // Convert empty-string date fields to undefined so Prisma skips them instead of
     // sending invalid DateTime values that would cause a 500 on update.
     const dateOfBirth = rest.dateOfBirth && String(rest.dateOfBirth).trim() ? rest.dateOfBirth : undefined;
+    // Number inputs hand back strings; Prisma rejects a string for a Float column.
+    const parsedSalary = baseSalary === '' || baseSalary === null || baseSalary === undefined
+        ? undefined
+        : Number(baseSalary);
     return {
         ...rest,
         dateOfBirth,
         status,
         departmentId: departmentId || undefined,
+        // An empty select value must clear the relation, not be sent as an id of ''.
+        supervisorId: supervisorId ? supervisorId : null,
+        baseSalary: Number.isFinite(parsedSalary) ? parsedSalary : undefined,
+        // Keep the canonical column name; the UI exposes pfa/rsaNumber aliases.
+        pensionId: rest.pensionId ?? rsaNumber ?? pfa ?? undefined,
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[employmentType] ?? employmentType,
         dateHired: dateHiredISO && String(dateHiredISO).trim() ? dateHiredISO : undefined,
     };

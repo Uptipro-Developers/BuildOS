@@ -85,6 +85,23 @@ export class AdminExtrasService {
     private readonly pendingInviteStatuses = ['pending_invite', 'invited', 'pending invite'];
 
     private allApps = ['construction', 'finance', 'hr', 'procurement', 'admin', 'ess', 'storefront'];
+
+    /**
+     * Non-admin roles the backend's @Roles(...) decorators already enforce.
+     * Seeded on demand by ensureBaseRoles() so role dropdowns and guards agree.
+     */
+    private static readonly BASE_ROLES: { name: string; description: string; appScope: string[] }[] = [
+        { name: 'Employee', description: 'Standard employee with self-service access', appScope: ['ess'] },
+        { name: 'Manager', description: 'Line manager who approves their team\'s requests', appScope: ['ess', 'hr'] },
+        { name: 'Team Lead', description: 'Team lead with task and resource assignment rights', appScope: ['ess', 'construction'] },
+        { name: 'Approver', description: 'Reviews and approves submitted requests', appScope: ['ess'] },
+        { name: 'HR Manager', description: 'Manages employees, payroll, leave and HR setup', appScope: ['ess', 'hr'] },
+        { name: 'Finance Manager', description: 'Manages accounting, budgets and payments', appScope: ['ess', 'finance'] },
+        { name: 'Procurement Manager', description: 'Manages suppliers, RFQs and purchase orders', appScope: ['ess', 'procurement'] },
+        { name: 'Project Manager', description: 'Manages construction projects and delivery', appScope: ['ess', 'construction'] },
+        { name: 'Resource Manager', description: 'Plans and allocates labour, plant and materials', appScope: ['ess', 'construction'] },
+        { name: 'Compliance Officer', description: 'Reviews compliance documents and supplier vetting', appScope: ['ess', 'procurement'] },
+    ];
     private readonly rolePermissionKeys = ['view', 'create', 'edit', 'approve', 'delete'];
 
     // Single source of truth for the system process catalog. Derived from the
@@ -421,6 +438,51 @@ export class AdminExtrasService {
                 inheritedRoles: encoded.inheritedRoles,
             },
         });
+
+        await this.ensureBaseRoles();
+    }
+
+    /**
+     * The backend's @Roles(...) guards reference role names that had no matching
+     * AppRole row, so the Admin → Roles list and every role dropdown only ever
+     * offered "Admin". That left callers inventing unbacked strings (employee
+     * onboarding used to hard-code role: 'employee'). These upserts give every
+     * guard-referenced role a real row; appScope mirrors the modules each role
+     * is expected to reach. Role matching is case-insensitive in RolesGuard, so
+     * "Employee" here satisfies @Roles('employee').
+     */
+    private async ensureBaseRoles() {
+        for (const role of AdminExtrasService.BASE_ROLES) {
+            await this.prisma.appRole.upsert({
+                where: { name: role.name },
+                create: { name: role.name, description: role.description, appScope: role.appScope },
+                // Only backfill the description/scope of a role nobody has customised;
+                // an admin editing permissions in the UI must not be overwritten here.
+                update: {},
+            });
+        }
+    }
+
+    /**
+     * Resolves a caller-supplied role string to the canonical AppRole.name, so a
+     * user can never be created against a role that does not exist. Matching is
+     * case- and separator-insensitive ("hr-manager", "HR Manager", "hr manager"
+     * all resolve to "HR Manager") because RolesGuard compares case-insensitively
+     * and callers historically passed kebab-case guard strings.
+     */
+    private async resolveRoleName(role: string): Promise<string> {
+        await this.ensureAdminRole();
+        const canonical = (value: string) => value.trim().toLowerCase().replace(/[\s_-]+/g, '');
+        const target = canonical(role);
+        const roles = await this.prisma.appRole.findMany({ select: { name: true } });
+        const match = roles.find((r) => canonical(r.name) === target);
+        if (!match) {
+            const available = roles.map((r) => r.name).sort().join(', ');
+            throw new BadRequestException(
+                `Unknown role "${role}". Available roles: ${available}`,
+            );
+        }
+        return match.name;
     }
 
     private async loadRawAdminSettings(): Promise<Record<string, any>> {
@@ -1376,6 +1438,7 @@ export class AdminExtrasService {
             throw new BadRequestException('Invalid email address');
         }
         if (!role) throw new BadRequestException('Role is required');
+        const resolvedRole = await this.resolveRoleName(role);
 
         const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (existing) throw new ConflictException('Email already registered');
@@ -1389,7 +1452,7 @@ export class AdminExtrasService {
             data: {
                 email: normalizedEmail,
                 name,
-                role,
+                role: resolvedRole,
                 department: department || null,
                 assignedApps,
                 password: placeholder,
@@ -2101,6 +2164,127 @@ export class AdminExtrasService {
             .map((s: string) => s.trim())
             .filter((s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
         return { subject, text, html, cc };
+    }
+
+    /**
+     * Welcome email sent when HR onboards an employee — before any login account
+     * exists. Uses the admin-configured "Employee Onboarding Initiated" template
+     * (Admin → Email Configuration → HR), whose variables are derived from the
+     * Employee model, and falls back to a built-in message when no template is
+     * enabled. Deliberately contains no activation link: the User account is only
+     * created later, when an admin syncs the employee from Admin → Users.
+     */
+    async sendEmployeeWelcomeEmail(employee: {
+        firstName: string;
+        lastName: string;
+        email: string;
+        role?: string | null;
+        department?: { name?: string | null } | null;
+    }): Promise<void> {
+        const email = String(employee?.email ?? '').trim().toLowerCase();
+        if (!email) return;
+
+        const companyProfile = await this.prisma.companyProfile
+            .findUnique({ where: { id: 'singleton' } })
+            .catch(() => null);
+        const companyName = String(companyProfile?.name ?? '').trim() || 'BuildOS';
+        const fullName = `${employee.firstName ?? ''} ${employee.lastName ?? ''}`.trim();
+
+        const vars = {
+            ...this.toTemplateVars(employee as any),
+            name: fullName,
+            employee_name: fullName,
+            employee_email: email,
+            email,
+            job_title: employee.role ?? '',
+            department: employee.department?.name ?? '',
+            company_name: companyName,
+        };
+
+        const templated = await this.composeTemplatedEmail('Employee Onboarding Initiated', vars);
+        if (templated) {
+            await this.mailQueue.enqueueEmail({
+                to: email,
+                subject: templated.subject || `Welcome to ${companyName}`,
+                text: templated.text,
+                html: templated.html,
+                ...(templated.cc.length > 0 ? { cc: templated.cc } : {}),
+            });
+            return;
+        }
+
+        await this.mailQueue.enqueueEmail({
+            to: email,
+            subject: `Welcome to ${companyName}, ${fullName}`,
+            text:
+                `Hi ${fullName},\n\nWelcome to ${companyName}. Your employee record has been created` +
+                `${vars.department ? ` in the ${vars.department} department` : ''}.\n\n` +
+                `Your system access will be set up shortly and you will receive a separate email to activate your account.`,
+            html:
+                `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1f2937;">` +
+                `<p>Hi ${this.escapeHtml(fullName)},</p>` +
+                `<p>Welcome to ${this.escapeHtml(companyName)}. Your employee record has been created` +
+                `${vars.department ? ` in the ${this.escapeHtml(String(vars.department))} department` : ''}.</p>` +
+                `<p>Your system access will be set up shortly and you will receive a separate email to activate your account.</p>` +
+                `</div>`,
+        });
+    }
+
+    /**
+     * Creates the login account for an already-onboarded employee (Admin → Users
+     * → Pending Sync → Sync). Reuses inviteUser() so the account, activation
+     * token and "New User Created" email all follow the normal invite path, then
+     * links the new user back onto the Employee row.
+     */
+    async syncEmployeeToUser(
+        employeeId: string,
+        data: { email?: string; role?: string; assignedApps?: string[] },
+    ) {
+        const employee = await this.prisma.employee.findUniqueOrThrow({
+            where: { id: employeeId },
+            include: { department: true },
+        });
+        if (employee.userId) {
+            throw new ConflictException('This employee is already synced to a user account');
+        }
+
+        const email = String(data?.email ?? employee.email ?? '').trim().toLowerCase();
+        const invited = await this.inviteUser({
+            email,
+            name: `${employee.firstName} ${employee.lastName}`.trim(),
+            role: String(data?.role ?? '').trim() || 'Employee',
+            assignedApps: data?.assignedApps?.length ? data.assignedApps : ['ess'],
+            department: employee.department?.name ?? undefined,
+        });
+
+        await this.prisma.employee.update({
+            where: { id: employee.id },
+            data: { userId: invited.id, ...(email !== employee.email ? { email } : {}) },
+        });
+
+        return invited;
+    }
+
+    /** Employees onboarded in HR that do not yet have a linked login account. */
+    async findPendingSyncEmployees() {
+        const employees = await this.prisma.employee.findMany({
+            where: { userId: null, status: 'active' },
+            include: { department: true },
+            orderBy: { createdAt: 'desc' },
+        });
+        return employees.map((e) => ({
+            id: e.id,
+            firstName: e.firstName,
+            lastName: e.lastName,
+            name: `${e.firstName} ${e.lastName}`.trim(),
+            email: e.email,
+            jobTitle: e.role ?? '',
+            department: e.department?.name ?? '',
+            departmentId: e.departmentId,
+            dateHired: e.dateHired,
+            phone: e.phone,
+            syncStatus: 'unsynced' as const,
+        }));
     }
 
     // ── Units ──

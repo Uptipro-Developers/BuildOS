@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { projects as mockProjects, fmtCurrency } from "./mockData";
 import { fetchConstructionProjects } from "../../api/projects";
 import { exportCSV } from "../../utils/exportCSV";
+import { csvAmountHeader } from "../../utils/generalSettings";
 
 export function CostsOverviewPage() {
   const navigate = useNavigate();
@@ -133,16 +134,20 @@ export function CostsOverviewPage() {
             onClick={() => {
               const rows = filtered.map((pc) => [
                 pc.name,
-                fmtCurrency(pc.budget),
-                fmtCurrency(pc.spent),
-                `${pc.utilisation}%`,
-                pc.variance < 0
-                  ? `-${fmtCurrency(Math.abs(pc.variance))}`
-                  : `+${fmtCurrency(pc.variance)}`,
+                pc.budget,
+                pc.spent,
+                pc.utilisation,
+                pc.variance,
               ]);
               exportCSV(
                 "costs",
-                ["Project", "Budget", "Spent", "Utilisation", "Variance"],
+                [
+                  "Project",
+                  csvAmountHeader("Budget"),
+                  csvAmountHeader("Spent"),
+                  "Utilisation (%)",
+                  csvAmountHeader("Variance"),
+                ],
                 rows,
               );
             }}

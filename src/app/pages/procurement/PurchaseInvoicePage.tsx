@@ -9,6 +9,7 @@ import {
   PurchaseInvoice as ApiPurchaseInvoice,
 } from "../../api/procurement-requests";
 import {
+  csvAmountHeader,
   getCurrencySymbol,
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
@@ -196,7 +197,7 @@ export function PurchaseInvoicePage() {
         "PO Ref",
         "Issue Date",
         "Due Date",
-        "Amount",
+        csvAmountHeader("Amount"),
         "Status",
       ],
       invoices.map((inv) => [
@@ -205,7 +206,7 @@ export function PurchaseInvoicePage() {
         inv.poRef,
         inv.issueDate,
         inv.dueDate,
-        fmt(lineTotal(inv.lines)),
+        lineTotal(inv.lines),
         inv.status,
       ]),
     );

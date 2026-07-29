@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { fetchPurchaseOrders } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
 import {
+  csvAmountHeader,
   getCurrencySymbol,
   formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
@@ -876,7 +877,7 @@ export function PurchaseOrdersPage() {
       "Contact",
       "Status",
       "Payment Status",
-      "Total Value",
+      csvAmountHeader("Total Value"),
       "Expected Date",
       "Items",
     ];
@@ -887,7 +888,7 @@ export function PurchaseOrdersPage() {
       po.supplierContact,
       statusConfig[po.status].label,
       PAYMENT_STATUS_CFG[po.paymentStatus].label,
-      String(po.totalValue),
+      po.totalValue,
       po.expectedDate,
       po.items
         .map((it) => `${it.material} (${it.qty} ${it.unit} @ ₦${it.unitCost})`)

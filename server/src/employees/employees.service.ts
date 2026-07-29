@@ -39,33 +39,6 @@ export class EmployeesService {
         private adminExtras: AdminExtrasService,
     ) { }
 
-    /**
-     * Creates the login account a newly onboarded employee uses to activate BuildOS
-     * access, reusing the same invite pipeline (pending_invite user + admin-configured
-     * "New User Created" email template, sent via the mail queue) that Admin's own
-     * "invite user" flow already uses. Failures here don't fail employee creation —
-     * they surface as a warning so HR data isn't lost over an unrelated email/infra issue.
-     */
-    private async createLinkedUserAccount(employee: {
-        id: string; firstName: string; lastName: string; email: string; department?: { name: string } | null;
-    }) {
-        const existing = await this.prisma.user.findUnique({ where: { email: employee.email } });
-        if (existing) {
-            await this.prisma.employee.update({ where: { id: employee.id }, data: { userId: existing.id } });
-            return;
-        }
-
-        const invited = await this.adminExtras.inviteUser({
-            email: employee.email,
-            name: `${employee.firstName} ${employee.lastName}`.trim(),
-            role: 'employee',
-            assignedApps: ['ess', 'hr'],
-            department: employee.department?.name,
-        });
-
-        await this.prisma.employee.update({ where: { id: employee.id }, data: { userId: invited.id } });
-    }
-
     findAll(status?: string, departmentId?: string) {
         return this.prisma.employee.findMany({
             where: {
@@ -104,20 +77,22 @@ export class EmployeesService {
             description: `Employee profile created for ${employee.firstName} ${employee.lastName}`,
         }).catch(() => {});
 
+        // Onboarding sends a welcome email now, but deliberately does NOT create a
+        // login account: the employee lands in Admin → Users → Pending Sync, where
+        // an admin reviews their company email, role and app access before the user
+        // is created. A failed email must not lose the HR record, so it degrades to
+        // a warning the UI surfaces instead of throwing.
         let onboardingWarning: string | undefined;
         try {
-            await this.createLinkedUserAccount(employee);
+            await this.adminExtras.sendEmployeeWelcomeEmail(employee);
         } catch (error) {
-            onboardingWarning = `Employee saved, but the welcome email/account could not be created: ${
+            onboardingWarning = `Employee saved, but the welcome email could not be sent: ${
                 error instanceof Error ? error.message : 'unknown error'
             }`;
             this.logger.warn(onboardingWarning);
         }
 
-        const result = onboardingWarning
-            ? employee
-            : await this.prisma.employee.findUniqueOrThrow({ where: { id: employee.id }, include: { department: true } });
-        return onboardingWarning ? { ...result, onboardingWarning } : result;
+        return onboardingWarning ? { ...employee, onboardingWarning } : employee;
     }
 
     async update(id: string, data: any) {

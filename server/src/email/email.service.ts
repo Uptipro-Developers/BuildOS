@@ -52,6 +52,7 @@ export class EmailService {
 
     /** Whether outbound email is fully configured (provider + key + from address). */
     isConfigured(): boolean {
+        if (this.getProvider() === 'log') return true;
         return this.getProvider() === 'resend' && !!this.getApiKey() && !!this.getDefaultFrom();
     }
 
@@ -61,6 +62,20 @@ export class EmailService {
      */
     async sendNow(payload: EmailPayload): Promise<void> {
         const provider = this.getProvider();
+
+        // EMAIL_PROVIDER=log writes the message to the application log instead of
+        // dispatching it. Intended for local development and end-to-end tests, so
+        // email-dependent flows (invites, employee onboarding, payslips) can be
+        // exercised without a live Resend key or sending mail to real addresses.
+        if (provider === 'log') {
+            this.logger.log(
+                `[email:log] to=${String(payload.to)}` +
+                    `${payload.cc?.length ? ` cc=${payload.cc.join(',')}` : ''}` +
+                    ` subject="${payload.subject}"\n${payload.text ?? payload.html ?? ''}`,
+            );
+            return;
+        }
+
         if (provider !== 'resend') {
             throw new BadRequestException(`Email provider '${provider}' is not supported by this service`);
         }

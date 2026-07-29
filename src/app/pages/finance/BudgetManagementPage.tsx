@@ -17,7 +17,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
 import { useNumbering } from "../../stores/numberingStore";
@@ -173,10 +176,10 @@ export function BudgetManagementPage() {
         "ID",
         "Name",
         "Scope",
-        "Budget",
-        "Spent",
-        "Committed",
-        "Remaining",
+        csvAmountHeader("Budget"),
+        csvAmountHeader("Spent"),
+        csvAmountHeader("Committed"),
+        csvAmountHeader("Remaining"),
         "Period",
         "Status",
       ],
@@ -184,10 +187,10 @@ export function BudgetManagementPage() {
         b.id,
         b.name,
         b.scope,
-        fmt(b.totalBudget),
-        fmt(b.spent),
-        fmt(b.committed),
-        fmt(b.totalBudget - b.spent - b.committed),
+        b.totalBudget,
+        b.spent,
+        b.committed,
+        b.totalBudget - b.spent - b.committed,
         b.period,
         b.status,
       ]),

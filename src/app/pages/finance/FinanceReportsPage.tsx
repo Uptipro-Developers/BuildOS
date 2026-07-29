@@ -3,9 +3,10 @@ import { BarChart3, Download, TrendingUp, TrendingDown, DollarSign, ScrollText }
 import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../../stores/financeStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
-import { exportCSV } from "../../utils/exportCSV";
+import { exportCSV, type CsvCell } from "../../utils/exportCSV";
 import { apiFetch } from "../../api/client";
 import {
+  csvAmountHeader,
   formatCurrencyByGeneralSettings,
   formatDateByGeneralSettings,
   formatNumberByGeneralSettings,
@@ -180,44 +181,45 @@ export function FinanceReportsPage() {
   }, [balanceSheet]);
 
   function handleExport() {
-    const rows: string[][] = [];
+    let headers: string[] = [];
+    const rows: CsvCell[][] = [];
     if (selectedReport === "trial-balance") {
-      rows.push(["Account Code", "Account Name", "Type", "Debit", "Credit"]);
-      tb.forEach(r => rows.push([r.code, r.accountName, r.type, fmt(r.debit), fmt(r.credit)]));
-      rows.push(["", "", "Total", fmt(totalDebits), fmt(totalCredits)]);
+      headers = ["Account Code", "Account Name", "Type", csvAmountHeader("Debit"), csvAmountHeader("Credit")];
+      tb.forEach(r => rows.push([r.code, r.accountName, r.type, r.debit, r.credit]));
+      rows.push(["", "", "Total", totalDebits, totalCredits]);
     } else if (selectedReport === "balance-sheet") {
-      rows.push(["Section", "Account", "Amount"]);
+      headers = ["Section", "Account", csvAmountHeader("Amount")];
       balanceSheet.forEach(s => {
-        rows.push([s.section, "", fmt(s.total)]);
-        s.items.forEach(i => rows.push(["", i.account, fmt(i.amount)]));
+        rows.push([s.section, "", s.total]);
+        s.items.forEach(i => rows.push(["", i.account, i.amount]));
       });
     } else if (selectedReport === "income-statement") {
-      rows.push(["Item", "Amount"]);
-      incomeStatement.forEach(r => rows.push([r.label, r.isSection ? "" : fmt(r.amount)]));
+      headers = ["Item", csvAmountHeader("Amount")];
+      incomeStatement.forEach(r => rows.push([r.label, r.isSection ? "" : r.amount]));
     }
-    exportCSV(`finance-report-${selectedReport}-${selectedFy?.label ?? "all"}`, rows[0] ?? [], rows.slice(1));
+    exportCSV(`finance-report-${selectedReport}-${selectedFy?.label ?? "all"}`, headers, rows);
   }
 
   function exportTB() {
-    const headers = ["Account Code", "Account Name", "Type", "Debit", "Credit"];
-    const rows = tb.map(r => [r.code, r.accountName, r.type, fmt(r.debit), fmt(r.credit)]);
-    rows.push(["", "", "Total", fmt(totalDebits), fmt(totalCredits)]);
+    const headers = ["Account Code", "Account Name", "Type", csvAmountHeader("Debit"), csvAmountHeader("Credit")];
+    const rows: CsvCell[][] = tb.map(r => [r.code, r.accountName, r.type, r.debit, r.credit]);
+    rows.push(["", "", "Total", totalDebits, totalCredits]);
     exportCSV(`trial-balance-${selectedFy?.label ?? "all"}`, headers, rows);
   }
 
   function exportBS() {
-    const headers = ["Section", "Account", "Amount"];
-    const rows: string[][] = [];
+    const headers = ["Section", "Account", csvAmountHeader("Amount")];
+    const rows: CsvCell[][] = [];
     balanceSheet.forEach(s => {
-      rows.push([s.section, "", fmt(s.total)]);
-      s.items.forEach(i => rows.push(["", i.account, fmt(i.amount)]));
+      rows.push([s.section, "", s.total]);
+      s.items.forEach(i => rows.push(["", i.account, i.amount]));
     });
     exportCSV(`balance-sheet-${selectedFy?.label ?? "all"}`, headers, rows);
   }
 
   function exportIS() {
-    const headers = ["Item", "Amount"];
-    const rows = incomeStatement.map(r => [r.label, r.isSection ? "" : fmt(r.amount)]);
+    const headers = ["Item", csvAmountHeader("Amount")];
+    const rows = incomeStatement.map(r => [r.label, r.isSection ? "" : r.amount]);
     exportCSV(`income-statement-${selectedFy?.label ?? "all"}`, headers, rows);
   }
 

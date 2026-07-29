@@ -4,7 +4,8 @@ import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../..
 import { useChangelog } from "../../stores/changelogStore";
 import type { FiscalYear, FiscalYearStatus } from "./types";
 import { DataTable, type Column } from "../../components/DataTable";
-import { exportCSV } from "../../utils/exportCSV";
+import { exportCSV, type CsvCell } from "../../utils/exportCSV";
+import { csvAmountHeader } from "../../utils/generalSettings";
 
 
 const FISCAL_STATUS_STYLES: Record<FiscalYearStatus, string> = {
@@ -226,8 +227,8 @@ export function FiscalYearsPage() {
                     searchFields={[r => r.accountName, r => r.code]}
                     headerExtra={
                       <button onClick={() => {
-                        const headers = ["Account", "Code", "Debit", "Credit"];
-                        const rows = tb.map(r => [r.accountName, r.code, fmt(r.debit), fmt(r.credit)]);
+                        const headers = ["Account", "Code", csvAmountHeader("Debit"), csvAmountHeader("Credit")];
+                        const rows = tb.map(r => [r.accountName, r.code, r.debit, r.credit]);
                         exportCSV(`trial-balance-${reportFy.label}`, headers, rows);
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
@@ -246,8 +247,8 @@ export function FiscalYearsPage() {
                     searchFields={[r => r.label]}
                     headerExtra={
                       <button onClick={() => {
-                        const headers = ["Item", "Amount"];
-                        const rows = income.map(r => [r.label, r.isSection ? "" : fmt(r.amount)]);
+                        const headers = ["Item", csvAmountHeader("Amount")];
+                        const rows = income.map(r => [r.label, r.isSection ? "" : r.amount]);
                         exportCSV(`income-statement-${reportFy.label}`, headers, rows);
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
                         <Download className="w-3 h-3" /> Export CSV
@@ -266,11 +267,11 @@ export function FiscalYearsPage() {
                     searchFields={[r => r.account]}
                     headerExtra={
                       <button onClick={() => {
-                        const headers = ["Section", "Account", "Amount"];
-                        const rows: string[][] = [];
+                        const headers = ["Section", "Account", csvAmountHeader("Amount")];
+                        const rows: CsvCell[][] = [];
                         bs.forEach(s => {
-                          rows.push([s.section, "", fmt(s.total)]);
-                          s.items.forEach(i => rows.push(["", i.account, fmt(i.amount)]));
+                          rows.push([s.section, "", s.total]);
+                          s.items.forEach(i => rows.push(["", i.account, i.amount]));
                         });
                         exportCSV(`balance-sheet-${reportFy.label}`, headers, rows);
                       }} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
