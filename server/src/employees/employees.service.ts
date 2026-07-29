@@ -114,7 +114,10 @@ export class EmployeesService {
             this.logger.warn(onboardingWarning);
         }
 
-        return onboardingWarning ? { ...employee, onboardingWarning } : employee;
+        const result = onboardingWarning
+            ? employee
+            : await this.prisma.employee.findUniqueOrThrow({ where: { id: employee.id }, include: { department: true } });
+        return onboardingWarning ? { ...result, onboardingWarning } : result;
     }
 
     async update(id: string, data: any) {
