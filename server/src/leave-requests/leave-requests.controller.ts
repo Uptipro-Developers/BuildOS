@@ -115,13 +115,24 @@ export class LeaveRequestsController {
   // ── Leave Approval ──
   @Post(':id/approve')
   @Roles('admin', 'hr-manager', 'manager')
-  async approve(@Param('id') id: string, @Request() req: any) {
-    const result = await this.leaveRequestsService.update(id, {
-      status: 'approved',
-      approvedBy: req.user.id,
-      approvedAt: new Date(),
-    });
-    return { success: true, data: result, message: 'Leave request approved' };
+  async approve(
+    @Param('id') id: string,
+    @Body('comments') comments: string,
+    @Request() req: any,
+  ) {
+    // Routed through the service so the configured approval workflow is honoured:
+    // the request is only released once every required step has approved.
+    const result = await this.leaveRequestsService.approve(id, req.user.id, comments);
+    const progress = await this.leaveRequestsService.getApprovalProgress(id);
+    const complete = result.status === 'approved';
+    return {
+      success: true,
+      data: result,
+      approvals: progress,
+      message: complete
+        ? 'Leave request approved'
+        : `Approval recorded (${progress.approved} of ${progress.required})`,
+    };
   }
 
   @Post(':id/reject')
@@ -131,12 +142,7 @@ export class LeaveRequestsController {
     @Body('reason') reason: string,
     @Request() req: any,
   ) {
-    const result = await this.leaveRequestsService.update(id, {
-      status: 'rejected',
-      approvedBy: req.user.id,
-      approvedAt: new Date(),
-      notes: reason,
-    });
+    const result = await this.leaveRequestsService.reject(id, req.user.id, reason);
     return { success: true, data: result, message: 'Leave request rejected' };
   }
 }

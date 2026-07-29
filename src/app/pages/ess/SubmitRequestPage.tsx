@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { getCurrencySymbol } from "../../utils/generalSettings";
+import { toast } from "sonner";
+import {
+  getCurrencySymbol,
+  formatDateByGeneralSettings,
+} from "../../utils/generalSettings";
 import {
   CheckCircle,
   AlertTriangle,
@@ -22,6 +26,7 @@ import { IssueForm } from "../../components/IssueForm";
 import { ChangeRequestForm } from "../../components/ChangeRequestForm";
 import { AttachmentsSection } from "../../components/AttachmentsSection";
 import { ApprovalPipeline } from "../../components/ApprovalPipeline";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getWorkflows,
   getPipelineForRequest,
@@ -253,6 +258,7 @@ function MaterialCreationForm({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   function validate() {
     const e: Record<string, string> = {};
@@ -269,6 +275,10 @@ function MaterialCreationForm({
       setErrors(errs);
       return;
     }
+    setShowConfirm(true);
+  }
+
+  function submitRequest() {
     onSuccess("MCR-" + String(Math.floor(1000 + Math.random() * 8999)));
   }
 
@@ -283,148 +293,158 @@ function MaterialCreationForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Info banner */}
-      <div className="flex gap-3 bg-orange-50 border border-orange-200 rounded-xl p-4">
-        <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
-        <div>
-          <p className="text-sm font-semibold text-orange-800">
-            Material Creation Request
-          </p>
-          <p className="text-xs text-orange-700 mt-0.5 leading-relaxed">
-            This material is out of stock or does not exist in the catalogue.
-            Your request will be sent to your <strong>Line Manager</strong> for
-            approval, then the <strong>Store Manager</strong> will create and
-            procure the material.
-          </p>
-        </div>
-      </div>
-
-      {/* Approval steps */}
-      <div className="grid grid-cols-3 gap-2 text-center">
-        {[
-          { step: "1", label: "Your Request", sub: "ESS Submission" },
-          { step: "2", label: "Line Manager", sub: "Approves request" },
-          { step: "3", label: "Store Manager", sub: "Creates & Procures" },
-        ].map((s) => (
-          <div
-            key={s.step}
-            className="bg-gray-50 rounded-xl p-3 border border-gray-200"
-          >
-            <div className="w-6 h-6 bg-teal-600 text-white rounded-full text-xs font-bold flex items-center justify-center mx-auto mb-1.5">
-              {s.step}
-            </div>
-            <p className="text-xs font-semibold text-gray-800">{s.label}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{s.sub}</p>
+    <>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Info banner */}
+        <div className="flex gap-3 bg-orange-50 border border-orange-200 rounded-xl p-4">
+          <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-orange-800">
+              Material Creation Request
+            </p>
+            <p className="text-xs text-orange-700 mt-0.5 leading-relaxed">
+              This material is out of stock or does not exist in the catalogue.
+              Your request will be sent to your <strong>Line Manager</strong>{" "}
+              for approval, then the <strong>Store Manager</strong> will create
+              and procure the material.
+            </p>
           </div>
-        ))}
-      </div>
+        </div>
 
-      {/* Material Name */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Material Name<span className="text-red-500">*</span>
-        </label>
-        <input
-          value={formState.materialName}
-          onChange={(e) => field("materialName", e.target.value)}
-          placeholder="e.g. Aluminium Roofing Sheet 0.55mm"
-          className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.materialName ? "border-red-400" : "border-gray-300"}`}
-        />
-        {errors.materialName && (
-          <p className="text-xs text-red-500 mt-1">{errors.materialName}</p>
-        )}
-      </div>
+        {/* Approval steps */}
+        <div className="grid grid-cols-3 gap-2 text-center">
+          {[
+            { step: "1", label: "Your Request", sub: "ESS Submission" },
+            { step: "2", label: "Line Manager", sub: "Approves request" },
+            { step: "3", label: "Store Manager", sub: "Creates & Procures" },
+          ].map((s) => (
+            <div
+              key={s.step}
+              className="bg-gray-50 rounded-xl p-3 border border-gray-200"
+            >
+              <div className="w-6 h-6 bg-teal-600 text-white rounded-full text-xs font-bold flex items-center justify-center mx-auto mb-1.5">
+                {s.step}
+              </div>
+              <p className="text-xs font-semibold text-gray-800">{s.label}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{s.sub}</p>
+            </div>
+          ))}
+        </div>
 
-      {/* Description */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Description{" "}
-          <span className="text-gray-400 font-normal">(optional)</span>
-        </label>
-        <textarea
-          value={formState.description}
-          onChange={(e) => field("description", e.target.value)}
-          rows={2}
-          placeholder="Describe the material, specifications, brand preference…"
-          className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-        />
-      </div>
-
-      {/* Estimated Quantity + Unit */}
-      <div className="grid grid-cols-2 gap-4">
+        {/* Material Name */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Estimated Quantity<span className="text-red-500">*</span>
+            Material Name<span className="text-red-500">*</span>
           </label>
           <input
-            value={formState.estimatedQty}
-            onChange={(e) => field("estimatedQty", e.target.value)}
-            type="number"
-            min="1"
-            placeholder="0"
-            className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.estimatedQty ? "border-red-400" : "border-gray-300"}`}
+            value={formState.materialName}
+            onChange={(e) => field("materialName", e.target.value)}
+            placeholder="e.g. Aluminium Roofing Sheet 0.55mm"
+            className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.materialName ? "border-red-400" : "border-gray-300"}`}
           />
-          {errors.estimatedQty && (
-            <p className="text-xs text-red-500 mt-1">{errors.estimatedQty}</p>
+          {errors.materialName && (
+            <p className="text-xs text-red-500 mt-1">{errors.materialName}</p>
           )}
         </div>
+
+        {/* Description */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Unit
+            Description{" "}
+            <span className="text-gray-400 font-normal">(optional)</span>
           </label>
-          <div className="relative">
-            <select
-              value={formState.unit}
-              onChange={(e) => field("unit", e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              {[
-                "pcs",
-                "bags",
-                "kg",
-                "tonnes",
-                "metres",
-                "m²",
-                "m³",
-                "litres",
-                "sets",
-                "sheets",
-                "rolls",
-              ].map((u) => (
-                <option key={u}>{u}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+          <textarea
+            value={formState.description}
+            onChange={(e) => field("description", e.target.value)}
+            rows={2}
+            placeholder="Describe the material, specifications, brand preference…"
+            className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+          />
+        </div>
+
+        {/* Estimated Quantity + Unit */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Estimated Quantity<span className="text-red-500">*</span>
+            </label>
+            <input
+              value={formState.estimatedQty}
+              onChange={(e) => field("estimatedQty", e.target.value)}
+              type="number"
+              min="1"
+              placeholder="0"
+              className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.estimatedQty ? "border-red-400" : "border-gray-300"}`}
+            />
+            {errors.estimatedQty && (
+              <p className="text-xs text-red-500 mt-1">{errors.estimatedQty}</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Unit
+            </label>
+            <div className="relative">
+              <select
+                value={formState.unit}
+                onChange={(e) => field("unit", e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                {[
+                  "pcs",
+                  "bags",
+                  "kg",
+                  "tonnes",
+                  "metres",
+                  "m²",
+                  "m³",
+                  "litres",
+                  "sets",
+                  "sheets",
+                  "rolls",
+                ].map((u) => (
+                  <option key={u}>{u}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Additional Notes */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Additional Notes{" "}
-          <span className="text-gray-400 font-normal">(optional)</span>
-        </label>
-        <textarea
-          value={formState.notes}
-          onChange={(e) => field("notes", e.target.value)}
-          rows={2}
-          placeholder="Any urgency, site requirements, or suggested supplier…"
-          className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-        />
-      </div>
+        {/* Additional Notes */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Additional Notes{" "}
+            <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={formState.notes}
+            onChange={(e) => field("notes", e.target.value)}
+            rows={2}
+            placeholder="Any urgency, site requirements, or suggested supplier…"
+            className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+          />
+        </div>
 
-      <AttachmentsSection files={attachments} onChange={setAttachments} />
+        <AttachmentsSection files={attachments} onChange={setAttachments} />
 
-      <button
-        type="submit"
-        className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors flex items-center justify-center gap-2"
-      >
-        <Send className="w-4 h-4" />
-        Submit Material Creation Request
-      </button>
-    </form>
+        <button
+          type="submit"
+          className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors flex items-center justify-center gap-2"
+        >
+          <Send className="w-4 h-4" />
+          Submit Material Creation Request
+        </button>
+      </form>
+      <ConfirmationModal
+        isOpen={showConfirm}
+        title="Submit Material Creation Request?"
+        description={`This will request the creation of ${formState.estimatedQty || "0"} ${formState.unit} of "${formState.materialName}". Your line manager reviews it first, then the store manager creates and procures the material.`}
+        confirmLabel="Submit Request"
+        onConfirm={submitRequest}
+        onCancel={() => setShowConfirm(false)}
+      />
+    </>
   );
 }
 
@@ -460,6 +480,7 @@ function MaterialForm({
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   function validate() {
     const e: Record<string, string> = {};
@@ -476,13 +497,22 @@ function MaterialForm({
     return e;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) {
       setErrors(errs);
       return;
     }
+    setShowConfirm(true);
+  }
+
+  const confirmDescription =
+    requestKind === "service"
+      ? `This will submit a ${formState.serviceType || "service"} request for ${formState.project}, needed by ${formatDateByGeneralSettings(formState.serviceDate)}. It will be routed for approval once submitted.`
+      : `This will request ${formState.quantity} ${formState.unit} of ${formState.material} for ${formState.project}. It will be routed for approval once submitted.`;
+
+  async function submitRequest() {
     if (requestKind === "service") {
       // No backend target for service requests yet — keep optimistic ack.
       onSuccess("SVC-" + String(Math.floor(1000 + Math.random() * 8999)));
@@ -508,12 +538,14 @@ function MaterialForm({
       });
       onSuccess(created?.id ?? "MR");
     } catch (err) {
-      alert(
-        (err as Error)?.message ||
-          "Failed to submit material request. Please try again.",
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to submit material request. Please try again.",
       );
     } finally {
       setSubmitting(false);
+      setShowConfirm(false);
     }
   }
 
@@ -528,402 +560,422 @@ function MaterialForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Material / Service Toggle */}
-      <div className="flex rounded-xl overflow-hidden border border-gray-200 bg-gray-50 p-1 gap-1">
-        <button
-          type="button"
-          onClick={() => {
-            setRequestKind("material");
-            setShowCreationForm(false);
-            setSelectedStock(null);
-            field("material", "");
-          }}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
-            requestKind === "material"
-              ? "bg-white text-teal-700 shadow-sm border border-gray-200"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          Material Request
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setRequestKind("service");
-            setShowCreationForm(false);
-            setSelectedStock(null);
-          }}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
-            requestKind === "service"
-              ? "bg-white text-teal-700 shadow-sm border border-gray-200"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          <Wrench className="w-4 h-4" />
-          Service Request
-        </button>
-      </div>
-
-      {requestKind === "material" && showCreationForm ? (
-        <div className="space-y-4">
+    <>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Material / Service Toggle */}
+        <div className="flex rounded-xl overflow-hidden border border-gray-200 bg-gray-50 p-1 gap-1">
           <button
             type="button"
             onClick={() => {
+              setRequestKind("material");
               setShowCreationForm(false);
               setSelectedStock(null);
               field("material", "");
             }}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
+              requestKind === "material"
+                ? "bg-white text-teal-700 shadow-sm border border-gray-200"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
-            <ArrowLeft className="w-4 h-4" /> Back to material search
+            <Package className="w-4 h-4" />
+            Material Request
           </button>
-          <MaterialCreationForm onSuccess={(id) => onSuccess(id)} />
+          <button
+            type="button"
+            onClick={() => {
+              setRequestKind("service");
+              setShowCreationForm(false);
+              setSelectedStock(null);
+            }}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
+              requestKind === "service"
+                ? "bg-white text-teal-700 shadow-sm border border-gray-200"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <Wrench className="w-4 h-4" />
+            Service Request
+          </button>
         </div>
-      ) : requestKind === "material" ? (
-        <>
-          {/* Project (shared) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project<span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <select
-                value={formState.project}
-                onChange={(e) => field("project", e.target.value)}
-                className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.project ? "border-red-400" : "border-gray-300"}`}
-              >
-                <option value="">Select a project…</option>
-                {projects.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            </div>
-            {errors.project && (
-              <p className="text-xs text-red-500 mt-1">{errors.project}</p>
-            )}
+
+        {requestKind === "material" && showCreationForm ? (
+          <div className="space-y-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreationForm(false);
+                setSelectedStock(null);
+                field("material", "");
+              }}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
+            >
+              <ArrowLeft className="w-4 h-4" /> Back to material search
+            </button>
+            <MaterialCreationForm onSuccess={(id) => onSuccess(id)} />
           </div>
-
-          {/* Material Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Material Name<span className="text-red-500">*</span>
-            </label>
-            <MaterialCombobox
-              value={formState.material}
-              onChange={(v) => field("material", v)}
-              onStockChange={(s) => setSelectedStock(s)}
-              error={errors.material}
-            />
-            {errors.material && (
-              <p className="text-xs text-red-500 mt-1">{errors.material}</p>
-            )}
-          </div>
-
-          {/* Stock level feedback */}
-          {selectedStock === "low_stock" && (
-            <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-              <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-amber-800">
-                  Low Stock
-                </p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  Available but running low. Your request will proceed normally.
-                  Storefront may raise a procurement order to replenish stock.
-                </p>
-              </div>
-            </div>
-          )}
-          {selectedStock === "out_of_stock" && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-4 space-y-3">
-              <div className="flex items-start gap-2.5">
-                <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-red-800">
-                    Out of Stock
-                  </p>
-                  <p className="text-xs text-red-700 mt-0.5">
-                    This material is currently unavailable. You cannot submit a
-                    direct material request. Instead, submit a{" "}
-                    <strong>Material Creation Request</strong> to initiate the
-                    procurement process through your Line Manager and Store
-                    Manager.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCreationForm(true)}
-                className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
-              >
-                <PlusCircle className="w-4 h-4" />
-                Request New Material
-              </button>
-            </div>
-          )}
-
-          {/* Quantity + Unit — only when not out of stock */}
-          {selectedStock !== "out_of_stock" && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Quantity<span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={formState.quantity}
-                    onChange={(e) => field("quantity", e.target.value)}
-                    type="number"
-                    min="1"
-                    placeholder="0"
-                    className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.quantity ? "border-red-400" : "border-gray-300"}`}
-                  />
-                  {errors.quantity && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.quantity}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Unit
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={formState.unit}
-                      onChange={(e) => field("unit", e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      {[
-                        "pcs",
-                        "bags",
-                        "kg",
-                        "tonnes",
-                        "metres",
-                        "m²",
-                        "m³",
-                        "litres",
-                        "sets",
-                      ].map((u) => (
-                        <option key={u}>{u}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Due date<span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={formState.neededDate}
-                    onChange={(e) => field("neededDate", e.target.value)}
-                    type="date"
-                    className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.neededDate ? "border-red-400" : "border-gray-300"}`}
-                  />
-                  {errors.neededDate && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.neededDate}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Priority
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={formState.priority}
-                      onChange={(e) => field("priority", e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      {priorities.map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Comments{" "}
-                  <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <textarea
-                  value={formState.comments}
-                  onChange={(e) => field("comments", e.target.value)}
-                  rows={3}
-                  placeholder="Any additional context or urgency notes…"
-                  className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-                />
-              </div>
-
-              <AttachmentsSection
-                files={attachments}
-                onChange={setAttachments}
-              />
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-60"
-              >
-                {submitting ? "Submitting…" : "Submit Material Request"}
-              </button>
-            </>
-          )}
-        </>
-      ) : (
-        // Service request branch
-        <>
-          {/* Project (shared) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Project<span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <select
-                value={formState.project}
-                onChange={(e) => field("project", e.target.value)}
-                className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.project ? "border-red-400" : "border-gray-300"}`}
-              >
-                <option value="">Select a project…</option>
-                {projects.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            </div>
-            {errors.project && (
-              <p className="text-xs text-red-500 mt-1">{errors.project}</p>
-            )}
-          </div>
-
-          {/* Service Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Service Type<span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <select
-                value={formState.serviceType}
-                onChange={(e) => field("serviceType", e.target.value)}
-                className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.serviceType ? "border-red-400" : "border-gray-300"}`}
-              >
-                <option value="">Select service type…</option>
-                {[
-                  "Electrical Work",
-                  "Plumbing",
-                  "Civil / Masonry",
-                  "IT / Technical Support",
-                  "Cleaning / Janitorial",
-                  "Security",
-                  "Equipment Repair",
-                  "Landscaping",
-                  "Other",
-                ].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-            </div>
-            {errors.serviceType && (
-              <p className="text-xs text-red-500 mt-1">{errors.serviceType}</p>
-            )}
-          </div>
-
-          {/* Service Provider */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Preferred Service Provider{" "}
-              <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <input
-              value={formState.serviceProvider}
-              onChange={(e) => field("serviceProvider", e.target.value)}
-              placeholder="e.g. Tech Solutions Ltd"
-              className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          {/* Service Date + Estimated Cost */}
-          <div className="grid grid-cols-2 gap-4">
+        ) : requestKind === "material" ? (
+          <>
+            {/* Project (shared) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Due date<span className="text-red-500">*</span>
+                Project<span className="text-red-500">*</span>
               </label>
-              <input
-                value={formState.serviceDate}
-                onChange={(e) => field("serviceDate", e.target.value)}
-                type="date"
-                className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.serviceDate ? "border-red-400" : "border-gray-300"}`}
+              <div className="relative">
+                <select
+                  value={formState.project}
+                  onChange={(e) => field("project", e.target.value)}
+                  className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.project ? "border-red-400" : "border-gray-300"}`}
+                >
+                  <option value="">Select a project…</option>
+                  {projects.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+              {errors.project && (
+                <p className="text-xs text-red-500 mt-1">{errors.project}</p>
+              )}
+            </div>
+
+            {/* Material Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Material Name<span className="text-red-500">*</span>
+              </label>
+              <MaterialCombobox
+                value={formState.material}
+                onChange={(v) => field("material", v)}
+                onStockChange={(s) => setSelectedStock(s)}
+                error={errors.material}
               />
-              {errors.serviceDate && (
+              {errors.material && (
+                <p className="text-xs text-red-500 mt-1">{errors.material}</p>
+              )}
+            </div>
+
+            {/* Stock level feedback */}
+            {selectedStock === "low_stock" && (
+              <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">
+                    Low Stock
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Available but running low. Your request will proceed
+                    normally. Storefront may raise a procurement order to
+                    replenish stock.
+                  </p>
+                </div>
+              </div>
+            )}
+            {selectedStock === "out_of_stock" && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-4 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-800">
+                      Out of Stock
+                    </p>
+                    <p className="text-xs text-red-700 mt-0.5">
+                      This material is currently unavailable. You cannot submit
+                      a direct material request. Instead, submit a{" "}
+                      <strong>Material Creation Request</strong> to initiate the
+                      procurement process through your Line Manager and Store
+                      Manager.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreationForm(true)}
+                  className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  Request New Material
+                </button>
+              </div>
+            )}
+
+            {/* Quantity + Unit — only when not out of stock */}
+            {selectedStock !== "out_of_stock" && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Quantity<span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      value={formState.quantity}
+                      onChange={(e) => field("quantity", e.target.value)}
+                      type="number"
+                      min="1"
+                      placeholder="0"
+                      className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.quantity ? "border-red-400" : "border-gray-300"}`}
+                    />
+                    {errors.quantity && (
+                      <p className="text-xs text-red-500 mt-1">
+                        {errors.quantity}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unit
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={formState.unit}
+                        onChange={(e) => field("unit", e.target.value)}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      >
+                        {[
+                          "pcs",
+                          "bags",
+                          "kg",
+                          "tonnes",
+                          "metres",
+                          "m²",
+                          "m³",
+                          "litres",
+                          "sets",
+                        ].map((u) => (
+                          <option key={u}>{u}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Due date<span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      value={formState.neededDate}
+                      onChange={(e) => field("neededDate", e.target.value)}
+                      type="date"
+                      className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.neededDate ? "border-red-400" : "border-gray-300"}`}
+                    />
+                    {errors.neededDate && (
+                      <p className="text-xs text-red-500 mt-1">
+                        {errors.neededDate}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Priority
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={formState.priority}
+                        onChange={(e) => field("priority", e.target.value)}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      >
+                        {priorities.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Comments{" "}
+                    <span className="text-gray-400 font-normal">
+                      (optional)
+                    </span>
+                  </label>
+                  <textarea
+                    value={formState.comments}
+                    onChange={(e) => field("comments", e.target.value)}
+                    rows={3}
+                    placeholder="Any additional context or urgency notes…"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                  />
+                </div>
+
+                <AttachmentsSection
+                  files={attachments}
+                  onChange={setAttachments}
+                />
+
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-60"
+                >
+                  {submitting ? "Submitting…" : "Submit Material Request"}
+                </button>
+              </>
+            )}
+          </>
+        ) : (
+          // Service request branch
+          <>
+            {/* Project (shared) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Project<span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={formState.project}
+                  onChange={(e) => field("project", e.target.value)}
+                  className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.project ? "border-red-400" : "border-gray-300"}`}
+                >
+                  <option value="">Select a project…</option>
+                  {projects.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+              {errors.project && (
+                <p className="text-xs text-red-500 mt-1">{errors.project}</p>
+              )}
+            </div>
+
+            {/* Service Type */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Service Type<span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={formState.serviceType}
+                  onChange={(e) => field("serviceType", e.target.value)}
+                  className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.serviceType ? "border-red-400" : "border-gray-300"}`}
+                >
+                  <option value="">Select service type…</option>
+                  {[
+                    "Electrical Work",
+                    "Plumbing",
+                    "Civil / Masonry",
+                    "IT / Technical Support",
+                    "Cleaning / Janitorial",
+                    "Security",
+                    "Equipment Repair",
+                    "Landscaping",
+                    "Other",
+                  ].map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+              {errors.serviceType && (
                 <p className="text-xs text-red-500 mt-1">
-                  {errors.serviceDate}
+                  {errors.serviceType}
                 </p>
               )}
             </div>
+
+            {/* Service Provider */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Estimated Cost{" "}
-                <span className="text-gray-400 font-normal">
-                  ({getCurrencySymbol()})
-                </span>
+                Preferred Service Provider{" "}
+                <span className="text-gray-400 font-normal">(optional)</span>
               </label>
               <input
-                value={formState.estimatedCost}
-                onChange={(e) => field("estimatedCost", e.target.value)}
-                type="number"
-                min="0"
-                placeholder="0.00"
+                value={formState.serviceProvider}
+                onChange={(e) => field("serviceProvider", e.target.value)}
+                placeholder="e.g. Tech Solutions Ltd"
                 className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>
-          </div>
 
-          {/* Comments (shared) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Comments{" "}
-              <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <textarea
-              value={formState.comments}
-              onChange={(e) => field("comments", e.target.value)}
-              rows={3}
-              placeholder="Any additional context or urgency notes…"
-              className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-            />
-          </div>
+            {/* Service Date + Estimated Cost */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Due date<span className="text-red-500">*</span>
+                </label>
+                <input
+                  value={formState.serviceDate}
+                  onChange={(e) => field("serviceDate", e.target.value)}
+                  type="date"
+                  className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.serviceDate ? "border-red-400" : "border-gray-300"}`}
+                />
+                {errors.serviceDate && (
+                  <p className="text-xs text-red-500 mt-1">
+                    {errors.serviceDate}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Estimated Cost{" "}
+                  <span className="text-gray-400 font-normal">
+                    ({getCurrencySymbol()})
+                  </span>
+                </label>
+                <input
+                  value={formState.estimatedCost}
+                  onChange={(e) => field("estimatedCost", e.target.value)}
+                  type="number"
+                  min="0"
+                  placeholder="0.00"
+                  className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+            </div>
 
-          <AttachmentsSection files={attachments} onChange={setAttachments} />
+            {/* Comments (shared) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Comments{" "}
+                <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                value={formState.comments}
+                onChange={(e) => field("comments", e.target.value)}
+                rows={3}
+                placeholder="Any additional context or urgency notes…"
+                className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+              />
+            </div>
 
-          <button
-            type="submit"
-            className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors"
-          >
-            Submit Service Request
-          </button>
-        </>
-      )}
-    </form>
+            <AttachmentsSection files={attachments} onChange={setAttachments} />
+
+            <button
+              type="submit"
+              className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors"
+            >
+              Submit Service Request
+            </button>
+          </>
+        )}
+      </form>
+      <ConfirmationModal
+        isOpen={showConfirm}
+        title={
+          requestKind === "service"
+            ? "Submit Service Request?"
+            : "Submit Material Request?"
+        }
+        description={confirmDescription}
+        confirmLabel="Submit Request"
+        isLoading={submitting}
+        onConfirm={submitRequest}
+        onCancel={() => setShowConfirm(false)}
+      />
+    </>
   );
 }
 
@@ -943,6 +995,7 @@ function ExpenseForm({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   function validate() {
@@ -954,13 +1007,17 @@ function ExpenseForm({
     return e;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) {
       setErrors(errs);
       return;
     }
+    setShowConfirm(true);
+  }
+
+  async function submitRequest() {
     setSubmitting(true);
     try {
       const created: any = await createExpense({
@@ -972,12 +1029,14 @@ function ExpenseForm({
       });
       onSuccess(created?.id ?? "EXP");
     } catch (err) {
-      alert(
-        (err as Error)?.message ||
-          "Failed to submit expense. Please try again.",
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to submit expense. Please try again.",
       );
     } finally {
       setSubmitting(false);
+      setShowConfirm(false);
     }
   }
 
@@ -997,123 +1056,135 @@ function ExpenseForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Project */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Project<span className="text-red-500">*</span>
-        </label>
-        <div className="relative">
-          <select
-            value={formState.project}
-            onChange={(e) => field("project", e.target.value)}
-            className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.project ? "border-red-400" : "border-gray-300"}`}
-          >
-            <option value="">Select a project…</option>
-            {projects.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+    <>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Project */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Project<span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <select
+              value={formState.project}
+              onChange={(e) => field("project", e.target.value)}
+              className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.project ? "border-red-400" : "border-gray-300"}`}
+            >
+              <option value="">Select a project…</option>
+              {projects.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+          </div>
+          {errors.project && (
+            <p className="text-xs text-red-500 mt-1">{errors.project}</p>
+          )}
         </div>
-        {errors.project && (
-          <p className="text-xs text-red-500 mt-1">{errors.project}</p>
-        )}
-      </div>
 
-      {/* Amount */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Amount (USD)<span className="text-red-500">*</span>
-        </label>
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-            $
-          </span>
-          <input
-            value={formState.amount}
-            onChange={(e) => field("amount", e.target.value)}
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="0.00"
-            className={`w-full border rounded-md pl-7 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.amount ? "border-red-400" : "border-gray-300"}`}
-          />
-        </div>
-        {errors.amount && (
-          <p className="text-xs text-red-500 mt-1">{errors.amount}</p>
-        )}
-      </div>
-
-      {/* Description */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Description<span className="text-red-500">*</span>
-        </label>
-        <textarea
-          value={formState.description}
-          onChange={(e) => field("description", e.target.value)}
-          rows={3}
-          placeholder="Describe what this expense is for…"
-          className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none ${errors.description ? "border-red-400" : "border-gray-300"}`}
-        />
-        {errors.description && (
-          <p className="text-xs text-red-500 mt-1">{errors.description}</p>
-        )}
-      </div>
-
-      {/* Receipt Upload */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Receipt <span className="text-gray-400 font-normal">(optional)</span>
-        </label>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".jpg,.jpeg,.png,.pdf"
-          className="hidden"
-          onChange={handleFile}
-        />
-        {formState.receiptName ? (
-          <div className="flex items-center gap-2 border border-gray-300 rounded-md px-4 py-2.5 bg-gray-50">
-            <Upload className="w-4 h-4 text-teal-600" />
-            <span className="text-sm text-gray-700 flex-1 truncate">
-              {formState.receiptName}
+        {/* Amount */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Amount (USD)<span className="text-red-500">*</span>
+          </label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
+              $
             </span>
+            <input
+              value={formState.amount}
+              onChange={(e) => field("amount", e.target.value)}
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              className={`w-full border rounded-md pl-7 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.amount ? "border-red-400" : "border-gray-300"}`}
+            />
+          </div>
+          {errors.amount && (
+            <p className="text-xs text-red-500 mt-1">{errors.amount}</p>
+          )}
+        </div>
+
+        {/* Description */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Description<span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={formState.description}
+            onChange={(e) => field("description", e.target.value)}
+            rows={3}
+            placeholder="Describe what this expense is for…"
+            className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none ${errors.description ? "border-red-400" : "border-gray-300"}`}
+          />
+          {errors.description && (
+            <p className="text-xs text-red-500 mt-1">{errors.description}</p>
+          )}
+        </div>
+
+        {/* Receipt Upload */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Receipt{" "}
+            <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".jpg,.jpeg,.png,.pdf"
+            className="hidden"
+            onChange={handleFile}
+          />
+          {formState.receiptName ? (
+            <div className="flex items-center gap-2 border border-gray-300 rounded-md px-4 py-2.5 bg-gray-50">
+              <Upload className="w-4 h-4 text-teal-600" />
+              <span className="text-sm text-gray-700 flex-1 truncate">
+                {formState.receiptName}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormState((p) => ({ ...p, receiptName: "" }));
+                  if (fileRef.current) fileRef.current.value = "";
+                }}
+              >
+                <X className="w-4 h-4 text-gray-400 hover:text-gray-600" />
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => {
-                setFormState((p) => ({ ...p, receiptName: "" }));
-                if (fileRef.current) fileRef.current.value = "";
-              }}
+              onClick={() => fileRef.current?.click()}
+              className="w-full flex items-center gap-2 border border-dashed border-gray-300 rounded-md px-4 py-4 hover:bg-gray-50 transition-colors justify-center"
             >
-              <X className="w-4 h-4 text-gray-400 hover:text-gray-600" />
+              <Upload className="w-4 h-4 text-gray-400" />
+              <span className="text-sm text-gray-500">
+                Click to upload receipt (JPG, PNG, PDF)
+              </span>
             </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="w-full flex items-center gap-2 border border-dashed border-gray-300 rounded-md px-4 py-4 hover:bg-gray-50 transition-colors justify-center"
-          >
-            <Upload className="w-4 h-4 text-gray-400" />
-            <span className="text-sm text-gray-500">
-              Click to upload receipt (JPG, PNG, PDF)
-            </span>
-          </button>
-        )}
-      </div>
+          )}
+        </div>
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-60"
-      >
-        {submitting ? "Submitting…" : "Submit Expense Request"}
-      </button>
-    </form>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-60"
+        >
+          {submitting ? "Submitting…" : "Submit Expense Request"}
+        </button>
+      </form>
+      <ConfirmationModal
+        isOpen={showConfirm}
+        title="Submit Expense Claim?"
+        description={`This will submit an expense claim of $${Number(formState.amount || 0).toLocaleString()} under the "General" category for ${formState.project}. It will be routed for approval once submitted.`}
+        confirmLabel="Submit Request"
+        isLoading={submitting}
+        onConfirm={submitRequest}
+        onCancel={() => setShowConfirm(false)}
+      />
+    </>
   );
 }
 
@@ -1144,10 +1215,11 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const workingDays = countWorkingDays(startDate, endDate);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!leaveType) errs.leaveType = "Required";
@@ -1165,11 +1237,17 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
       return;
     }
     if (!authUser.employeeId) {
-      alert(
+      toast.error(
         "Your account isn't linked to an employee profile, so leave can't be submitted.",
       );
       return;
     }
+    setShowConfirm(true);
+  }
+
+  async function submitRequest() {
+    // Re-resolved here because validation runs before the confirmation step.
+    const leaveTypeId = leaveTypes.find((t) => t.name === leaveType)?.id ?? "";
     setSubmitting(true);
     try {
       const created: any = await createLeaveRequest({
@@ -1183,126 +1261,139 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
       });
       onSuccess(created?.data?.id ?? created?.id ?? "LEAVE");
     } catch (err) {
-      alert(
-        (err as Error)?.message ||
-          "Failed to submit leave request. Please try again.",
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to submit leave request. Please try again.",
       );
     } finally {
       setSubmitting(false);
+      setShowConfirm(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Leave type */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Leave Type<span className="text-red-500">*</span>
-        </label>
-        <div className="relative">
-          <select
-            value={leaveType}
-            onChange={(e) => setLeaveType(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-          >
-            <option value="">Select leave type…</option>
-            {leaveTypes.map((t) => (
-              <option key={t.id} value={t.name}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-        </div>
-      </div>
-
-      {/* Date range */}
-      <div className="grid grid-cols-2 gap-4">
+    <>
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Leave type */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Start Date<span className="text-red-500">*</span>
+            Leave Type<span className="text-red-500">*</span>
           </label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => {
-              setStartDate(e.target.value);
-              if (errors.startDate)
-                setErrors((p) => {
-                  const x = { ...p };
-                  delete x.startDate;
-                  return x;
-                });
-            }}
-            className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.startDate ? "border-red-400" : "border-gray-300"}`}
-          />
-          {errors.startDate && (
-            <p className="text-xs text-red-500 mt-1">{errors.startDate}</p>
-          )}
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            End Date<span className="text-red-500">*</span>
-          </label>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => {
-              setEndDate(e.target.value);
-              if (errors.endDate)
-                setErrors((p) => {
-                  const x = { ...p };
-                  delete x.endDate;
-                  return x;
-                });
-            }}
-            className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.endDate ? "border-red-400" : "border-gray-300"}`}
-          />
-          {errors.endDate && (
-            <p className="text-xs text-red-500 mt-1">{errors.endDate}</p>
-          )}
-        </div>
-      </div>
-
-      {/* Duration display */}
-      {startDate && endDate && !errors.endDate && (
-        <div className="flex items-center gap-2.5 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3">
-          <Calendar className="w-4 h-4 text-teal-600 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-teal-800">
-              {workingDays} working {workingDays === 1 ? "day" : "days"}
-            </p>
-            <p className="text-xs text-teal-600">
-              Weekends excluded · Public holidays not applied
-            </p>
+          <div className="relative">
+            <select
+              value={leaveType}
+              onChange={(e) => setLeaveType(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option value="">Select leave type…</option>
+              {leaveTypes.map((t) => (
+                <option key={t.id} value={t.name}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
         </div>
-      )}
 
-      {/* Notes */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Notes <span className="text-gray-400 font-normal">(optional)</span>
-        </label>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={3}
-          placeholder="Any additional context for your manager…"
-          className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-        />
-      </div>
+        {/* Date range */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Start Date<span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                if (errors.startDate)
+                  setErrors((p) => {
+                    const x = { ...p };
+                    delete x.startDate;
+                    return x;
+                  });
+              }}
+              className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.startDate ? "border-red-400" : "border-gray-300"}`}
+            />
+            {errors.startDate && (
+              <p className="text-xs text-red-500 mt-1">{errors.startDate}</p>
+            )}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              End Date<span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                if (errors.endDate)
+                  setErrors((p) => {
+                    const x = { ...p };
+                    delete x.endDate;
+                    return x;
+                  });
+              }}
+              className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.endDate ? "border-red-400" : "border-gray-300"}`}
+            />
+            {errors.endDate && (
+              <p className="text-xs text-red-500 mt-1">{errors.endDate}</p>
+            )}
+          </div>
+        </div>
 
-      <AttachmentsSection files={attachments} onChange={setAttachments} />
+        {/* Duration display */}
+        {startDate && endDate && !errors.endDate && (
+          <div className="flex items-center gap-2.5 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3">
+            <Calendar className="w-4 h-4 text-teal-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-teal-800">
+                {workingDays} working {workingDays === 1 ? "day" : "days"}
+              </p>
+              <p className="text-xs text-teal-600">
+                Weekends excluded · Public holidays not applied
+              </p>
+            </div>
+          </div>
+        )}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-60"
-      >
-        {submitting ? "Submitting…" : "Submit Leave Request"}
-      </button>
-    </form>
+        {/* Notes */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Notes <span className="text-gray-400 font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            placeholder="Any additional context for your manager…"
+            className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+          />
+        </div>
+
+        <AttachmentsSection files={attachments} onChange={setAttachments} />
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="w-full bg-teal-600 text-white py-2.5 rounded-md text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-60"
+        >
+          {submitting ? "Submitting…" : "Submit Leave Request"}
+        </button>
+      </form>
+      <ConfirmationModal
+        isOpen={showConfirm}
+        title="Submit Leave Request?"
+        description={`This will submit a ${leaveType} request from ${formatDateByGeneralSettings(startDate)} to ${formatDateByGeneralSettings(endDate)} — ${workingDays} working ${workingDays === 1 ? "day" : "days"}. It will be routed for approval once submitted.`}
+        confirmLabel="Submit Request"
+        isLoading={submitting}
+        onConfirm={submitRequest}
+        onCancel={() => setShowConfirm(false)}
+      />
+    </>
   );
 }
 
