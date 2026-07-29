@@ -58,7 +58,7 @@ export class LeaveRequestsController {
   @Get('pending-approvals')
   @Roles('admin', 'manager')
   async getPendingApprovals(@Request() req: any) {
-    const result = await this.leaveBalanceService.getPendingApprovals(req.user.id);
+    const result = await this.leaveBalanceService.getPendingApprovals(req.user.sub ?? req.user.id);
     return { success: true, ...result };
   }
 
@@ -122,7 +122,7 @@ export class LeaveRequestsController {
   ) {
     // Routed through the service so the configured approval workflow is honoured:
     // the request is only released once every required step has approved.
-    const result = await this.leaveRequestsService.approve(id, req.user.id, comments);
+    const result = await this.leaveRequestsService.approve(id, req.user.sub ?? req.user.id, comments);
     const progress = await this.leaveRequestsService.getApprovalProgress(id);
     const complete = result.status === 'approved';
     return {
@@ -142,7 +142,7 @@ export class LeaveRequestsController {
     @Body('reason') reason: string,
     @Request() req: any,
   ) {
-    const result = await this.leaveRequestsService.reject(id, req.user.id, reason);
+    const result = await this.leaveRequestsService.reject(id, req.user.sub ?? req.user.id, reason);
     return { success: true, data: result, message: 'Leave request rejected' };
   }
 }

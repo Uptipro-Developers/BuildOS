@@ -173,36 +173,76 @@ export class LeaveRequestsService {
      *
      * The Admin app's configured workflow wins: an active ApprovalWorkflow with
      * processType "leave" defines the ordered approver nodes, and the shared
-     * workflow engine drives it. When none is configured we fall back to the leave
-     * type's own `approvalsRequired` count, so leave still routes correctly before
-     * an admin sets a workflow up.
+     * workflow engine drives it.
+     *
+     * When no workflow is configured, one is provisioned from the leave type's own
+     * `approvalsRequired` count. Every request therefore runs through the same
+     * engine and gets a real per-step audit trail, and the generated workflow is a
+     * normal row an admin can edit afterwards in Admin › Process Workflows.
      */
     private async openApprovalProcess(
         requestId: string,
         employeeId: string,
-        leaveType: { name: string; approvalsRequired: number },
+        leaveType: { id: string; name: string; approvalsRequired: number },
     ) {
-        const workflow = await this.prisma.approvalWorkflow.findFirst({
+        const workflow = await this.resolveLeaveWorkflow(leaveType);
+        await this.workflowEngine.createWorkflowInstance(
+            workflow.id,
+            'LeaveRequest',
+            requestId,
+            employeeId,
+            { leaveType: leaveType.name },
+        );
+    }
+
+    /** The configured 'leave' workflow, provisioning a default one if absent. */
+    private async resolveLeaveWorkflow(leaveType: {
+        id: string; name: string; approvalsRequired: number;
+    }) {
+        const configured = await this.prisma.approvalWorkflow.findFirst({
             where: { processType: 'leave', isActive: true },
             include: { nodes: true },
         });
+        if (configured && configured.nodes.length > 0) return configured;
 
-        if (workflow && workflow.nodes.length > 0) {
-            await this.workflowEngine.createWorkflowInstance(
-                workflow.id,
-                'LeaveRequest',
-                requestId,
-                employeeId,
-                { leaveType: leaveType.name },
-            );
-            return;
-        }
+        const steps = Math.max(1, leaveType.approvalsRequired ?? 1);
+        // Per-leave-type, because approvalsRequired differs between types
+        // (e.g. Annual needs 1 approval, Maternity needs 2).
+        const name = `${leaveType.name} Approval`;
+        const existing = await this.prisma.approvalWorkflow.findFirst({
+            where: { name },
+            include: { nodes: true },
+        });
+        if (existing && existing.nodes.length >= steps) return existing;
 
         this.logger.log(
-            `No active 'leave' approval workflow configured; falling back to ` +
-            `${leaveType.name}.approvalsRequired=${leaveType.approvalsRequired ?? 1} ` +
-            `for request ${requestId}`,
+            `Provisioning a default '${name}' workflow with ${steps} step(s) from ` +
+            `LeaveType.approvalsRequired; edit it in Admin › Process Workflows.`,
         );
+
+        // Two approval levels is the common shape; anything deeper repeats the
+        // second level rather than inventing role names.
+        const roleFor = (sequence: number) =>
+            sequence === 1 ? 'manager' : 'hr-manager';
+
+        return this.prisma.approvalWorkflow.upsert({
+            where: { name },
+            create: {
+                name,
+                processType: 'leave',
+                description: `Auto-generated from ${leaveType.name}.approvalsRequired`,
+                isActive: true,
+                nodes: {
+                    create: Array.from({ length: steps }, (_, i) => ({
+                        sequence: i + 1,
+                        name: `Level ${i + 1} Approval`,
+                        approverRole: roleFor(i + 1),
+                    })),
+                },
+            },
+            update: {},
+            include: { nodes: true },
+        });
     }
 
     /**
@@ -233,14 +273,16 @@ export class LeaveRequestsService {
             };
         }
 
-        return {
-            source: 'leaveType' as const,
-            instance: null,
-            required: Math.max(1, request.leaveType.approvalsRequired ?? 1),
-            // Without a workflow instance the only recorded signal is the
-            // intermediate approver stamped on the request itself.
-            approved: request.approvedBy && request.status === 'pending' ? 1 : 0,
-        };
+        const required = Math.max(1, request.leaveType.approvalsRequired ?? 1);
+        // Without a workflow instance the recorded signals are the final approval
+        // (status approved) or an intermediate approver stamped on a still-pending
+        // request.
+        const approved = request.status === 'approved'
+            ? required
+            : request.approvedBy
+                ? 1
+                : 0;
+        return { source: 'leaveType' as const, instance: null, required, approved };
     }
 
     /**
@@ -268,23 +310,20 @@ export class LeaveRequestsService {
             if (!open) {
                 throw new ConflictException('There is no approval step awaiting a decision');
             }
-            // The engine closes this step and opens the next one, or completes
-            // the instance when this was the last node.
+            // The engine closes this step and opens the next one, or completes the
+            // instance when this was the last node.
             await this.workflowEngine.approveNode(open.id, approverId, comments);
 
             const after = await this.getApprovalProgress(id);
             if (after.approved < after.required) {
-                // Still outstanding steps — the request stays pending.
-                return this.findOne(id);
+                // Outstanding steps remain — the request stays pending, and the
+                // latest approver is recorded so the trail shows who has signed.
+                return this.prisma.leaveRequest.update({
+                    where: { id },
+                    data: { approvedBy: approverId },
+                    include: { employee: true, leaveType: true },
+                });
             }
-        } else if (progress.required > progress.approved + 1) {
-            // Multi-approval leave type with no configured workflow: record this
-            // approver but do not release the request yet.
-            return this.prisma.leaveRequest.update({
-                where: { id },
-                data: { approvedBy: approverId, ...(comments ? { notes: comments } : {}) },
-                include: { employee: true, leaveType: true },
-            });
         }
 
         // Final approval — the request now counts against the balance, so capture

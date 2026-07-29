@@ -316,8 +316,7 @@ export class WorkflowEngineService {
     initiatedBy: string,
     context: any,
   ) {
-    // Determine approver
-    let approverId = node.approverEmail; // Placeholder - should resolve to user ID
+    const approverId = await this.resolveApprover(node, initiatedBy);
 
     return this.prisma.approvalRequest.create({
       data: {
@@ -327,5 +326,50 @@ export class WorkflowEngineService {
         status: 'pending',
       },
     });
+  }
+
+  /**
+   * Resolves a node's configured approver to a real User id.
+   *
+   * ApprovalRequest.approverId is NOT NULL, and this previously assigned
+   * `node.approverEmail` directly — an email, not an id, and null on any node
+   * configured by role alone. That made every such create fail, which is why no
+   * module had a working approval trail.
+   *
+   * Resolution order: the node's explicit approverEmail, then any active user
+   * holding the node's approverRole, then an admin as a catch-all so the step is
+   * still actionable rather than lost.
+   */
+  private async resolveApprover(node: any, initiatedBy: string): Promise<string> {
+    const email = String(node?.approverEmail ?? '').trim().toLowerCase();
+    if (email) {
+      const named = await this.prisma.user.findUnique({ where: { email } });
+      if (named) return named.id;
+    }
+
+    const role = String(node?.approverRole ?? '').trim();
+    if (role) {
+      // Role names are compared case- and separator-insensitively, matching
+      // RolesGuard ("hr-manager" and "HR Manager" are the same role).
+      const canonical = role.toLowerCase().replace(/[\s_-]+/g, '');
+      const candidates = await this.prisma.user.findMany({
+        where: { status: { notIn: ['Inactive', 'inactive'] } },
+        select: { id: true, role: true },
+      });
+      const match = candidates.find(
+        (u) => String(u.role ?? '').toLowerCase().replace(/[\s_-]+/g, '') === canonical,
+      );
+      if (match) return match.id;
+    }
+
+    const admin = await this.prisma.user.findFirst({
+      where: { role: { in: ['admin', 'Admin'] } },
+      select: { id: true },
+    });
+    if (admin) return admin.id;
+
+    // Nothing better available — route it back to the initiator so the request
+    // is visible to someone rather than orphaned.
+    return initiatedBy;
   }
 }
