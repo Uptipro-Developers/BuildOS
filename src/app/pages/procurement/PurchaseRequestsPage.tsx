@@ -25,6 +25,7 @@ import {
 } from "../../components/AdvancedFilter";
 import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
+import { fetchProjects } from "../../api/projects";
 import {
   csvAmountHeader,
   getCurrencySymbol,
@@ -218,7 +219,7 @@ function NewPRModal({
     return fmtDate(d2);
   };
 
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [project, setProject] = useState("");
   const [mrRef, setMrRef] = useState("MR-0041");
@@ -229,14 +230,21 @@ function NewPRModal({
     { material: "", qty: "", unit: PR_UNITS[0], estimatedUnitCost: "" },
   ]);
 
+  // Projects come from /projects directly so the dropdown always reflects the
+  // real project list; suppliers still come from the reference-data bundle.
   useEffect(() => {
+    fetchProjects()
+      .then((rows) => {
+        const list = rows.map((p) => ({ id: p.id, name: p.name }));
+        setProjects(list);
+        setProject((prev) => prev || list[0]?.name || "");
+      })
+      .catch(() => {});
+
     getReferenceData()
       .then((data) => {
-        const projectNames = data.projects.map((p) => p.name);
         const supplierNames = data.suppliers.map((s) => s.name);
-        setProjects(projectNames);
         setSuppliers(supplierNames);
-        setProject((prev) => prev || projectNames[0] || "");
         setSelectedSuppliers((prev) =>
           prev.length ? prev : supplierNames.slice(0, 1),
         );
@@ -318,8 +326,11 @@ function NewPRModal({
                 onChange={(e) => setProject(e.target.value)}
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
+                <option value="">Select a project…</option>
                 {projects.map((p) => (
-                  <option key={p}>{p}</option>
+                  <option key={p.id} value={p.name}>
+                    {p.name}
+                  </option>
                 ))}
               </select>
             </div>

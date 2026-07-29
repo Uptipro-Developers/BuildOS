@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { AttachmentsSection } from "./AttachmentsSection";
 import { createIssue } from "../api/hr-extras";
 import { getPublicChangeCategories } from "../api/admin-extras";
@@ -34,8 +35,10 @@ export function ChangeRequestForm({
     raisedBy: "Current User",
     dateRaised: new Date().toISOString().split("T")[0],
     scopeImpact: "",
-    scheduleImpactDays: 0,
-    costImpact: 0,
+    // Numeric impacts are held as raw strings so the fields can genuinely be
+    // emptied; they are converted to numbers on submit.
+    scheduleImpactDays: "",
+    costImpact: "",
     qualityImpact: "",
     stakeholderImpact: "",
     recommendedAction: "",
@@ -91,9 +94,11 @@ export function ChangeRequestForm({
       if (form.changeTypes.length)
         detailLines.push(`Change types: ${form.changeTypes.join(", ")}`);
       if (form.scopeImpact) detailLines.push(`Scope impact: ${form.scopeImpact}`);
-      if (form.scheduleImpactDays)
-        detailLines.push(`Schedule impact (days): ${form.scheduleImpactDays}`);
-      if (form.costImpact) detailLines.push(`Cost impact: ${form.costImpact}`);
+      const scheduleImpactDays = Number(form.scheduleImpactDays) || 0;
+      const costImpact = Number(form.costImpact) || 0;
+      if (scheduleImpactDays)
+        detailLines.push(`Schedule impact (days): ${scheduleImpactDays}`);
+      if (costImpact) detailLines.push(`Cost impact: ${costImpact}`);
       if (form.recommendedAction)
         detailLines.push(`Recommended action: ${form.recommendedAction}`);
       if (form.notes) detailLines.push(`Notes: ${form.notes}`);
@@ -116,9 +121,8 @@ export function ChangeRequestForm({
           "CHG-" + Math.random().toString(36).slice(2, 8).toUpperCase(),
       );
     } catch (err) {
-      alert(
-        (err as Error)?.message ||
-          "Failed to submit change request. Please try again.",
+      toast.error(
+        err instanceof Error ? err.message : "Failed to submit change request. Please try again.",
       );
     } finally {
       setSubmitting(false);
@@ -264,9 +268,8 @@ export function ChangeRequestForm({
               <input
                 type="number"
                 value={form.scheduleImpactDays}
-                onChange={(e) =>
-                  field("scheduleImpactDays", Number(e.target.value))
-                }
+                onChange={(e) => field("scheduleImpactDays", e.target.value)}
+                placeholder="0"
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>
@@ -277,7 +280,8 @@ export function ChangeRequestForm({
               <input
                 type="number"
                 value={form.costImpact}
-                onChange={(e) => field("costImpact", Number(e.target.value))}
+                onChange={(e) => field("costImpact", e.target.value)}
+                placeholder="0"
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>

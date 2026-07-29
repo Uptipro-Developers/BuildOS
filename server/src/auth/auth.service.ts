@@ -408,8 +408,14 @@ export class AuthService {
         role: string;
         assignedApps: string[];
     }) {
+        // Prefer the explicit Employee↔User link; fall back to matching on email
+        // for employees onboarded before that link existed. Resolving by link
+        // keeps working if an admin later changes the login email.
         const employee = await this.prisma.employee
-            .findUnique({ where: { email: user.email }, select: { id: true } })
+            .findFirst({
+                where: { OR: [{ userId: user.id }, { email: user.email }] },
+                select: { id: true },
+            })
             .catch(() => null);
         return {
             id: user.id,

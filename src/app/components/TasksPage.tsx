@@ -13,6 +13,7 @@ import {
   User,
 } from "lucide-react";
 import { toast } from "sonner";
+import { getAuthUserName } from "../utils/useAuthUser";
 import {
   listAppTasks,
   createAppTask,
@@ -130,9 +131,15 @@ export function TasksPage({
   useEffect(() => {
     listAppTasks()
       .then((rows) => {
+        // Users only see tasks they raised themselves.
+        const me = (getAuthUserName() || "").trim().toLowerCase();
         setTasks(
           rows
             .filter((t) => t.app === app)
+            .filter((t) => {
+              if (!me) return false;
+              return String(t.assignedBy ?? "").trim().toLowerCase() === me;
+            })
             .map((t) => ({
               id: t.id,
               name: t.name,
@@ -238,7 +245,7 @@ export function TasksPage({
         ...form,
         status: STATUS_TO_BACKEND.Pending,
         app,
-        assignedBy: form.assignedTo,
+        assignedBy: getAuthUserName() || "Current User",
       })
         .then((created) => {
           // Swap the temporary id for the server-generated one.

@@ -18,6 +18,7 @@ import {
 import { ApprovalPipeline } from "./ApprovalPipeline";
 import type { PipelineStep } from "./ApprovalPipeline";
 import { fetchEmployees } from "../api/employees";
+import { useAuthUser } from "../utils/useAuthUser";
 import { listAppTasks, updateAppTask, toBoardStatus } from "../api/app-tasks";
 
 type TaskStatus =
@@ -146,8 +147,14 @@ export function MyTasksView({
   accentClass = "bg-indigo-600 border-indigo-600",
   accentTextClass = "text-indigo-700",
 }: MyTasksViewProps) {
+  const authUser = useAuthUser();
   const [tasks, setTasks] = useState<MyTask[]>([]);
-  const [employeeNames, setEmployeeNames] = useState<string[]>([]);
+  /**
+   * Names this user may view a board for: themselves, plus anyone reporting to
+   * them (directly or further down the chain). Previously the picker listed every
+   * employee, so any user could open anyone else's task board.
+   */
+  const [viewableNames, setViewableNames] = useState<string[]>([]);
   const [currentUser, setCurrentUser] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
@@ -176,26 +183,53 @@ export function MyTasksView({
       })
       .catch(() => {});
     fetchEmployees()
-      .then((emps) => {
-        const names = emps
-          .map((e) => `${e.firstName} ${e.lastName}`.trim())
-          .filter(Boolean);
-        if (names.length > 0) setEmployeeNames(names);
-      })
-      .catch(() => {});
-  }, [app]);
+      .then((emps: any[]) => {
+        const fullName = (e: any) => `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim();
+        const me = emps.find(
+          (e) =>
+            (authUser.employeeId && e.id === authUser.employeeId) ||
+            (authUser.email &&
+              String(e.email ?? "").toLowerCase() === authUser.email.toLowerCase()),
+        );
+        if (!me) {
+          // Can't place this user in the org chart — show only their own board.
+          setViewableNames(authUser.name ? [authUser.name] : []);
+          return;
+        }
 
-  // Dropdown options: real employees merged with assignees already on tasks.
-  const users = Array.from(
-    new Set([
-      ...employeeNames,
-      ...tasks.map((t) => t.assignedTo).filter(Boolean),
-    ]),
-  );
+        // Walk down the reporting chain: a supervisor may view the boards of the
+        // people they manage, and of anyone under them.
+        const reports = new Set<string>();
+        const collect = (supervisorId: string) => {
+          for (const e of emps) {
+            if (e.supervisorId === supervisorId && !reports.has(e.id)) {
+              reports.add(e.id);
+              collect(e.id);
+            }
+          }
+        };
+        collect(me.id);
+
+        setViewableNames([
+          fullName(me),
+          ...emps.filter((e) => reports.has(e.id)).map(fullName),
+        ].filter(Boolean));
+      })
+      .catch(() => setViewableNames(authUser.name ? [authUser.name] : []));
+  }, [app, authUser.employeeId, authUser.email, authUser.name]);
+
+  // Only the current user and their reports are selectable.
+  const users = viewableNames;
+  // The picker is a supervisor tool — with nobody to supervise there is nothing
+  // to switch between.
+  const canViewOthers = users.length > 1;
 
   useEffect(() => {
-    if (!currentUser && users.length > 0) setCurrentUser(users[0]);
-  }, [currentUser, users]);
+    if (currentUser) return;
+    // Default to the logged-in user rather than whoever sorted first.
+    const self = authUser.name && users.includes(authUser.name) ? authUser.name : users[0];
+    if (self) setCurrentUser(self);
+  }, [currentUser, users, authUser.name]);
 
   const myTasks = tasks.filter((t) => t.assignedTo === currentUser);
 
@@ -239,24 +273,27 @@ export function MyTasksView({
             Track your assigned tasks and update their status
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <User className="w-4 h-4 text-gray-400" />
-          <span className="text-sm text-gray-500">Viewing as:</span>
-          <select
-            value={currentUser}
-            onChange={(e) => {
-              setCurrentUser(e.target.value);
-              setExpandedId(null);
-            }}
-            className={`text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 ${ringColor}`}
-          >
-            {users.map((u) => (
-              <option key={u} value={u}>
-                {u}
-              </option>
-            ))}
-          </select>
-        </div>
+        {canViewOthers && (
+          // Supervisor-only control for reviewing the boards of people they manage.
+          <div className="flex items-center gap-2">
+            <User className="w-4 h-4 text-gray-400" />
+            <span className="text-sm text-gray-500">Viewing as:</span>
+            <select
+              value={currentUser}
+              onChange={(e) => {
+                setCurrentUser(e.target.value);
+                setExpandedId(null);
+              }}
+              className={`text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 ${ringColor}`}
+            >
+              {users.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Count pills */}

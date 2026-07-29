@@ -58,8 +58,9 @@ const emptyForm = {
   raisedBy: "Current User",
   dateRaised: new Date().toISOString().split("T")[0],
   scopeImpact: "",
-  scheduleImpactDays: 0,
-  costImpact: 0,
+  // Held as strings so the field can genuinely be emptied; coerced on submit.
+  scheduleImpactDays: "",
+  costImpact: "",
   qualityImpact: "",
   stakeholderImpact: "",
   recommendedAction: "",
@@ -128,8 +129,8 @@ export function ChangeRequestsPage() {
       summaryTaskId: "",
       taskId: "",
       scopeImpact: form.scopeImpact,
-      scheduleImpactDays: form.scheduleImpactDays,
-      costImpact: form.costImpact,
+      scheduleImpactDays: Number(form.scheduleImpactDays) || 0,
+      costImpact: Number(form.costImpact) || 0,
       qualityImpact: form.qualityImpact,
       stakeholderImpact: form.stakeholderImpact,
       recommendedAction: form.recommendedAction,
@@ -444,15 +445,10 @@ export function ChangeRequestsPage() {
                   <input
                     type="number"
                     min="0"
+                    placeholder="0"
                     value={form.scheduleImpactDays}
                     onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        scheduleImpactDays: Math.max(
-                          0,
-                          parseInt(e.target.value) || 0,
-                        ),
-                      }))
+                      setForm((f) => ({ ...f, scheduleImpactDays: e.target.value }))
                     }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
                   />
@@ -464,12 +460,10 @@ export function ChangeRequestsPage() {
                   <input
                     type="number"
                     min="0"
+                    placeholder="0"
                     value={form.costImpact}
                     onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        costImpact: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
+                      setForm((f) => ({ ...f, costImpact: e.target.value }))
                     }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2"
                   />

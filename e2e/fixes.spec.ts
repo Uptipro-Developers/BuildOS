@@ -65,9 +65,29 @@ test("1 · Admin sidebar has no Departments navigation link", async ({ page }) =
 });
 
 // ─── Test 2 — Finance Tasks Edit/Delete always visible ───────────────────
-test("2 · Finance Tasks page shows Edit and Delete buttons without requiring hover", async ({ page }) => {
+test("2 · Finance Tasks page shows Edit and Delete buttons without requiring hover", async ({ page, request }) => {
+  // The Tasks board only shows tasks the signed-in user raised, so seed one
+  // attributed to them rather than relying on whatever happens to be in the DB.
+  const { access_token, user } = await (
+    await request.post(`${API}/auth/login`, {
+      data: { email: "admin@buildos.ng", password: "BuildOS@2025" },
+    })
+  ).json();
+  const seeded = await request.post(`${API}/tasks`, {
+    headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+    data: {
+      title: `E2E hover-actions ${Date.now()}`,
+      description: "Seeded so the board has a row owned by this user",
+      app: "finance",
+      assignedTo: user.name,
+      assignedBy: user.name,
+      status: "todo",
+      priority: "medium",
+    },
+  });
+  expect(seeded.ok(), `task seed failed: ${await seeded.text()}`).toBeTruthy();
+
   await goto(page, "/apps/finance/tasks");
-  // Wait for task list to appear
   const taskRow = page.locator('[title="Edit task"], [title="Delete task"]').first();
   // They should be immediately visible (no opacity-0)
   await expect(taskRow).toBeVisible({ timeout: 10_000 });

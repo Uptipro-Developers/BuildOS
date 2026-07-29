@@ -1086,11 +1086,11 @@ function ExpenseForm({
         {/* Amount */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Amount (USD)<span className="text-red-500">*</span>
+            Amount<span className="text-red-500">*</span>
           </label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-              $
+              {getCurrencySymbol()}
             </span>
             <input
               value={formState.amount}

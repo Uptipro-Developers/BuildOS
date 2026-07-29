@@ -4,6 +4,7 @@ import { getPurchaseRequests } from "../../api/procurement-requests";
 import { getMaterialRequests } from "../../api/materials";
 import { fetchExpenses } from "../../api/expenses";
 import { fetchLeaveRequests } from "../../api/leave-requests";
+import { getIssues } from "../../api/hr-extras";
 import { useAuthUser } from "../../utils/useAuthUser";
 import {
   Clock,
@@ -129,7 +130,12 @@ interface Request {
 
 function toReqStatus(status: string | undefined): ReqStatus {
   const raw = (status ?? "").trim().toLowerCase();
-  if (["approved", "approve", "completed", "done", "paid"].includes(raw)) {
+  // "resolved"/"closed" cover logged issues, which reach a settled state rather
+  // than being approved.
+  if (
+    ["approved", "approve", "completed", "done", "paid", "resolved", "closed"]
+      .includes(raw)
+  ) {
     return "approved";
   }
   if (
@@ -203,6 +209,7 @@ export function MyRequestsPage() {
       getMaterialRequests(),
       fetchExpenses(),
       fetchLeaveRequests(),
+      getIssues(),
     ])
       .then((results) => {
         const purchaseRequests =
@@ -221,10 +228,28 @@ export function MyRequestsPage() {
           results[3].status === "fulfilled" && Array.isArray(results[3].value)
             ? results[3].value
             : [];
+        const issues =
+          results[4].status === "fulfilled" && Array.isArray(results[4].value)
+            ? results[4].value
+            : [];
 
         const byKey = `${(authUser.name || authUser.email || "").trim().toLowerCase()}`;
 
-        const mappedPurchase: Request[] = purchaseRequests.map((pr) => ({
+        /**
+         * My Requests shows only what this user raised. Previously an
+         * unidentifiable user fell through to seeing EVERY request in the system,
+         * so this deliberately fails closed instead.
+         */
+        const raisedByMe = (...candidates: unknown[]) => {
+          if (!byKey) return false;
+          return candidates.some(
+            (c) => String(c ?? "").trim().toLowerCase() === byKey,
+          );
+        };
+
+        const mappedPurchase: Request[] = purchaseRequests
+          .filter((pr: any) => raisedByMe(pr.requestedBy, pr.createdBy))
+          .map((pr) => ({
           id: pr.prRef || pr.id,
           type: "Material Request",
           title: pr.title || "Purchase request",
@@ -240,14 +265,7 @@ export function MyRequestsPage() {
         }));
 
         const mappedMaterial: Request[] = materialRequests
-          .filter((mr) => {
-            if (!byKey) return true;
-            return (
-              String(mr.requestedBy || "")
-                .trim()
-                .toLowerCase() === byKey
-            );
-          })
+          .filter((mr) => raisedByMe(mr.requestedBy))
           .map((mr) => ({
             id: mr.reference || mr.id,
             type: "Material Request",
@@ -269,14 +287,7 @@ export function MyRequestsPage() {
           }));
 
         const mappedExpenses: Request[] = expenses
-          .filter((exp: any) => {
-            if (!byKey) return true;
-            return (
-              String(exp.createdBy || "")
-                .trim()
-                .toLowerCase() === byKey
-            );
-          })
+          .filter((exp: any) => raisedByMe(exp.createdBy))
           .map((exp: any) => ({
             id: exp.id,
             type: "Expense Request",
@@ -296,11 +307,13 @@ export function MyRequestsPage() {
 
         const mappedLeaves: Request[] = leaves
           .filter((lv: any) => {
-            if (!byKey) return true;
-            return String(lv.employee || "")
-              .trim()
-              .toLowerCase()
-              .includes(byKey);
+            if (!byKey) return false;
+            // Leave rows carry the employee's display name, which may include a
+            // middle name, so this stays a containment check.
+            const employeeName = typeof lv.employee === "string"
+              ? lv.employee
+              : `${lv.employee?.firstName ?? ""} ${lv.employee?.lastName ?? ""}`;
+            return employeeName.trim().toLowerCase().includes(byKey);
           })
           .map((lv: any) => ({
             id: lv.refId || lv.id,
@@ -319,11 +332,32 @@ export function MyRequestsPage() {
             approvalHistory: [],
           }));
 
+        // Issues logged from ESS are requests too — the type filter already
+        // offered "Issue Report" but nothing ever loaded them.
+        const mappedIssues: Request[] = issues
+          .filter((iss: any) => raisedByMe(iss.reportedBy))
+          .map((iss: any) => ({
+            id: iss.id,
+            // Change requests are stored as issues with this category, so the
+            // card reflects what the user actually raised.
+            type: (String(iss.category ?? "").trim().toLowerCase() === "change request"
+              ? "Change Request"
+              : "Issue Report") as ReqType,
+            title: iss.title || "Issue report",
+            project: iss.projectName || "—",
+            date: (iss.reportedAt || iss.createdAt || "").slice(0, 10),
+            status: toReqStatus(iss.status),
+            items: [{ name: iss.category || "Issue" }],
+            comments: iss.description || "",
+            approvalHistory: [],
+          }));
+
         const merged = [
           ...mappedMaterial,
           ...mappedPurchase,
           ...mappedExpenses,
           ...mappedLeaves,
+          ...mappedIssues,
         ].sort((a, b) => b.date.localeCompare(a.date));
 
         setMyRequests(merged);

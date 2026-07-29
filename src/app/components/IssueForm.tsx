@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useState } from "react";
 import { AttachmentsSection } from "./AttachmentsSection";
 import { createIssue } from "../api/hr-extras";
@@ -83,8 +84,8 @@ export function IssueForm({
           "ISS-" + Math.random().toString(36).slice(2, 8).toUpperCase(),
       );
     } catch (err) {
-      alert(
-        (err as Error)?.message || "Failed to report issue. Please try again.",
+      toast.error(
+        err instanceof Error ? err.message : "Failed to report issue. Please try again.",
       );
     } finally {
       setSubmitting(false);

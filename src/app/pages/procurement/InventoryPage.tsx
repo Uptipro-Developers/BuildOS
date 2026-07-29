@@ -1,5 +1,10 @@
-import { useState, useEffect, useRef } from "react";
-import { getMaterials, Material as ApiMaterial } from "../../api/materials";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { toast } from "sonner";
+import {
+  getMaterials,
+  createMaterial,
+  Material as ApiMaterial,
+} from "../../api/materials";
 import { useClickOutside } from "../../utils/useClickOutside";
 import {
   getCurrencySymbol,
@@ -18,20 +23,9 @@ import {
   XCircle,
   MoreHorizontal,
   Download,
+  X,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
-
-const categories = [
-  "All",
-  "Concrete & Masonry",
-  "Steel & Ironmongery",
-  "Electrical",
-  "Plumbing & MEP",
-  "Timber & Formwork",
-  "Finishes",
-  "Plant & Equipment",
-  "General",
-];
 
 type LocalMaterial = {
   id: string;
@@ -95,15 +89,386 @@ type MatSortKey =
   "name" | "category" | "currentStock" | "unitCost" | "stockValue" | "status";
 type SortDir = "asc" | "desc";
 
+// ── Add Material modal ────────────────────────────────────────────────────────
+const MATERIAL_TYPES = ["Consumable", "Reusable"];
+const ALLOCATION_STATUSES = ["Available", "Allocated", "Under Maintenance"];
+const CONDITIONS = ["Good", "Fair", "Needs Servicing", "Damaged"];
+
+const inputClass =
+  "w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+const errorInputClass =
+  "w-full border border-red-400 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400";
+
+interface AddMaterialForm {
+  name: string;
+  category: string;
+  unit: string;
+  materialType: string;
+  totalQty: string;
+  availableQty: string;
+  reservedQty: string;
+  unitCost: string;
+  reorderLevel: string;
+  allocationStatus: string;
+  allocatedTo: string;
+  allocatedProject: string;
+  condition: string;
+}
+
+const emptyMaterialForm: AddMaterialForm = {
+  name: "",
+  category: "",
+  unit: "",
+  materialType: "Consumable",
+  totalQty: "",
+  availableQty: "",
+  reservedQty: "",
+  unitCost: "",
+  reorderLevel: "",
+  allocationStatus: "Available",
+  allocatedTo: "",
+  allocatedProject: "",
+  condition: "Good",
+};
+
+type MaterialFormErrors = Partial<Record<keyof AddMaterialForm, string>>;
+
+function validateMaterialForm(form: AddMaterialForm): MaterialFormErrors {
+  const errors: MaterialFormErrors = {};
+  if (!form.name.trim()) errors.name = "Material name is required.";
+  if (!form.category.trim()) errors.category = "Category is required.";
+  if (!form.unit.trim()) errors.unit = "Unit of measure is required.";
+
+  const numeric: (keyof AddMaterialForm)[] = [
+    "totalQty",
+    "availableQty",
+    "reservedQty",
+    "unitCost",
+    "reorderLevel",
+  ];
+  for (const key of numeric) {
+    const raw = form[key].trim();
+    if (!raw) continue; // blank means "use the default of 0"
+    const n = Number(raw);
+    if (!Number.isFinite(n)) errors[key] = "Enter a number.";
+    else if (n < 0) errors[key] = "Cannot be negative.";
+  }
+
+  // Reusable items are the only ones that can be allocated to somebody.
+  if (form.allocationStatus === "Allocated" && !form.allocatedTo.trim())
+    errors.allocatedTo = "Say who the material is allocated to.";
+
+  return errors;
+}
+
+function MatField({
+  label,
+  required,
+  error,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      {children}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+function AddMaterialModal({
+  onSave,
+  onClose,
+  knownCategories,
+  saving,
+}: {
+  onSave: (payload: Partial<ApiMaterial>) => void;
+  onClose: () => void;
+  knownCategories: string[];
+  saving: boolean;
+}) {
+  const [form, setForm] = useState<AddMaterialForm>({ ...emptyMaterialForm });
+  const [errors, setErrors] = useState<MaterialFormErrors>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const set = (k: keyof AddMaterialForm, v: string) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    setErrors((prev) => (prev[k] ? { ...prev, [k]: undefined } : prev));
+  };
+  const cls = (k: keyof AddMaterialForm) =>
+    errors[k] ? errorInputClass : inputClass;
+
+  const num = (v: string) => (v.trim() ? Number(v) : 0);
+
+  function handleSubmit() {
+    const found = validateMaterialForm(form);
+    setErrors(found);
+    setSubmitted(true);
+    if (Object.keys(found).length > 0) return;
+
+    const totalQty = num(form.totalQty);
+    const reservedQty = num(form.reservedQty);
+    // Stock that hasn't been reserved is available, which is what a store
+    // clerk means when they only fill in the total received.
+    const availableQty = form.availableQty.trim()
+      ? Number(form.availableQty)
+      : Math.max(totalQty - reservedQty, 0);
+
+    onSave({
+      name: form.name.trim(),
+      category: form.category.trim(),
+      unit: form.unit.trim(),
+      materialType: form.materialType,
+      totalQty,
+      availableQty,
+      reservedQty,
+      unitCost: num(form.unitCost),
+      reorderLevel: num(form.reorderLevel),
+      allocationStatus: form.allocationStatus,
+      allocatedTo: form.allocatedTo.trim() || undefined,
+      allocatedProject: form.allocatedProject.trim() || undefined,
+      condition: form.materialType === "Reusable" ? form.condition : undefined,
+    });
+  }
+
+  const errorCount = Object.values(errors).filter(Boolean).length;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">Add Material</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-6 overflow-y-auto">
+          {submitted && errorCount > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              Please correct {errorCount} highlighted{" "}
+              {errorCount === 1 ? "field" : "fields"} before adding this
+              material.
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">
+              Identification
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <MatField label="Material Name" required error={errors.name}>
+                <input
+                  value={form.name}
+                  onChange={(e) => set("name", e.target.value)}
+                  placeholder="e.g. OPC Cement"
+                  className={cls("name")}
+                />
+              </MatField>
+              <MatField label="Category" required error={errors.category}>
+                <input
+                  value={form.category}
+                  onChange={(e) => set("category", e.target.value)}
+                  list="material-category-options"
+                  placeholder="e.g. Concrete"
+                  className={cls("category")}
+                />
+                <datalist id="material-category-options">
+                  {knownCategories.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </MatField>
+              <MatField label="Unit of Measure" required error={errors.unit}>
+                <input
+                  value={form.unit}
+                  onChange={(e) => set("unit", e.target.value)}
+                  placeholder="e.g. bags, tonnes, m³"
+                  className={cls("unit")}
+                />
+              </MatField>
+              <MatField label="Material Type">
+                <select
+                  value={form.materialType}
+                  onChange={(e) => set("materialType", e.target.value)}
+                  className={`${inputClass} bg-white`}
+                >
+                  {MATERIAL_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </MatField>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">
+              Stock &amp; Cost
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <MatField label="Total Quantity" error={errors.totalQty}>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.totalQty}
+                  onChange={(e) => set("totalQty", e.target.value)}
+                  placeholder="0"
+                  className={cls("totalQty")}
+                />
+              </MatField>
+              <MatField label="Reserved Quantity" error={errors.reservedQty}>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.reservedQty}
+                  onChange={(e) => set("reservedQty", e.target.value)}
+                  placeholder="0"
+                  className={cls("reservedQty")}
+                />
+              </MatField>
+              <MatField label="Available Quantity" error={errors.availableQty}>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.availableQty}
+                  onChange={(e) => set("availableQty", e.target.value)}
+                  placeholder="Total − reserved"
+                  className={cls("availableQty")}
+                />
+              </MatField>
+              <MatField
+                label={`Unit Cost (${getCurrencySymbol()})`}
+                error={errors.unitCost}
+              >
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.unitCost}
+                  onChange={(e) => set("unitCost", e.target.value)}
+                  placeholder="0.00"
+                  className={cls("unitCost")}
+                />
+              </MatField>
+              <MatField
+                label="Reorder Level (min stock)"
+                error={errors.reorderLevel}
+              >
+                <input
+                  type="number"
+                  min="0"
+                  value={form.reorderLevel}
+                  onChange={(e) => set("reorderLevel", e.target.value)}
+                  placeholder="0"
+                  className={cls("reorderLevel")}
+                />
+              </MatField>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">
+              Allocation
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <MatField label="Allocation Status">
+                <select
+                  value={form.allocationStatus}
+                  onChange={(e) => set("allocationStatus", e.target.value)}
+                  className={`${inputClass} bg-white`}
+                >
+                  {ALLOCATION_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </MatField>
+              {form.materialType === "Reusable" && (
+                <MatField label="Condition">
+                  <select
+                    value={form.condition}
+                    onChange={(e) => set("condition", e.target.value)}
+                    className={`${inputClass} bg-white`}
+                  >
+                    {CONDITIONS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </MatField>
+              )}
+              <MatField
+                label="Allocated To"
+                required={form.allocationStatus === "Allocated"}
+                error={errors.allocatedTo}
+              >
+                <input
+                  value={form.allocatedTo}
+                  onChange={(e) => set("allocatedTo", e.target.value)}
+                  placeholder="Person, crew or store"
+                  className={cls("allocatedTo")}
+                />
+              </MatField>
+              <MatField label="Allocated Project">
+                <input
+                  value={form.allocatedProject}
+                  onChange={(e) => set("allocatedProject", e.target.value)}
+                  className={inputClass}
+                />
+              </MatField>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="px-4 py-2 bg-blue-700 text-white rounded-md text-sm font-medium hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? "Adding…" : "Add Material"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function InventoryPage() {
   const [materials, setMaterials] = useState<LocalMaterial[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
 
+  const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  function loadMaterials() {
+    return getMaterials().then((data) =>
+      setMaterials(data.map(fromApiMaterial)),
+    );
+  }
+
   useEffect(() => {
-    getMaterials()
-      .then((data) => setMaterials(data.map(fromApiMaterial)))
+    loadMaterials()
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
@@ -159,6 +524,33 @@ export function InventoryPage() {
     out_of_stock: materials.filter((m) => m.status === "out_of_stock").length,
   };
 
+  // Category filter options come from the categories actually present on the
+  // loaded materials, so the filter can never offer a category with no items.
+  const knownCategories = useMemo(
+    () =>
+      Array.from(
+        new Set(materials.map((m) => m.category).filter(Boolean)),
+      ).sort((a, b) => a.localeCompare(b)),
+    [materials],
+  );
+  const categories = ["All", ...knownCategories];
+
+  async function handleCreateMaterial(payload: Partial<ApiMaterial>) {
+    setSaving(true);
+    try {
+      await createMaterial(payload);
+      await loadMaterials();
+      setShowAddMaterial(false);
+      toast.success("Material added");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to add material",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading)
     return (
       <div className="p-8 text-center text-gray-400 text-sm">Loading…</div>
@@ -173,7 +565,8 @@ export function InventoryPage() {
             All Materials
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {materials.length} items across {categories.length - 1} categories
+            {materials.length} items across {knownCategories.length}{" "}
+            {knownCategories.length === 1 ? "category" : "categories"}
           </p>
         </div>
         <div className="flex gap-2">
@@ -209,7 +602,10 @@ export function InventoryPage() {
           >
             <Download className="w-3.5 h-3.5" /> Export
           </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800">
+          <button
+            onClick={() => setShowAddMaterial(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800"
+          >
             <Plus className="w-3.5 h-3.5" /> Add Material
           </button>
         </div>
@@ -433,6 +829,15 @@ export function InventoryPage() {
           </div>
         )}
       </div>
+
+      {showAddMaterial && (
+        <AddMaterialModal
+          knownCategories={knownCategories}
+          saving={saving}
+          onSave={handleCreateMaterial}
+          onClose={() => setShowAddMaterial(false)}
+        />
+      )}
     </div>
   );
 }
