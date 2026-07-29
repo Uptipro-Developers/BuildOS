@@ -1,9 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as bcrypt from 'bcryptjs';
-import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityHistoryService } from '../activity-history/activity-history.service';
-import { NotificationService } from '../notifications/notification.service';
+import { AdminExtrasService } from '../admin-extras/admin-extras.service';
 
 /** Columns accepted from clients; everything else is dropped. */
 const EMPLOYEE_FIELDS = [
@@ -38,61 +36,34 @@ export class EmployeesService {
     constructor(
         private prisma: PrismaService,
         private activityHistory: ActivityHistoryService,
-        private notificationService: NotificationService,
+        private adminExtras: AdminExtrasService,
     ) { }
 
-    private getFrontendBaseUrl(): string {
-        const configured = (process.env.FRONTEND_URL || process.env.APP_WEB_URL || '').replace(/\/$/, '');
-        if (configured) return configured;
-        return process.env.NODE_ENV === 'production'
-            ? 'https://build-os-delta.vercel.app'
-            : 'http://localhost:5173';
-    }
-
     /**
-     * Creates the login account a newly onboarded employee uses to activate BuildOS access,
-     * and sends the "New User Created" welcome email via the admin-configured template.
-     * Failures here don't fail employee creation — they surface as a warning so HR data
-     * isn't lost over an unrelated email/infra issue.
+     * Creates the login account a newly onboarded employee uses to activate BuildOS
+     * access, reusing the same invite pipeline (pending_invite user + admin-configured
+     * "New User Created" email template, sent via the mail queue) that Admin's own
+     * "invite user" flow already uses. Failures here don't fail employee creation —
+     * they surface as a warning so HR data isn't lost over an unrelated email/infra issue.
      */
-    private async createLinkedUserAccount(employee: { id: string; firstName: string; lastName: string; email: string }) {
+    private async createLinkedUserAccount(employee: {
+        id: string; firstName: string; lastName: string; email: string; department?: { name: string } | null;
+    }) {
         const existing = await this.prisma.user.findUnique({ where: { email: employee.email } });
         if (existing) {
             await this.prisma.employee.update({ where: { id: employee.id }, data: { userId: existing.id } });
             return;
         }
 
-        const name = `${employee.firstName} ${employee.lastName}`.trim();
-        const token = crypto.randomBytes(32).toString('hex');
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-        const placeholder = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 10);
-
-        const user = await this.prisma.user.create({
-            data: {
-                email: employee.email,
-                name,
-                role: 'employee',
-                assignedApps: ['ess', 'hr'],
-                password: placeholder,
-                status: 'pending_invite',
-                inviteToken: token,
-                inviteExpiresAt: expiresAt,
-            },
+        const invited = await this.adminExtras.inviteUser({
+            email: employee.email,
+            name: `${employee.firstName} ${employee.lastName}`.trim(),
+            role: 'employee',
+            assignedApps: ['ess', 'hr'],
+            department: employee.department?.name,
         });
 
-        try {
-            const activationLink = `${this.getFrontendBaseUrl()}/auth/activate?token=${encodeURIComponent(token)}`;
-            await this.notificationService.renderAndSendTemplate('New User Created', employee.email, {
-                user_name: name,
-                user_email: employee.email,
-                activation_link: activationLink,
-            });
-        } catch (error) {
-            await this.prisma.user.delete({ where: { id: user.id } }).catch(() => null);
-            throw error;
-        }
-
-        await this.prisma.employee.update({ where: { id: employee.id }, data: { userId: user.id } });
+        await this.prisma.employee.update({ where: { id: employee.id }, data: { userId: invited.id } });
     }
 
     findAll(status?: string, departmentId?: string) {

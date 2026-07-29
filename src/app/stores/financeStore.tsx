@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
 import type {
   Account, AccountType, FiscalYear,
   Accrual, TxnType, AccrualTypeConfig,
@@ -152,7 +152,23 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>(SEED_ACCOUNTS);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>(SEED_FISCAL_YEARS);
-  const [accruals, setAccruals] = useState<Accrual[]>(SEED_ACCRUALS);
+  const [accruals, setAccruals] = useState<Accrual[]>(() => {
+    try {
+      const raw = localStorage.getItem("buildos_accruals");
+      if (raw) return JSON.parse(raw) as Accrual[];
+    } catch {
+      /* ignore */
+    }
+    return SEED_ACCRUALS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("buildos_accruals", JSON.stringify(accruals));
+    } catch {
+      /* ignore */
+    }
+  }, [accruals]);
   const [accrualTypeConfigs, setAccrualTypeConfigs] = useState<AccrualTypeConfig[]>(SEED_ACCRUAL_TYPE_CONFIGS);
 
   const getDescendantIds = useCallback((parentId: string): string[] => {

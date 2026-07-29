@@ -3,10 +3,10 @@ import { EmployeesController } from './employees.controller';
 import { EmployeesService } from './employees.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ActivityHistoryModule } from '../activity-history/activity-history.module';
-import { NotificationsModule } from '../notifications/notifications.module';
+import { AdminExtrasModule } from '../admin-extras/admin-extras.module';
 
 @Module({
-    imports: [PrismaModule, ActivityHistoryModule, NotificationsModule],
+    imports: [PrismaModule, ActivityHistoryModule, AdminExtrasModule],
     controllers: [EmployeesController],
     providers: [EmployeesService],
 })

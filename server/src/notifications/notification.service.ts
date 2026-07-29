@@ -1,6 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { EmailService } from '../email/email.service';
 
 interface NotificationRule {
   id: string;
@@ -12,10 +11,7 @@ interface NotificationRule {
 
 @Injectable()
 export class NotificationService {
-  constructor(
-    private prisma: PrismaService,
-    private emailService: EmailService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   /**
    * Create notification rule

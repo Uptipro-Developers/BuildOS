@@ -12,6 +12,6 @@ import { PrismaModule } from '../prisma/prisma.module';
     imports: [PrismaModule],
     controllers: [AdminExtrasController, AdminPublicController, ApprovalsPublicController, SystemConfigController, ReportsController],
     providers: [AdminExtrasService, SystemConfigService, ReportBuilderService],
-    exports: [SystemConfigService, ReportBuilderService],
+    exports: [AdminExtrasService, SystemConfigService, ReportBuilderService],
 })
 export class AdminExtrasModule { }

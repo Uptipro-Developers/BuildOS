@@ -1,8 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   fetchExpenses,
+  createExpense,
+  updateExpense,
+  deleteExpense,
   approveExpense,
   rejectExpense,
 } from "../../api/expenses";
@@ -15,6 +19,8 @@ import {
   X,
   Save,
   Eye,
+  Edit,
+  Trash2,
   CheckCircle,
   XCircle,
   Clock,
@@ -25,7 +31,6 @@ import {
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
-import { useNumbering } from "../../stores/numberingStore";
 
 type ExpenseStatus =
   | "Draft"
@@ -98,11 +103,12 @@ const emptyForm = {
   amount: "",
   description: "",
   receipt: "",
+  receiptName: "",
 };
 
 export function ExpenseManagementPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [projectNames, setProjectNames] = useState<string[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
 
   function toExpense(e: any): Expense {
@@ -138,7 +144,7 @@ export function ExpenseManagementPage() {
       .then(([expenseData, projects, accounts]) => {
         const mappedExpenses = expenseData.map(toExpense);
         setExpenses(mappedExpenses);
-        setProjectNames(projects.map((p) => p.name));
+        setProjects(projects);
         setCategoryOptions(
           Array.from(
             new Set([
@@ -154,15 +160,16 @@ export function ExpenseManagementPage() {
     "All",
   );
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [viewExpense, setViewExpense] = useState<Expense | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [rejectState, setRejectState] = useState<{
     id: string;
     reason: string;
   } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
 
   const fmt = (n: number) =>
     formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
@@ -238,9 +245,15 @@ export function ExpenseManagementPage() {
       key: "actions",
       label: "Actions",
       render: (e) => (
-        <button onClick={() => setViewExpense(e)} className="text-xs text-emerald-600 hover:underline flex items-center gap-1 ml-auto">
-          <Eye className="w-3.5 h-3.5" /> View
-        </button>
+        <div className="flex items-center justify-end gap-1">
+          <button onClick={() => setViewExpense(e)} title="View" className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"><Eye className="w-3.5 h-3.5" /></button>
+          {e.status === "Draft" && (
+            <>
+              <button onClick={() => openEditExpense(e)} title="Edit" className="p-1.5 hover:bg-emerald-50 rounded-lg text-gray-400 hover:text-emerald-600"><Edit className="w-3.5 h-3.5" /></button>
+              <button onClick={() => deleteExpenseRow(e.id)} title="Delete" className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+            </>
+          )}
+        </div>
       ),
       sortable: false,
       filterable: false,
@@ -249,26 +262,71 @@ export function ExpenseManagementPage() {
     },
   ];
 
-  function addExpense() {
+  function openAddExpense() {
+    setEditId(null);
+    setForm(emptyForm);
+    setShowAddModal(true);
+  }
+
+  function openEditExpense(e: Expense) {
+    setEditId(e.id);
+    setForm({
+      project: e.project,
+      category: e.category,
+      amount: String(e.amount),
+      description: e.description,
+      receipt: e.receipt ?? "",
+      receiptName: "",
+    });
+    setShowAddModal(true);
+  }
+
+  function handleReceiptChange(ev: React.ChangeEvent<HTMLInputElement>) {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () =>
+      setForm((f) => ({ ...f, receipt: reader.result as string, receiptName: file.name }));
+    reader.readAsDataURL(file);
+  }
+
+  async function saveExpense(status: ExpenseStatus) {
     if (!form.project || !form.amount || !form.description) return;
-    const newExp: Expense = {
-      id: getNextId("Expense"),
-      project: form.project,
+    const projectId = projects.find((p) => p.name === form.project)?.id;
+    const payload = {
+      projectId,
       category: form.category || "Other",
       amount: parseFloat(form.amount.replace(/,/g, "")),
       description: form.description,
-      createdBy: getAuthUserName() || "Current User",
-      date: new Date().toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-      status: "Draft",
+      receipt: form.receipt || undefined,
+      status,
+      ...(editId ? {} : { createdBy: getAuthUserName() || "Current User", date: new Date().toISOString() }),
     };
-    setExpenses([newExp, ...expenses]);
-    logChange({ module: "Finance", action: "Created", entityType: "Expense", entityId: newExp.id, summary: `Expense ${newExp.id} created — ${newExp.description}`, performedBy: "Current User" });
-    setShowAddModal(false);
-    setForm(emptyForm);
+    try {
+      if (editId) {
+        await updateExpense(editId, payload);
+        logChange({ module: "Finance", action: "Updated", entityType: "Expense", entityId: editId, summary: `Expense ${editId} updated — ${form.description}`, performedBy: "Current User" });
+      } else {
+        const created: any = await createExpense(payload);
+        logChange({ module: "Finance", action: "Created", entityType: "Expense", entityId: created?.id ?? "", summary: `Expense created — ${form.description}`, performedBy: "Current User" });
+      }
+      const items = await fetchExpenses();
+      setExpenses(items.map(toExpense));
+      setShowAddModal(false);
+      setForm(emptyForm);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save expense");
+    }
+  }
+
+  async function deleteExpenseRow(id: string) {
+    try {
+      await deleteExpense(id);
+      setExpenses((prev) => prev.filter((e) => e.id !== id));
+      logChange({ module: "Finance", action: "Deleted", entityType: "Expense", entityId: id, summary: `Expense ${id} deleted`, performedBy: "Current User" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete expense");
+    }
   }
 
   function approve(id: string) {
@@ -303,15 +361,25 @@ export function ExpenseManagementPage() {
     setViewExpense(null);
   }
 
-  function sendToFinance(id: string) {
-    setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, status: "Sent to Finance" } : e));
-    logChange({ module: "Finance", action: "Sent to Finance", entityType: "Expense", entityId: id, summary: `Expense ${id} sent to finance`, performedBy: "Current User" });
+  async function sendToFinance(id: string) {
+    try {
+      await updateExpense(id, { status: "Sent to Finance" });
+      setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, status: "Sent to Finance" } : e));
+      logChange({ module: "Finance", action: "Sent to Finance", entityType: "Expense", entityId: id, summary: `Expense ${id} sent to finance`, performedBy: "Current User" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send expense to finance");
+    }
     setViewExpense(null);
   }
 
-  function markPaid(id: string) {
-    setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, status: "Paid" } : e));
-    logChange({ module: "Finance", action: "Paid", entityType: "Expense", entityId: id, summary: `Expense ${id} marked as paid`, performedBy: "Current User" });
+  async function markPaid(id: string) {
+    try {
+      await updateExpense(id, { status: "Paid" });
+      setExpenses((prev) => prev.map((e) => e.id === id ? { ...e, status: "Paid" } : e));
+      logChange({ module: "Finance", action: "Paid", entityType: "Expense", entityId: id, summary: `Expense ${id} marked as paid`, performedBy: "Current User" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to mark expense as paid");
+    }
     setViewExpense(null);
   }
 
@@ -361,7 +429,7 @@ export function ExpenseManagementPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
+          <button onClick={openAddExpense} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 text-sm font-medium">
             <Plus className="w-4 h-4" /> Add Expense
           </button>
         </div>
@@ -439,7 +507,7 @@ export function ExpenseManagementPage() {
               <div className="flex items-center gap-2">
                 <Receipt className="w-4 h-4 text-emerald-600" />
                 <h2 className="text-sm font-semibold text-gray-900">
-                  Add Expense
+                  {editId ? "Edit Expense" : "Add Expense"}
                 </h2>
               </div>
               <button
@@ -463,9 +531,9 @@ export function ExpenseManagementPage() {
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <option value="">Select project</option>
-                    {projectNames.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.name}>
+                        {p.name}
                       </option>
                     ))}
                   </select>
@@ -492,7 +560,7 @@ export function ExpenseManagementPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Amount (USD) *
+                  Amount *
                 </label>
                 <input
                   value={form.amount}
@@ -519,10 +587,20 @@ export function ExpenseManagementPage() {
                 <label className="block text-xs font-semibold text-gray-700 mb-1.5">
                   Receipt Upload
                 </label>
-                <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-emerald-300 hover:bg-emerald-50 transition-colors">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center cursor-pointer hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    className="hidden"
+                    onChange={handleReceiptChange}
+                  />
                   <Upload className="w-5 h-5 text-gray-300 mx-auto mb-1" />
                   <p className="text-xs text-gray-500">
-                    Click to upload or drag and drop
+                    {form.receiptName || "Click to upload or drag and drop"}
                   </p>
                   <p className="text-xs text-gray-400">
                     PDF, PNG, JPG up to 10MB
@@ -538,13 +616,13 @@ export function ExpenseManagementPage() {
                 Cancel
               </button>
               <button
-                onClick={addExpense}
+                onClick={() => saveExpense("Draft")}
                 className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800"
               >
                 <Save className="w-3.5 h-3.5" /> Save as Draft
               </button>
               <button
-                onClick={addExpense}
+                onClick={() => saveExpense("Submitted")}
                 className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
               >
                 <Send className="w-3.5 h-3.5" /> Submit

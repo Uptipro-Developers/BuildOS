@@ -7,11 +7,11 @@ export interface Transaction {
     createdBy?: string; notes?: string; createdAt: string;
 }
 export interface JournalLine {
-    id?: string; accountId: string; accountName?: string; accountCode?: string;
+    id?: string; accountName?: string; accountCode?: string;
     debit: number; credit: number; description?: string;
 }
 export interface JournalEntry {
-    id: string; ref: string; date: string; description?: string;
+    id: string; reference: string; date: string; description?: string;
     status: string; lines: JournalLine[]; createdBy?: string;
     postedAt?: string; createdAt: string;
 }

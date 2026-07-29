@@ -86,11 +86,7 @@ test("3 · Chart of Accounts table has a Parent Ledger column", async ({ page })
 
 // ─── Test 4 — Journal Entry reference auto-generated ────────────────────
 test("4 · Journal Entry saves with auto-generated reference when field left blank", async ({ page }) => {
-  await goto(page, "/apps/finance/journal-entries");
-
-  // Clear any stale localStorage first so we start fresh
-  await page.evaluate(() => localStorage.removeItem("buildos_journal_entries"));
-  await page.reload();
+  await goto(page, "/apps/finance/journal");
   await page.waitForLoadState("networkidle");
 
   // Open new entry modal
@@ -99,30 +95,29 @@ test("4 · Journal Entry saves with auto-generated reference when field left bla
   // Fill description only — leave reference blank
   await page.getByPlaceholder(/Entry description/i).fill("Auto-ref test entry");
 
-  // Fill two lines to make it balanced
-  const rows = page.locator("table tbody tr");
+  // Fill two lines to make it balanced (scoped to the modal — the page also
+  // has its own DataTable listing existing entries, which is a second <table>)
+  const rows = page.locator(".fixed.inset-0 table tbody tr");
   // Row 0: account + debit
   const row0accountSelect = rows.nth(0).locator("select").first();
-  await row0accountSelect.selectOption({ label: "Cash & Bank" });
+  await row0accountSelect.selectOption({ index: 1 });
   await rows.nth(0).locator('input[type="number"]').first().fill("5000");
   // Row 1: account + credit
   const row1accountSelect = rows.nth(1).locator("select").first();
-  await row1accountSelect.selectOption({ label: "Revenue" });
+  await row1accountSelect.selectOption({ index: 2 });
   await rows.nth(1).locator('input[type="number"]').nth(1).fill("5000");
 
   // Save as Draft
   await page.getByRole("button", { name: "Save as Draft" }).click();
 
-  // The entry should appear in the table with a non-empty reference
-  const refCell = page.locator("table td").filter({ hasText: /JE-REF-/i }).first();
+  // The entry should appear in the table with a non-empty, backend-generated reference
+  const refCell = page.locator("table td").filter({ hasText: /JRN-/i }).first();
   await expect(refCell).toBeVisible({ timeout: 8_000 });
 });
 
 // ─── Test 5 — Journal Entries persist across reload ──────────────────────
 test("5 · Journal entries created in UI survive a page reload", async ({ page }) => {
-  await goto(page, "/apps/finance/journal-entries");
-  await page.evaluate(() => localStorage.removeItem("buildos_journal_entries"));
-  await page.reload();
+  await goto(page, "/apps/finance/journal");
   await page.waitForLoadState("networkidle");
 
   // Create an entry
@@ -130,12 +125,12 @@ test("5 · Journal entries created in UI survive a page reload", async ({ page }
   const uniqueDesc = `Persist-test-${Date.now()}`;
   await page.getByPlaceholder(/Entry description/i).fill(uniqueDesc);
 
-  const rows = page.locator("table tbody tr");
+  const rows = page.locator(".fixed.inset-0 table tbody tr");
   const row0acct = rows.nth(0).locator("select").first();
-  await row0acct.selectOption({ label: "Cash & Bank" });
+  await row0acct.selectOption({ index: 1 });
   await rows.nth(0).locator('input[type="number"]').first().fill("1000");
   const row1acct = rows.nth(1).locator("select").first();
-  await row1acct.selectOption({ label: "Revenue" });
+  await row1acct.selectOption({ index: 2 });
   await rows.nth(1).locator('input[type="number"]').nth(1).fill("1000");
   await page.getByRole("button", { name: "Save as Draft" }).click();
 
@@ -159,17 +154,19 @@ test("6 · New accrual entry persists after page reload", async ({ page }) => {
 
   // Create a new accrual
   await page.getByRole("button", { name: /New Accrual/i }).click();
+  const modal = page.locator(".fixed.inset-0");
   const uniqueTitle = `AccrualPersist-${Date.now()}`;
 
   // Type
-  await page.locator("select").first().selectOption({ index: 1 });
+  await modal.locator("select").first().selectOption({ index: 1 });
   // Title
   await page.getByPlaceholder(/GRNI/i).fill(uniqueTitle);
   // Reversal date
-  await page.locator('input[type="date"]').first().fill("2026-12-31");
+  await modal.locator('input[type="date"]').first().fill("2026-12-31");
 
-  // Fill two lines for balance — select accounts and amounts
-  const trows = page.locator("table tbody tr");
+  // Fill two lines for balance — select accounts and amounts (scoped to the
+  // modal — the page also has its own list table behind it)
+  const trows = modal.locator("table tbody tr");
   await trows.nth(0).locator("select").selectOption({ index: 1 });
   await trows.nth(0).locator('input[type="number"]').first().fill("10000");
   await trows.nth(1).locator("select").selectOption({ index: 2 });
@@ -201,7 +198,7 @@ test("7 · Add Expense modal shows Amount label without (USD)", async ({ page })
 test("8 · Add Expense modal receipt upload has a real <input type=file>", async ({ page }) => {
   await goto(page, "/apps/finance/expenses");
   await page.getByRole("button", { name: /Add Expense/i }).click();
-  await page.waitForSelector('[type="file"]', { timeout: 8_000 });
+  await page.waitForSelector('[type="file"]', { timeout: 8_000, state: "attached" });
   const fileInput = page.locator('[type="file"]');
   await expect(fileInput).toBeDefined();
   // Confirm it's hidden (styling), but present in the DOM
@@ -211,27 +208,48 @@ test("8 · Add Expense modal receipt upload has a real <input type=file>", async
 
 // ─── Test 9 — Draft expense has Edit + Delete; non-Paid has Edit only ───
 test("9 · Draft expense has Edit and Delete buttons; Paid has neither", async ({ page }) => {
+  // Seed data doesn't guarantee a Draft/Paid pair, so create our own via the
+  // real API — same pattern as the employees.spec.ts fixture helpers.
+  const loginRes = await page.request.post(`${API}/auth/login`, {
+    data: { email: "admin@buildos.ng", password: "BuildOS@2025" },
+  });
+  const { access_token } = await loginRes.json();
+  const projRes = await page.request.get(`${API}/projects`, {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
+  const projects = await projRes.json();
+  const projectId = projects[0]?.id;
+  expect(projectId, "Need at least one project").toBeTruthy();
+
+  const draftDesc = `E2E-Draft-${Date.now()}`;
+  const paidDesc = `E2E-Paid-${Date.now()}`;
+  const draftRes = await page.request.post(`${API}/expenses`, {
+    headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+    data: { projectId, category: "Other", amount: 1000, description: draftDesc, createdBy: "E2E", date: new Date().toISOString(), status: "Draft" },
+  });
+  const draft = await draftRes.json();
+  const paidRes = await page.request.post(`${API}/expenses`, {
+    headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+    data: { projectId, category: "Other", amount: 1000, description: paidDesc, createdBy: "E2E", date: new Date().toISOString(), status: "Paid" },
+  });
+  const paid = await paidRes.json();
+
   await goto(page, "/apps/finance/expenses");
-  // Ensure we can see the table
   await page.waitForSelector("table", { timeout: 10_000 });
 
-  // Find draft row — EXP-0046 is "Draft" in seed data
-  const draftRow = page.locator("tr").filter({ hasText: "EXP-0046" });
+  const draftRow = page.locator("tr").filter({ hasText: draftDesc });
   await expect(draftRow).toBeVisible({ timeout: 8_000 });
+  await expect(draftRow.locator('[title="Edit"]')).toBeVisible();
+  await expect(draftRow.locator('[title="Delete"]')).toBeVisible();
 
-  // Edit button (title="Edit")
-  const editBtn = draftRow.locator('[title="Edit"]');
-  await expect(editBtn).toBeVisible();
-
-  // Delete button (title="Delete")
-  const deleteBtn = draftRow.locator('[title="Delete"]');
-  await expect(deleteBtn).toBeVisible();
-
-  // Paid row (EXP-0048) — no Edit or Delete
-  const paidRow = page.locator("tr").filter({ hasText: "EXP-0048" });
+  const paidRow = page.locator("tr").filter({ hasText: paidDesc });
   await expect(paidRow).toBeVisible();
   await expect(paidRow.locator('[title="Edit"]')).not.toBeVisible();
   await expect(paidRow.locator('[title="Delete"]')).not.toBeVisible();
+
+  // Cleanup
+  await page.request.delete(`${API}/expenses/${draft.id}`, { headers: { Authorization: `Bearer ${access_token}` } });
+  await page.request.delete(`${API}/expenses/${paid.id}`, { headers: { Authorization: `Bearer ${access_token}` } });
 });
 
 // ─── Test 10 — Expenses persist across reload ────────────────────────────

@@ -407,15 +407,17 @@ export function TasksPage({
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => openEdit(task)}
+                  title="Edit task"
                   className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
                 >
                   <Edit className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setPendingDeleteTask(task)}
+                  title="Delete task"
                   className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
                 >
                   <Trash2 className="w-3.5 h-3.5" />

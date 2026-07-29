@@ -1,8 +1,12 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   getJournalEntries,
+  createJournalEntry,
+  updateJournalEntry,
+  deleteJournalEntry,
   getChartAccounts,
   JournalEntry as ApiJournalEntry,
 } from "../../api/finance-extras";
@@ -10,7 +14,6 @@ import { Plus, Search, Eye, Edit, Trash2, X } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
-import { useNumbering } from "../../stores/numberingStore";
 
 type EntryStatus = "Draft" | "Posted" | "Reversed";
 
@@ -48,9 +51,29 @@ const STATUS_STYLES: Record<EntryStatus, string> = {
   Reversed: "bg-red-100 text-red-700",
 };
 
+function mapApiEntry(e: ApiJournalEntry): JournalEntry {
+  return {
+    id: e.id,
+    date: e.date,
+    reference: e.reference,
+    description: e.description ?? "",
+    status: (["Draft", "Posted", "Reversed"].includes(e.status)
+      ? e.status
+      : "Draft") as EntryStatus,
+    createdBy: e.createdBy ?? "",
+    lines: (e.lines ?? []).map((l) => ({
+      id: l.id ?? `ln-${Date.now()}-${Math.random()}`,
+      account: l.accountName ?? "",
+      glCode: l.accountCode ?? "",
+      debit: l.debit,
+      credit: l.credit,
+      description: l.description ?? "",
+    })),
+  };
+}
+
 export function JournalEntryPage() {
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [accounts, setAccounts] = useState<{ code: string; name: string }[]>(
     [],
@@ -72,28 +95,7 @@ export function JournalEntryPage() {
   }, []);
   useEffect(() => {
     getJournalEntries()
-      .then((data: ApiJournalEntry[]) => {
-        setEntries(
-          data.map((e) => ({
-            id: e.id,
-            date: e.date,
-            reference: e.ref,
-            description: e.description ?? "",
-            status: (["Draft", "Posted", "Reversed"].includes(e.status)
-              ? e.status
-              : "Draft") as EntryStatus,
-            createdBy: e.createdBy ?? "",
-            lines: (e.lines ?? []).map((l) => ({
-              id: l.id ?? `ln-${Date.now()}-${Math.random()}`,
-              account: l.accountName ?? "",
-              glCode: l.accountCode ?? "",
-              debit: l.debit,
-              credit: l.credit,
-              description: l.description ?? "",
-            })),
-          })),
-        );
-      })
+      .then((data: ApiJournalEntry[]) => setEntries(data.map(mapApiEntry)))
       .catch(console.error);
   }, []);
   const [search, setSearch] = useState("");
@@ -177,26 +179,48 @@ export function JournalEntryPage() {
   const totalCredits = form.lines.reduce((s, l) => s + (l.credit || 0), 0);
   const isBalanced = totalDebits === totalCredits && totalDebits > 0;
 
-  function saveEntry(status: EntryStatus) {
+  async function saveEntry(status: EntryStatus) {
     if (!form.description || !isBalanced) return;
-    if (editId) {
-      setEntries((prev) => prev.map((e) => e.id === editId ? { ...e, ...form, status } : e));
-      logChange({ module: "Finance", action: "Updated", entityType: "JournalEntry", entityId: editId, summary: `Journal Entry: ${form.description} updated [${status}]`, performedBy: "Current User" });
-    } else {
-      const newEntry: JournalEntry = {
-        id: getNextId("JournalEntry"),
-        ...form, status, createdBy: getAuthUserName() || "Current User",
-      };
-      setEntries([newEntry, ...entries]);
-      logChange({ module: "Finance", action: "Created", entityType: "JournalEntry", entityId: newEntry.id, summary: `Journal Entry ${newEntry.id}: ${form.description} [${status}]`, performedBy: "Current User" });
+    const payload = {
+      date: new Date(form.date).toISOString(),
+      description: form.description,
+      status,
+      createdBy: getAuthUserName() || "Current User",
+      lines: form.lines
+        .filter((l) => l.account)
+        .map((l) => ({
+          accountCode: l.glCode,
+          accountName: l.account,
+          debit: l.debit || 0,
+          credit: l.credit || 0,
+          description: l.description || undefined,
+        })),
+    };
+    try {
+      if (editId) {
+        const updated = mapApiEntry(await updateJournalEntry(editId, payload));
+        setEntries((prev) => prev.map((e) => (e.id === editId ? updated : e)));
+        logChange({ module: "Finance", action: "Updated", entityType: "JournalEntry", entityId: editId, summary: `Journal Entry: ${form.description} updated [${status}]`, performedBy: "Current User" });
+      } else {
+        const created = mapApiEntry(await createJournalEntry(payload));
+        setEntries((prev) => [created, ...prev]);
+        logChange({ module: "Finance", action: "Created", entityType: "JournalEntry", entityId: created.id, summary: `Journal Entry ${created.id}: ${form.description} [${status}]`, performedBy: "Current User" });
+      }
+      setModalOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save journal entry");
     }
-    setModalOpen(false);
   }
 
-  function deleteEntry(id: string) {
-    const entry = entries.find(e => e.id === id);
-    setEntries((prev) => prev.filter((e) => e.id !== id));
-    if (entry) logChange({ module: "Finance", action: "Deleted", entityType: "JournalEntry", entityId: entry.id, summary: `Journal Entry ${entry.id}: ${entry.description} deleted`, performedBy: "Current User" });
+  async function deleteEntry(id: string) {
+    const entry = entries.find((e) => e.id === id);
+    try {
+      await deleteJournalEntry(id);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+      if (entry) logChange({ module: "Finance", action: "Deleted", entityType: "JournalEntry", entityId: entry.id, summary: `Journal Entry ${entry.id}: ${entry.description} deleted`, performedBy: "Current User" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete journal entry");
+    }
   }
 
   function handleExport() {
