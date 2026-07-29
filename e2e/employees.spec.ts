@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-const API = 'http://localhost:8090/api';
+const API = 'http://localhost:8080/api';
 
 /** Get a live JWT and inject it into localStorage before the page loads */
 async function setupAuth(page: Page) {

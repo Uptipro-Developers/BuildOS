@@ -27,3 +27,7 @@ pnpm-debug.log*
 # TypeScript cache
 *.tsbuildinfo
 .vercel
+
+# Playwright output
+/test-results/
+/playwright-report/
