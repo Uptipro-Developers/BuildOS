@@ -2,8 +2,15 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   formatCurrencyByGeneralSettings,
+  formatDateByGeneralSettings,
   formatTimeByGeneralSettings,
 } from "../../utils/generalSettings";
+import {
+  documentFooter,
+  documentHeader,
+  escapeHtml,
+  printDocument,
+} from "../../utils/printDocument";
 import { getPayrollRuns, getPayrollEntries } from "../../api/hr-extras";
 import {
   CheckCircle,
@@ -108,6 +115,57 @@ export function PayrollProcessingPage() {
   const totalNet = included.reduce((s, e) => s + e.netPay, 0);
 
   const now = () => formatTimeByGeneralSettings(new Date()) + " — Apr 10, 2026";
+
+  /**
+   * Renders the completed payroll run as a printable summary. "Download PDF"
+   * goes through the browser's print dialog, where "Save as PDF" produces the
+   * actual file.
+   */
+  function downloadRunSummary() {
+    const rows = included
+      .map(
+        (e) =>
+          `<tr><td>${escapeHtml(e.name)}</td>` +
+          `<td>${escapeHtml(e.department || "—")}</td>` +
+          `<td>${escapeHtml(e.gradeLevel || "—")}</td>` +
+          `<td class="num">${escapeHtml(fmt(e.basicSalary + e.allowances))}</td>` +
+          `<td class="num negative">-${escapeHtml(fmt(e.deductions))}</td>` +
+          `<td class="num">${escapeHtml(fmt(e.netPay))}</td></tr>`,
+      )
+      .join("");
+
+    const body =
+      documentHeader("Payroll Run Summary", month, [
+        ["Employees paid", String(included.length)],
+        ["On hold", String(onHold.length)],
+        ["Excluded", String(excluded.length)],
+        ["Stage", STAGE_MESSAGES[approvalStage]],
+      ]) +
+      `<div class="doc-section"><h2>Employees paid</h2><table>` +
+      `<thead><tr><th>Employee</th><th>Department</th><th>Grade</th>` +
+      `<th class="num">Gross</th><th class="num">Deductions</th>` +
+      `<th class="num">Net Pay</th></tr></thead><tbody>` +
+      (rows ||
+        `<tr><td colspan="6">No employees included in this run.</td></tr>`) +
+      `<tr class="total"><td colspan="3">Totals</td>` +
+      `<td class="num">${escapeHtml(fmt(totalGross))}</td>` +
+      `<td class="num negative">-${escapeHtml(fmt(totalDed))}</td>` +
+      `<td class="num">${escapeHtml(fmt(totalNet))}</td></tr>` +
+      `<tr class="net"><td colspan="5">Total disbursed</td>` +
+      `<td class="num">${escapeHtml(fmt(totalNet))}</td></tr>` +
+      `</tbody></table></div>` +
+      documentFooter(formatDateByGeneralSettings(new Date()));
+
+    try {
+      printDocument(`Payroll Summary ${month}`, body);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Unable to open the payroll summary.",
+      );
+    }
+  }
 
   function advanceStage(to: ApprovalStage) {
     setApprovalStage(to);
@@ -319,7 +377,10 @@ export function PayrollProcessingPage() {
             successfully. {included.length} employees paid. Total disbursed:{" "}
             <strong>{fmt(totalNet)}</strong>.
           </span>
-          <button className="ml-auto flex items-center gap-1 text-green-700 hover:underline text-xs">
+          <button
+            onClick={downloadRunSummary}
+            className="ml-auto flex items-center gap-1 text-green-700 hover:underline text-xs"
+          >
             <Download className="w-3 h-3" /> Download PDF
           </button>
         </div>

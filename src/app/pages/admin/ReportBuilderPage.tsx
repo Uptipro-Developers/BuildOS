@@ -7,6 +7,7 @@ import {
   deleteReportTemplate,
 } from "../../api/admin-extras";
 import { formatNumberByGeneralSettings } from "../../utils/generalSettings";
+import { exportCSV, type CsvCell } from "../../utils/exportCSV";
 import {
   Play,
   Download,
@@ -821,6 +822,34 @@ export function ReportBuilderPage() {
     return rows.slice(0, rowLimit);
   })();
 
+  // Exports the generated rows using the given columns, in order, as headers.
+  const exportPreviewCSV = (
+    columns: { key: string; displayLabel: string }[],
+  ) => {
+    const rows: CsvCell[][] = previewData.map((row) =>
+      columns.map((col) => {
+        const value = row[col.key];
+        const type = source.fields.find((f) => f.key === col.key)?.type;
+        if (type === "date" && typeof value === "string" && value !== "") {
+          const d = new Date(value);
+          return Number.isNaN(d.getTime()) ? value : d;
+        }
+        return value ?? "";
+      }),
+    );
+    const slug =
+      (tplName || source.label)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "report";
+    exportCSV(
+      slug,
+      columns.map((c) => c.displayLabel),
+      rows,
+    );
+    toast.success(`Exported ${rows.length} records.`);
+  };
+
   // ── Filtered templates for library ──
   const visibleTemplates = templates.filter((t) => {
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
@@ -1390,7 +1419,10 @@ export function ReportBuilderPage() {
                 </span>
                 {hasRun && (
                   <div className="ml-auto flex gap-2">
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50">
+                    <button
+                      onClick={() => exportPreviewCSV(displayColumns)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50"
+                    >
                       <Download className="w-3.5 h-3.5" />
                       CSV
                     </button>
@@ -1651,7 +1683,10 @@ export function ReportBuilderPage() {
                         <span className="text-xs text-gray-500">
                           {previewData.length} rows
                         </span>
-                        <button className="ml-auto flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50">
+                        <button
+                          onClick={() => exportPreviewCSV(displayColumns)}
+                          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50"
+                        >
                           <Download className="w-3.5 h-3.5" />
                           Export CSV
                         </button>

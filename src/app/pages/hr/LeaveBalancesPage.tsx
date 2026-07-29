@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Search, Download, Filter } from "lucide-react";
 import { fetchEmployees } from "../../api/employees";
 import { fetchLeaveRequests } from "../../api/leave-requests";
+import { exportCSV } from "../../utils/exportCSV";
 
 interface EmployeeBalance {
   id: string;
@@ -93,6 +95,50 @@ export function LeaveBalancesPage() {
     return true;
   });
 
+  function handleExport() {
+    // Export the filtered view, with each leave type as entitled/used/remaining
+    // day counts so the recipient can total them in a spreadsheet.
+    const rows = displayed.map((e) => [
+      e.employeeId,
+      e.name,
+      e.department,
+      e.annual.total,
+      e.annual.used,
+      e.annual.total - e.annual.used,
+      e.sick.total,
+      e.sick.used,
+      e.sick.total - e.sick.used,
+      e.emergency.total,
+      e.emergency.used,
+      e.emergency.total - e.emergency.used,
+      e.study.total,
+      e.study.used,
+      e.study.total - e.study.used,
+    ]);
+    exportCSV(
+      "leave-balances",
+      [
+        "Employee ID",
+        "Employee",
+        "Department",
+        "Annual Entitlement (Days)",
+        "Annual Used (Days)",
+        "Annual Remaining (Days)",
+        "Sick Entitlement (Days)",
+        "Sick Used (Days)",
+        "Sick Remaining (Days)",
+        "Emergency Entitlement (Days)",
+        "Emergency Used (Days)",
+        "Emergency Remaining (Days)",
+        "Study Entitlement (Days)",
+        "Study Used (Days)",
+        "Study Remaining (Days)",
+      ],
+      rows,
+    );
+    toast.success(`Exported ${rows.length} records.`);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -104,7 +150,10 @@ export function LeaveBalancesPage() {
             Employee leave entitlements — 2026 leave year
           </p>
         </div>
-        <button className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+        >
           <Download className="w-3.5 h-3.5" /> Export
         </button>
       </div>

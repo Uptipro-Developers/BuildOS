@@ -1,10 +1,18 @@
 import { useState, useEffect } from "react";
 import { Download, FileText, Search } from "lucide-react";
+import { toast } from "sonner";
 import { getPayslips } from "../../api/hr-extras";
 import {
   formatCurrencyByGeneralSettings,
   formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
+import {
+  documentFooter,
+  documentHeader,
+  escapeHtml,
+  printDocument,
+} from "../../utils/printDocument";
+import { useAuthUser } from "../../utils/useAuthUser";
 
 interface Payslip {
   id: string;
@@ -24,6 +32,47 @@ export function PayslipHistoryPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Payslip | null>(null);
   const [payslips, setPayslips] = useState<Payslip[]>([]);
+  const { name: employeeName, email: employeeEmail } = useAuthUser();
+
+  /**
+   * Renders a payslip as a printable document. "Download PDF" goes through the
+   * browser's print dialog, where "Save as PDF" produces the actual file.
+   */
+  const downloadPayslip = (p: Payslip) => {
+    const row = (label: string, value: string, cls = "") =>
+      `<tr><td>${escapeHtml(label)}</td>` +
+      `<td class="num ${cls}">${escapeHtml(value)}</td></tr>`;
+
+    const body =
+      documentHeader("Payslip", `Pay period: ${p.period}`, [
+        ["Payslip ID", p.id],
+        ["Status", p.status],
+        ["Paid on", p.paidOn],
+      ]) +
+      `<div class="doc-section"><h2>Employee</h2><table class="kv">` +
+      `<tr><td>Name</td><td>${escapeHtml(employeeName || "—")}</td></tr>` +
+      `<tr><td>Email</td><td>${escapeHtml(employeeEmail || "—")}</td></tr>` +
+      `<tr><td>Pay period</td><td>${escapeHtml(p.period)}</td></tr>` +
+      `</table></div>` +
+      `<div class="doc-section"><h2>Earnings and deductions</h2><table>` +
+      `<thead><tr><th>Description</th><th class="num">Amount</th></tr></thead><tbody>` +
+      row("Gross pay", fmt(p.grossPay)) +
+      row("Deductions (tax and pension)", `-${fmt(p.deductions)}`, "negative") +
+      `<tr class="net"><td>Net pay</td><td class="num">${escapeHtml(fmt(p.netPay))}</td></tr>` +
+      `</tbody></table></div>` +
+      documentFooter(
+        formatDateByGeneralSettings(new Date()),
+        "This payslip is issued for the employee's records.",
+      );
+
+    try {
+      printDocument(`Payslip ${p.period}`, body);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Unable to open the payslip.",
+      );
+    }
+  };
 
   useEffect(() => {
     getPayslips()
@@ -158,6 +207,7 @@ export function PayslipHistoryPage() {
                     <FileText className="w-4 h-4" />
                   </button>
                   <button
+                    onClick={() => downloadPayslip(p)}
                     className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-teal-600"
                     title="Download PDF"
                   >
@@ -239,7 +289,10 @@ export function PayslipHistoryPage() {
               >
                 Close
               </button>
-              <button className="px-4 py-2 text-sm bg-teal-600 text-white rounded-xl hover:bg-teal-700 flex items-center gap-2">
+              <button
+                onClick={() => downloadPayslip(selected)}
+                className="px-4 py-2 text-sm bg-teal-600 text-white rounded-xl hover:bg-teal-700 flex items-center gap-2"
+              >
                 <Download className="w-4 h-4" /> Download PDF
               </button>
             </div>

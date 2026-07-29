@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { getCurrencySymbol } from "../../utils/generalSettings";
+import { toast } from "sonner";
+import { csvAmountHeader, getCurrencySymbol } from "../../utils/generalSettings";
+import { exportCSV, type CsvCell } from "../../utils/exportCSV";
 import {
   Package,
   TrendingDown,
@@ -90,6 +92,7 @@ export function ProcurementReportsPage() {
   const recentRuns = [
     {
       id: "LIVE-STOCK",
+      reportId: "stock",
       name: "Stock Report",
       format: "Live",
       runBy: "System",
@@ -98,6 +101,7 @@ export function ProcurementReportsPage() {
     },
     {
       id: "LIVE-SPEND",
+      reportId: "spend",
       name: "Procurement Spend",
       format: "Live",
       runBy: "System",
@@ -203,6 +207,139 @@ export function ProcurementReportsPage() {
     },
   ];
 
+  // Dates from the API arrive pre-formatted for display; turn them back into
+  // real dates so the CSV column stays sortable.
+  const toCsvDate = (value: string | null | undefined): CsvCell => {
+    if (!value) return "";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d;
+  };
+
+  function exportReport(reportId: string) {
+    let headers: string[];
+    let rows: CsvCell[][];
+
+    if (reportId === "stock") {
+      headers = [
+        "Material",
+        "Category",
+        "Unit",
+        "Total Qty",
+        "Available Qty",
+        "Reserved Qty",
+        "Reorder Level",
+        csvAmountHeader("Unit Cost"),
+        csvAmountHeader("Stock Value"),
+      ];
+      rows = materials.map((m) => {
+        const available = m.availableQty ?? m.totalQty ?? 0;
+        return [
+          m.name,
+          m.category,
+          m.unit,
+          m.totalQty ?? 0,
+          available,
+          m.reservedQty ?? 0,
+          m.reorderLevel ?? 0,
+          m.unitCost ?? 0,
+          available * (m.unitCost ?? 0),
+        ];
+      });
+    } else if (reportId === "consumption") {
+      headers = [
+        "Reference",
+        "Material",
+        "Quantity",
+        "Unit",
+        "Store",
+        "Project",
+        "Purpose",
+        "Priority",
+        "Status",
+        "Requested By",
+        "Request Date",
+      ];
+      rows = requests.map((r) => [
+        r.reference,
+        r.materialName,
+        r.qty ?? 0,
+        r.unit,
+        r.storeName,
+        r.projectName ?? "",
+        r.purpose ?? "",
+        r.priority ?? "",
+        r.status,
+        r.requestedBy ?? "",
+        toCsvDate(r.requestDate),
+      ]);
+    } else if (reportId === "spend") {
+      headers = [
+        "PO Reference",
+        "Supplier",
+        "Status",
+        "Payment Status",
+        "Items",
+        csvAmountHeader("Total Value"),
+        csvAmountHeader("Received Value"),
+        "Created By",
+        "Created Date",
+        "Expected Date",
+      ];
+      rows = purchaseOrders.map((po) => [
+        po.prRef || po.id,
+        po.supplier,
+        po.status,
+        po.paymentStatus,
+        po.totalItems ?? 0,
+        po.totalValue ?? 0,
+        po.receivedValue ?? 0,
+        po.createdBy,
+        toCsvDate(po.createdDate),
+        toCsvDate(po.expectedDate),
+      ]);
+    } else {
+      headers = [
+        "Supplier",
+        "Contact Person",
+        "Phone",
+        "Email",
+        "City",
+        "Categories",
+        "Rating",
+        "On-Time Delivery Rate (%)",
+        "Reject Rate (%)",
+        "Active POs",
+        csvAmountHeader("Total Spend"),
+        "Last Order",
+        "Status",
+      ];
+      rows = suppliers.map((s) => [
+        s.name,
+        s.contactPerson,
+        s.phone,
+        s.email,
+        s.city,
+        Array.isArray(s.category) ? s.category.join("; ") : (s.category ?? ""),
+        s.rating ?? 0,
+        s.onTimeDeliveryRate ?? 0,
+        s.rejectRate ?? 0,
+        s.activePOs ?? 0,
+        s.totalSpend ?? 0,
+        toCsvDate(s.lastOrder),
+        s.status,
+      ]);
+    }
+
+    const filenames: Record<string, string> = {
+      stock: "procurement-materials",
+      consumption: "procurement-material-requests",
+      spend: "procurement-spend",
+      supplier: "procurement-suppliers",
+    };
+    exportCSV(filenames[reportId] ?? "procurement-report", headers, rows);
+    toast.success(`Exported ${rows.length} records.`);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -271,7 +408,10 @@ export function ProcurementReportsPage() {
                 <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-300 bg-white rounded-md hover:bg-gray-50 font-medium">
                   <RefreshCw className="w-3 h-3" /> Run Now
                 </button>
-                <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-900 text-white rounded-md hover:bg-gray-800 font-medium">
+                <button
+                  onClick={() => exportReport(report.id)}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-900 text-white rounded-md hover:bg-gray-800 font-medium"
+                >
                   <Download className="w-3 h-3" /> Export
                 </button>
               </div>
@@ -421,7 +561,10 @@ export function ProcurementReportsPage() {
                 <td className="px-4 py-3 text-gray-500">{r.date}</td>
                 <td className="px-4 py-3 text-gray-500">{r.time}</td>
                 <td className="px-4 py-3">
-                  <button className="flex items-center gap-1 text-xs text-blue-700 hover:text-blue-800 font-medium">
+                  <button
+                    onClick={() => exportReport(r.reportId)}
+                    className="flex items-center gap-1 text-xs text-blue-700 hover:text-blue-800 font-medium"
+                  >
                     <Download className="w-3.5 h-3.5" /> Download
                   </button>
                 </td>

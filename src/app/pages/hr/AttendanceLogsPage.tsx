@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { getAttendance } from "../../api/hr-extras";
+import { exportCSV } from "../../utils/exportCSV";
 import {
   Search,
   Download,
@@ -137,6 +139,37 @@ export function AttendanceLogsPage() {
     totalHrs: filtered.reduce((s, l) => s + l.hrs, 0).toFixed(1),
   };
 
+  function handleExport() {
+    // Export what the user is looking at, not the raw unfiltered log.
+    const rows = filtered.map((l) => [
+      l.date,
+      l.empId,
+      l.empName,
+      l.department,
+      l.checkIn === "—" ? "" : l.checkIn,
+      l.checkOut === "—" ? "" : l.checkOut,
+      l.hrs,
+      statusConfig[l.status]?.label ?? String(l.status ?? ""),
+      l.note,
+    ]);
+    exportCSV(
+      "attendance-logs",
+      [
+        "Date",
+        "Employee ID",
+        "Employee",
+        "Department",
+        "Check In",
+        "Check Out",
+        "Hours Worked",
+        "Status",
+        "Note",
+      ],
+      rows,
+    );
+    toast.success(`Exported ${rows.length} records.`);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -148,7 +181,10 @@ export function AttendanceLogsPage() {
             Historical attendance records for all employees
           </p>
         </div>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+        >
           <Download className="w-3.5 h-3.5" /> Export Logs
         </button>
       </div>

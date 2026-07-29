@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { getCurrencySymbol } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  getCurrencySymbol,
+} from "../../utils/generalSettings";
+import { exportCSV } from "../../utils/exportCSV";
 import {
   getAttendance,
   getPayrollRuns,
@@ -224,6 +228,72 @@ export function HRReportsPage() {
     }, 1500);
   }
 
+  function exportReport(type: ReportType) {
+    const periodSlug = period.replace(/\s+/g, "-").toLowerCase();
+    let rows: (string | number)[][];
+    if (type === "attendance") {
+      rows = attendancePreview.map((r) => [
+        r.dept,
+        r.employees,
+        r.present,
+        r.absent,
+        r.late,
+        r.avgHrs,
+        r.presenceRate,
+      ]);
+      exportCSV(
+        `attendance-report-${periodSlug}`,
+        [
+          "Department",
+          "Employees",
+          "Present Sessions",
+          "Absences",
+          "Late Arrivals",
+          "Average Hours",
+          "Presence Rate (%)",
+        ],
+        rows,
+      );
+    } else if (type === "workforce") {
+      rows = workforcePreview.map((r) => [
+        r.project,
+        r.headcount,
+        r.avgAlloc,
+        r.overAllocated,
+      ]);
+      exportCSV(
+        `workforce-utilization-report-${periodSlug}`,
+        [
+          "Project",
+          "Personnel",
+          "Average Allocation (%)",
+          "Over-Allocated Employees",
+        ],
+        rows,
+      );
+    } else {
+      rows = payrollPreview.map((r) => [
+        r.dept,
+        r.employees,
+        r.grossTotal,
+        r.grossTotal - r.netTotal,
+        r.netTotal,
+      ]);
+      exportCSV(
+        `payroll-summary-report-${periodSlug}`,
+        [
+          "Department",
+          "Employees",
+          csvAmountHeader("Gross Pay"),
+          csvAmountHeader("Deductions"),
+          csvAmountHeader("Net Pay"),
+        ],
+        rows,
+      );
+    }
+    toast.success(`Exported ${rows.length} records.`);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -294,7 +364,10 @@ export function HRReportsPage() {
               </button>
               <button
                 className="p-1.5 border border-gray-300 rounded hover:bg-gray-50"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  exportReport(r.type);
+                }}
               >
                 <Download className="w-3.5 h-3.5 text-gray-500" />
               </button>
@@ -317,7 +390,10 @@ export function HRReportsPage() {
               · {period}
             </p>
           </div>
-          <button className="flex items-center gap-1.5 text-sm text-indigo-700 hover:underline">
+          <button
+            onClick={() => exportReport(activeReport)}
+            className="flex items-center gap-1.5 text-sm text-indigo-700 hover:underline"
+          >
             <Download className="w-3.5 h-3.5" /> Export
           </button>
         </div>
