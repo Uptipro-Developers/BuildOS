@@ -595,6 +595,15 @@ export function ReportBuilderPage() {
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Run has to re-execute even when the configuration has not changed, so it
+  // cannot rely on the request key alone. Previously it only flipped `hasRun`,
+  // which meant clicking it did nothing observable.
+  const [runNonce, setRunNonce] = useState(0);
+
+  const runNow = () => {
+    setHasRun(true);
+    setRunNonce((n) => n + 1);
+  };
 
   // Derived fields (joins, concatenations, counts) are computed after loading, so
   // the database cannot filter or sort by them. Offering them silently did
@@ -726,7 +735,7 @@ export function ReportBuilderPage() {
     return () => {
       alive = false;
     };
-  }, [requestKey]);
+  }, [requestKey, runNonce]);
 
   useEffect(() => {
     getReportTemplates<ReportTemplate>()
@@ -1572,7 +1581,7 @@ export function ReportBuilderPage() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <button
-                onClick={() => setHasRun(true)}
+                onClick={runNow}
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors"
               >
                 <Play className="w-3.5 h-3.5" />
@@ -1649,7 +1658,7 @@ export function ReportBuilderPage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => setHasRun(true)}
+                      onClick={runNow}
                       className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
                     >
                       <Play className="w-4 h-4" />
@@ -1907,11 +1916,12 @@ export function ReportBuilderPage() {
                       Copy SQL
                     </button>
                     <button
-                      onClick={() => setHasRun(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
+                      onClick={runNow}
+                      disabled={previewLoading || !source.value}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60 transition-colors"
                     >
                       <Play className="w-3.5 h-3.5" />
-                      Run Query
+                      {previewLoading ? "Running…" : "Run Query"}
                     </button>
                   </div>
                 </div>
@@ -1920,8 +1930,15 @@ export function ReportBuilderPage() {
                     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                       <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
                         <span className="text-xs text-gray-500">
-                          {previewData.length} rows
+                          {previewLoading
+                            ? "Running…"
+                            : `${previewData.length} of ${previewMeta?.total ?? previewData.length} rows`}
                         </span>
+                        {previewError && (
+                          <span className="text-xs text-red-600 truncate max-w-[420px]">
+                            {previewError}
+                          </span>
+                        )}
                         <button
                           onClick={() => exportPreviewCSV(displayColumns)}
                           className="ml-auto flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50"

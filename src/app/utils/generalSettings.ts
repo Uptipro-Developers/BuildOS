@@ -10,11 +10,14 @@ export interface GeneralSettingsConfig {
 }
 
 const defaultGeneralSettings: GeneralSettingsConfig = {
-  currency: "USD",
-  currencySymbol: "$",
-  timezone: "America/New_York",
-  dateFormat: "MM/DD/YYYY",
-  timeFormat: "12",
+  // Nigerian defaults: BuildOS is deployed for a Nigerian construction group.
+  // These are only the fallback for a fresh install — Admin → General Settings
+  // overrides them, and every formatter reads the configured value, not these.
+  currency: "NGN",
+  currencySymbol: "₦",
+  timezone: "Africa/Lagos",
+  dateFormat: "DD/MM/YYYY",
+  timeFormat: "24",
   numberFormat: "1,234.56",
   fiscalYearStart: "01",
   language: "en",

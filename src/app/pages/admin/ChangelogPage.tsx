@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Search, RotateCcw, Filter } from "lucide-react";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
+import {
+  formatDateTimeByGeneralSettings,
+} from "../../utils/generalSettings";
 
 const MODULES = ["Finance", "HR", "Procurement", "Projects", "Admin", "ESS", "Storefront"];
 
@@ -32,7 +35,7 @@ export function ChangelogPage() {
     { key: "entity", label: "Entity", render: e => <span className="text-xs text-gray-400">{e.entityType} · {e.entityId}</span>, sortable: true, filterable: true, minWidth: 140 },
     { key: "summary", label: "Summary", render: e => <span className="text-sm text-gray-700">{e.summary}</span>, sortable: true, filterable: true, minWidth: 250 },
     { key: "timestamp", label: "Timestamp", render: e => (
-      <span className="text-xs text-gray-400 whitespace-nowrap">{new Date(e.timestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+      <span className="text-xs text-gray-400 whitespace-nowrap">{formatDateTimeByGeneralSettings(e.timestamp)}</span>
     ), sortable: true, filterable: false, minWidth: 140 },
     { key: "performedBy", label: "By", render: e => <span className="text-xs text-gray-500">{e.performedBy}</span>, sortable: true, filterable: true },
   ];

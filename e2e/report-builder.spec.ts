@@ -187,3 +187,26 @@ test("the Application select scopes the data sources, and SQL tracks the inputs"
   await expect(editor).toBeVisible({ timeout: 10_000 });
   await expect(editor).toHaveValue(/SELECT[\s\S]+FROM \w+[\s\S]+LIMIT \d+;/);
 });
+
+test("Run Query executes and reports results in SQL mode", async ({ page }) => {
+  await givenLoggedInAsAdmin(page);
+  await page.goto("/apps/admin/report-builder");
+
+  await page.getByRole("button", { name: /New Template/i }).first().click();
+  await page.getByRole("button", { name: /^SQL$/i }).click();
+
+  const run = page.getByRole("button", { name: /Run Query/i });
+  await expect(run).toBeVisible({ timeout: 15_000 });
+
+  // Run used to only flip a flag, so pressing it produced nothing observable.
+  // It must issue a request and report a row count.
+  const call = page.waitForResponse(
+    (r) => r.url().includes("/reports/run") && r.request().method() === "POST",
+    { timeout: 15_000 },
+  );
+  await run.click();
+  const response = await call;
+  expect(response.ok()).toBeTruthy();
+
+  await expect(page.getByText(/\d+ of \d+ rows/)).toBeVisible({ timeout: 15_000 });
+});

@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
-  getCurrencySymbol,
+  formatCurrencyByGeneralSettings,
   formatDateByGeneralSettings,
+  getCurrencySymbol,
 } from "../../utils/generalSettings";
 import {
   CheckCircle,
@@ -1178,7 +1179,7 @@ function ExpenseForm({
       <ConfirmationModal
         isOpen={showConfirm}
         title="Submit Expense Claim?"
-        description={`This will submit an expense claim of $${Number(formState.amount || 0).toLocaleString()} under the "General" category for ${formState.project}. It will be routed for approval once submitted.`}
+        description={`This will submit an expense claim of ${formatCurrencyByGeneralSettings(Number(formState.amount || 0))} under the "General" category for ${formState.project}. It will be routed for approval once submitted.`}
         confirmLabel="Submit Request"
         isLoading={submitting}
         onConfirm={submitRequest}

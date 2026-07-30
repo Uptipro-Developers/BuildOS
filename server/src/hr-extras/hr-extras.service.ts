@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+    BadRequestException,
+    ConflictException,
+    Injectable,
+    NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const HR_SETUP_KEY = 'hr-setup';
@@ -26,6 +31,173 @@ export class HrExtrasService {
     }
     findAttendance(id: string) {
         return this.prisma.attendanceRecord.findUniqueOrThrow({ where: { id } });
+    }
+
+    // ── Self-service clock in / out ──
+    //
+    // The employee is always resolved from the authenticated user, never from the
+    // request body. The generic POST /attendance takes an employeeId, so trusting
+    // one here would let any signed-in user record attendance for anybody.
+
+    /** The Employee row behind a User id, matching by link first then by email. */
+    private async employeeForUser(userId: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, name: true },
+        });
+        if (!user) throw new NotFoundException('Signed-in user not found');
+
+        const employee = await this.prisma.employee.findFirst({
+            where: { OR: [{ userId: user.id }, { email: user.email }] },
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                department: { select: { name: true } },
+            },
+        });
+        if (!employee) {
+            throw new BadRequestException(
+                'No employee record is linked to your account. Ask HR to link it before clocking in.',
+            );
+        }
+        return {
+            id: employee.id,
+            name: `${employee.firstName} ${employee.lastName}`.trim() || user.name,
+            department: employee.department?.name ?? '—',
+        };
+    }
+
+    /** Today's record for an employee, in the server's local day. */
+    private async todaysAttendance(employeeId: string) {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+
+        return this.prisma.attendanceRecord.findFirst({
+            where: { employeeId, date: { gte: start, lt: end } },
+            orderBy: { date: 'desc' },
+        });
+    }
+
+    /** "HH:MM" local time. */
+    private clockTime(at = new Date()) {
+        return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+    }
+
+    private toMinutes(value: string): number | null {
+        const match = /^(\d{1,2}):(\d{2})/.exec(value ?? '');
+        if (!match) return null;
+        const hours = Number(match[1]);
+        const minutes = Number(match[2]);
+        if (hours > 23 || minutes > 59) return null;
+        return hours * 60 + minutes;
+    }
+
+    /** Hours between two "HH:MM" values, allowing a shift past midnight. */
+    private hoursBetween(clockIn: string, clockOut: string): number {
+        const from = this.toMinutes(clockIn);
+        const to = this.toMinutes(clockOut);
+        if (from === null || to === null) return 0;
+        const span = to >= from ? to - from : to + 24 * 60 - from;
+        return Math.round((span / 60) * 10) / 10;
+    }
+
+    /**
+     * Whether a clock-in counts as late, from HR Setup.
+     *
+     * Returns `present` when no workday start is configured: guessing a start time
+     * would silently mark staff late against a number nobody chose.
+     */
+    private async statusForClockIn(clockIn: string): Promise<'present' | 'late'> {
+        const setup = (await this.getHrSetup()) as Record<string, unknown>;
+        const start = String(setup?.workDayStart ?? '').trim();
+        const startMinutes = this.toMinutes(start);
+        if (startMinutes === null) return 'present';
+
+        const grace = Number(setup?.lateGraceMinutes ?? 0);
+        const inMinutes = this.toMinutes(clockIn);
+        if (inMinutes === null) return 'present';
+
+        return inMinutes > startMinutes + (Number.isFinite(grace) ? grace : 0)
+            ? 'late'
+            : 'present';
+    }
+
+    /** The caller's own attendance state for today, for the ESS clock-in screen. */
+    async myAttendanceToday(userId: string) {
+        const employee = await this.employeeForUser(userId);
+        const record = await this.todaysAttendance(employee.id);
+        const setup = (await this.getHrSetup()) as Record<string, unknown>;
+
+        return {
+            employeeId: employee.id,
+            employeeName: employee.name,
+            department: employee.department,
+            record,
+            clockedIn: Boolean(record?.clockIn),
+            clockedOut: Boolean(record?.clockOut),
+            workDayStart: String(setup?.workDayStart ?? '') || null,
+            lateGraceMinutes: Number(setup?.lateGraceMinutes ?? 0) || 0,
+        };
+    }
+
+    async clockIn(userId: string) {
+        const employee = await this.employeeForUser(userId);
+        const existing = await this.todaysAttendance(employee.id);
+
+        if (existing?.clockIn) {
+            throw new ConflictException(
+                `You already clocked in at ${existing.clockIn} today.`,
+            );
+        }
+
+        const time = this.clockTime();
+        const status = await this.statusForClockIn(time);
+
+        if (existing) {
+            // HR may have already marked them (e.g. absent); clocking in corrects it.
+            return this.prisma.attendanceRecord.update({
+                where: { id: existing.id },
+                data: { clockIn: time, status, hoursWorked: 0 },
+            });
+        }
+
+        return this.prisma.attendanceRecord.create({
+            data: {
+                employeeId: employee.id,
+                employeeName: employee.name,
+                department: employee.department,
+                date: new Date(),
+                clockIn: time,
+                status,
+                hoursWorked: 0,
+            },
+        });
+    }
+
+    async clockOut(userId: string) {
+        const employee = await this.employeeForUser(userId);
+        const existing = await this.todaysAttendance(employee.id);
+
+        if (!existing?.clockIn) {
+            throw new BadRequestException('You have not clocked in today.');
+        }
+        if (existing.clockOut) {
+            throw new ConflictException(
+                `You already clocked out at ${existing.clockOut} today.`,
+            );
+        }
+
+        const time = this.clockTime();
+        return this.prisma.attendanceRecord.update({
+            where: { id: existing.id },
+            data: {
+                clockOut: time,
+                hoursWorked: this.hoursBetween(existing.clockIn, time),
+            },
+        });
     }
     createAttendance(data: any) {
         return this.prisma.attendanceRecord.create({ data });

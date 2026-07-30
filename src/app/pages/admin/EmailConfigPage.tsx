@@ -162,7 +162,17 @@ const BLANK_FORM: Omit<EmailConfig, "id"> = {
 export function EmailConfigPage() {
   const [configs, setConfigs] = useState<EmailConfig[]>([]);
   const [showModal, setShowModal] = useState(false);
+
   const [editId, setEditId] = useState<string | null>(null);
+
+  /**
+   * Trigger events that already have a configuration, so the picker can rule them
+   * out. Excludes the config being edited — otherwise editing one would report its
+   * own trigger as taken.
+   */
+  const configuredTriggers = new Set(
+    configs.filter((c) => c.id !== editId).map((c) => c.trigger),
+  );
   const [form, setForm] = useState({ ...BLANK_FORM });
   const [saved, setSaved] = useState(false);
   const [deletingConfig, setDeletingConfig] = useState<EmailConfig | null>(null);
@@ -440,9 +450,20 @@ export function EmailConfigPage() {
                     }
                   >
                     <option value="">Select trigger…</option>
-                    {(TRIGGERS_BY_MODULE[form.module] ?? []).map((t) => (
-                      <option key={t}>{t}</option>
-                    ))}
+                    {/* A trigger event can only have one configuration: two would
+                        make which template fires arbitrary. Events already
+                        configured are shown but disabled, so it is clear they
+                        exist rather than silently missing from the list. The
+                        config being edited stays selectable. */}
+                    {(TRIGGERS_BY_MODULE[form.module] ?? []).map((t) => {
+                      const taken = configuredTriggers.has(t);
+                      return (
+                        <option key={t} value={t} disabled={taken}>
+                          {t}
+                          {taken ? " — already configured" : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>

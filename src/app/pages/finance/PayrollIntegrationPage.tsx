@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
+  formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
@@ -149,10 +150,10 @@ export function PayrollIntegrationPage() {
         submittedBy: next === "Sent for Approval" ? (getAuthUserName() || "Current User") : p.submittedBy,
         approvedBy: next === "Approved" ? (getAuthUserName() || "Finance Manager") : p.approvedBy,
         approvedAt: next === "Approved"
-          ? new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          ? formatDateByGeneralSettings(new Date())
           : p.approvedAt,
         paidAt: next === "Paid"
-          ? new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          ? formatDateByGeneralSettings(new Date())
           : p.paidAt,
       };
     }));

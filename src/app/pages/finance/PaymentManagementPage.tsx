@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
+  formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import { fetchPayments } from "../../api/payments";
@@ -162,7 +163,7 @@ export function PaymentManagementPage() {
         status: next,
         initiatedBy: next === "Payment Initiated" ? (getAuthUserName() || "Current User") : p.initiatedBy,
         completedAt: next === "Payment Completed"
-          ? new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          ? formatDateByGeneralSettings(new Date())
           : p.completedAt,
       };
     }));

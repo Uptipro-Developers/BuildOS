@@ -14,7 +14,12 @@ import {
 } from "../../api/accruals";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import { exportCSV } from "../../utils/exportCSV";
-import { csvAmountHeader } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+  formatNumberByGeneralSettings,
+  getCurrencySymbol,
+} from "../../utils/generalSettings";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import type {
@@ -30,7 +35,10 @@ const ACCRUAL_STATUSES: AccrualStatus[] = [
 
 const SOURCE_MODULES = ["Procurement", "HR", "Finance", "Projects", "ESS", "Storefront"];
 
-const fmt = (n: number) => `₦${n.toLocaleString()}`;
+const fmt = (n: number) =>
+  formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
+/** Bare number, for columns that carry the currency in their header instead. */
+const num = (n: number) => formatNumberByGeneralSettings(n);
 
 const APPROVAL_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -210,12 +218,12 @@ export function AccrualsPage() {
     ), sortable: true, filterable: true, minWidth: 200 },
     { key: "lines", label: "Lines", render: a => (
       <div className="space-y-0.5">{a.lines.filter(l => l.debit > 0).map(l => (
-        <p key={l.id} className="text-xs font-mono text-gray-600">{l.account} <span className="text-emerald-600">₦{l.debit.toLocaleString()} DR</span></p>
+        <p key={l.id} className="text-xs font-mono text-gray-600">{l.account} <span className="text-emerald-600">{fmt(l.debit)} DR</span></p>
       ))}{a.lines.filter(l => l.credit > 0).map(l => (
-        <p key={l.id} className="text-xs font-mono text-gray-400">{l.account} <span className="text-amber-600">₦{l.credit.toLocaleString()} CR</span></p>
+        <p key={l.id} className="text-xs font-mono text-gray-400">{l.account} <span className="text-amber-600">{fmt(l.credit)} CR</span></p>
       ))}</div>
     ), sortable: false, filterable: false, minWidth: 200 },
-    { key: "amount", label: "Amount (₦)", render: a => (
+    { key: "amount", label: csvAmountHeader("Amount"), render: a => (
       <span className="text-sm font-semibold text-gray-900">{fmt(a.amount)}</span>
     ), sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
     { key: "status", label: "Status", render: a => (
@@ -373,8 +381,8 @@ export function AccrualsPage() {
                       <tr>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Account</th>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Description</th>
-                        <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Debit (₦)</th>
-                        <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Credit (₦)</th>
+                        <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Debit ({getCurrencySymbol()})</th>
+                        <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Credit ({getCurrencySymbol()})</th>
                         <th className="w-10 px-4 py-2" />
                       </tr>
                     </thead>
@@ -411,8 +419,8 @@ export function AccrualsPage() {
                     <tfoot className="bg-gray-50 border-t border-gray-100">
                       <tr>
                         <td colSpan={2} className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Total</td>
-                        <td className="px-4 py-2 text-right text-sm font-semibold text-emerald-700">{totalDebits.toLocaleString()}</td>
-                        <td className="px-4 py-2 text-right text-sm font-semibold text-amber-700">{totalCredits.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right text-sm font-semibold text-emerald-700">{num(totalDebits)}</td>
+                        <td className="px-4 py-2 text-right text-sm font-semibold text-amber-700">{num(totalCredits)}</td>
                         <td />
                       </tr>
                     </tfoot>

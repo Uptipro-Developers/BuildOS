@@ -1,6 +1,8 @@
-import { Plus, Edit, Trash2, Mail, Bell } from "lucide-react";
+import { Plus, Edit, Trash2, Mail, Bell, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { apiFetch } from "../../api/client";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getEmailTemplates,
   getNotificationRules,
@@ -34,162 +36,160 @@ export function NotificationsPage() {
         setEmailTemplates(templates as EmailTemplate[]);
         setNotificationRules(rules as NotificationRule[]);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setEmailTemplates([]);
         setNotificationRules([]);
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Failed to load templates and rules.",
+        );
       });
   }, []);
 
-  const addTemplate = async () => {
-    const name = window.prompt("Template name", "New Template")?.trim();
-    if (!name) return;
-    const subject =
-      window.prompt("Email subject", "Subject")?.trim() ?? "Subject";
-    const trigger = window.prompt("Trigger", "On event")?.trim() ?? "On event";
-    const payload = { name, subject, trigger };
-    try {
-      const created = await apiFetch<EmailTemplate>("/admin/email-templates", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      setEmailTemplates((prev) => [created, ...prev]);
-    } catch {
-      setEmailTemplates((prev) => [
-        { id: `tpl-${Date.now()}`, ...payload },
-        ...prev,
-      ]);
-    }
+  // ── Modal state ──
+  // Every action here used to run through window.prompt/confirm — one browser
+  // dialog per field, no validation, and no way to cancel halfway. Each catch also
+  // swallowed the error and kept the local change, so a failed save looked
+  // successful and vanished on refresh.
+  const [templateForm, setTemplateForm] = useState<EmailTemplate | null>(null);
+  const [ruleForm, setRuleForm] = useState<NotificationRule | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "template" | "rule"; id: string; name: string } | null
+  >(null);
+  const [busy, setBusy] = useState(false);
+
+  const BLANK_TEMPLATE: EmailTemplate = {
+    id: "",
+    name: "",
+    subject: "",
+    trigger: "",
+  };
+  const BLANK_RULE: NotificationRule = {
+    id: "",
+    name: "",
+    event: "",
+    recipients: "",
+    channels: ["Email"],
+    enabled: true,
   };
 
-  const editTemplate = async (id: string) => {
-    const current = emailTemplates.find((t) => t.id === id);
-    if (!current) return;
-    const name = window.prompt("Template name", current.name)?.trim();
-    if (!name) return;
-    const subject =
-      window.prompt("Email subject", current.subject)?.trim() ??
-      current.subject;
-    const trigger =
-      window.prompt("Trigger", current.trigger)?.trim() ?? current.trigger;
-
-    setEmailTemplates((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, name, subject, trigger } : t)),
-    );
-
+  const saveTemplate = async () => {
+    if (!templateForm) return;
+    const { id, ...payload } = templateForm;
+    setBusy(true);
     try {
-      await apiFetch(`/admin/email-templates/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name, subject, trigger }),
-      });
-    } catch {
-      // Keep local update when endpoint is unavailable.
-    }
-  };
-
-  const deleteTemplate = async (id: string) => {
-    if (!window.confirm("Delete this template?")) return;
-    try {
-      await apiFetch(`/admin/email-templates/${id}`, {
-        method: "DELETE",
-      });
-    } catch {
-      // Keep local deletion when endpoint is unavailable.
-    }
-    setEmailTemplates((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const addRule = async () => {
-    const name = window.prompt("Rule name", "New Rule")?.trim();
-    if (!name) return;
-    const event =
-      window.prompt("Event", "Custom Event")?.trim() ?? "Custom Event";
-    const recipients =
-      window.prompt("Recipients", "All Team Members")?.trim() ??
-      "All Team Members";
-    const channelsRaw = window.prompt(
-      "Channels (comma-separated)",
-      "Email,In-App",
-    );
-    const channels = (channelsRaw ?? "")
-      .split(",")
-      .map((c) => c.trim())
-      .filter(Boolean);
-    const payload = {
-      name,
-      event,
-      recipients,
-      channels: channels.length > 0 ? channels : ["Email"],
-      enabled: true,
-    };
-    try {
-      const created = await apiFetch<NotificationRule>(
-        "/admin/notification-rules",
-        {
+      if (id) {
+        const updated = await apiFetch<EmailTemplate>(
+          `/admin/email-templates/${id}`,
+          { method: "PATCH", body: JSON.stringify(payload) },
+        );
+        setEmailTemplates((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, ...updated } : t)),
+        );
+        toast.success(`Template "${payload.name}" updated.`);
+      } else {
+        const created = await apiFetch<EmailTemplate>("/admin/email-templates", {
           method: "POST",
           body: JSON.stringify(payload),
-        },
+        });
+        setEmailTemplates((prev) => [created, ...prev]);
+        toast.success(`Template "${payload.name}" created.`);
+      }
+      setTemplateForm(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the template.",
       );
-      setNotificationRules((prev) => [created, ...prev]);
-    } catch {
-      setNotificationRules((prev) => [
-        { id: `rule-${Date.now()}`, ...payload },
-        ...prev,
-      ]);
+    } finally {
+      setBusy(false);
     }
   };
 
-  const editRule = async (id: string) => {
-    const current = notificationRules.find((r) => r.id === id);
-    if (!current) return;
-    const name = window.prompt("Rule name", current.name)?.trim();
-    if (!name) return;
-    const event =
-      window.prompt("Event", current.event)?.trim() ?? current.event;
-    const recipients =
-      window.prompt("Recipients", current.recipients)?.trim() ??
-      current.recipients;
-
-    setNotificationRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, name, event, recipients } : r)),
-    );
-
+  const saveRule = async () => {
+    if (!ruleForm) return;
+    const { id, ...payload } = ruleForm;
+    setBusy(true);
     try {
-      await apiFetch(`/admin/notification-rules/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name, event, recipients }),
-      });
-    } catch {
-      // Keep local update when endpoint is unavailable.
+      if (id) {
+        const updated = await apiFetch<NotificationRule>(
+          `/admin/notification-rules/${id}`,
+          { method: "PATCH", body: JSON.stringify(payload) },
+        );
+        setNotificationRules((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, ...updated } : r)),
+        );
+        toast.success(`Rule "${payload.name}" updated.`);
+      } else {
+        const created = await apiFetch<NotificationRule>(
+          "/admin/notification-rules",
+          { method: "POST", body: JSON.stringify(payload) },
+        );
+        setNotificationRules((prev) => [created, ...prev]);
+        toast.success(`Rule "${payload.name}" created.`);
+      }
+      setRuleForm(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the rule.",
+      );
+    } finally {
+      setBusy(false);
     }
   };
 
-  const deleteRule = async (id: string) => {
-    if (!window.confirm("Delete this rule?")) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { kind, id, name } = deleteTarget;
+    const path =
+      kind === "template"
+        ? `/admin/email-templates/${id}`
+        : `/admin/notification-rules/${id}`;
+    setBusy(true);
     try {
-      await apiFetch(`/admin/notification-rules/${id}`, {
-        method: "DELETE",
-      });
-    } catch {
-      // Keep local deletion when endpoint is unavailable.
+      await apiFetch(path, { method: "DELETE" });
+      if (kind === "template") {
+        setEmailTemplates((prev) => prev.filter((t) => t.id !== id));
+      } else {
+        setNotificationRules((prev) => prev.filter((r) => r.id !== id));
+      }
+      toast.success(`"${name}" deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Failed to delete "${name}".`,
+      );
+    } finally {
+      setBusy(false);
     }
-    setNotificationRules((prev) => prev.filter((r) => r.id !== id));
   };
 
   const toggleRuleEnabled = async (id: string) => {
     const target = notificationRules.find((r) => r.id === id);
     if (!target) return;
     const nextEnabled = !target.enabled;
+
+    // Optimistic, then reverted on failure — the previous version kept the toggle
+    // regardless, so a rule could appear enabled while the server had it off.
+    setNotificationRules((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, enabled: nextEnabled } : r)),
+    );
     try {
       await apiFetch(`/admin/notification-rules/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ enabled: nextEnabled }),
       });
-    } catch {
-      // Keep local toggle when endpoint is unavailable.
+      toast.success(
+        `"${target.name}" ${nextEnabled ? "enabled" : "disabled"}.`,
+      );
+    } catch (err) {
+      setNotificationRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, enabled: target.enabled } : r)),
+      );
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update the rule.",
+      );
     }
-    setNotificationRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r)),
-    );
   };
 
   return (
@@ -214,7 +214,7 @@ export function NotificationsPage() {
             </h2>
           </div>
           <button
-            onClick={addTemplate}
+            onClick={() => setTemplateForm({ ...BLANK_TEMPLATE })}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -239,13 +239,19 @@ export function NotificationsPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => editTemplate(template.id)}
+                  onClick={() => setTemplateForm({ ...template })}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
                 >
                   <Edit className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => deleteTemplate(template.id)}
+                  onClick={() =>
+                    setDeleteTarget({
+                      kind: "template",
+                      id: template.id,
+                      name: template.name,
+                    })
+                  }
                   className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -266,7 +272,7 @@ export function NotificationsPage() {
             </h2>
           </div>
           <button
-            onClick={addRule}
+            onClick={() => setRuleForm({ ...BLANK_RULE })}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -311,13 +317,19 @@ export function NotificationsPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => editRule(rule.id)}
+                  onClick={() => setRuleForm({ ...rule })}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
                 >
                   <Edit className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => deleteRule(rule.id)}
+                  onClick={() =>
+                    setDeleteTarget({
+                      kind: "rule",
+                      id: rule.id,
+                      name: rule.name,
+                    })
+                  }
                   className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -371,6 +383,197 @@ export function NotificationsPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Add / Edit template ── */}
+      {templateForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">
+                {templateForm.id ? "Edit Email Template" : "Add Email Template"}
+              </h2>
+              <button
+                onClick={() => setTemplateForm(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              {(
+                [
+                  { key: "name", label: "Template Name", placeholder: "Leave Approved" },
+                  { key: "subject", label: "Email Subject", placeholder: "Your leave request was approved" },
+                  { key: "trigger", label: "Trigger Event", placeholder: "Leave request approved" },
+                ] as const
+              ).map((field) => (
+                <div key={field.key}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    {field.label} <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={templateForm[field.key]}
+                    placeholder={field.placeholder}
+                    onChange={(e) =>
+                      setTemplateForm((prev) =>
+                        prev ? { ...prev, [field.key]: e.target.value } : prev,
+                      )
+                    }
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="px-6 pb-5 flex justify-end gap-3">
+              <button
+                onClick={() => setTemplateForm(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveTemplate()}
+                disabled={
+                  busy ||
+                  !templateForm.name.trim() ||
+                  !templateForm.subject.trim() ||
+                  !templateForm.trigger.trim()
+                }
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {busy
+                  ? "Saving…"
+                  : templateForm.id
+                    ? "Save Changes"
+                    : "Add Template"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add / Edit notification rule ── */}
+      {ruleForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">
+                {ruleForm.id ? "Edit Notification Rule" : "Add Notification Rule"}
+              </h2>
+              <button
+                onClick={() => setRuleForm(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              {(
+                [
+                  { key: "name", label: "Rule Name", placeholder: "Notify on overdue approval" },
+                  { key: "event", label: "Event", placeholder: "Approval overdue" },
+                  { key: "recipients", label: "Recipients", placeholder: "All Team Members" },
+                ] as const
+              ).map((field) => (
+                <div key={field.key}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    {field.label} <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={ruleForm[field.key]}
+                    placeholder={field.placeholder}
+                    onChange={(e) =>
+                      setRuleForm((prev) =>
+                        prev ? { ...prev, [field.key]: e.target.value } : prev,
+                      )
+                    }
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                  Channels
+                </label>
+                {/* Checkboxes rather than the old comma-separated prompt, which
+                    accepted any text and silently produced invalid channels. */}
+                <div className="flex flex-wrap gap-3">
+                  {["Email", "In-App", "SMS"].map((channel) => {
+                    const on = ruleForm.channels.includes(channel);
+                    return (
+                      <label
+                        key={channel}
+                        className="flex items-center gap-2 text-sm text-gray-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() =>
+                            setRuleForm((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    channels: on
+                                      ? prev.channels.filter((c) => c !== channel)
+                                      : [...prev.channels, channel],
+                                  }
+                                : prev,
+                            )
+                          }
+                          className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        {channel}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="px-6 pb-5 flex justify-end gap-3">
+              <button
+                onClick={() => setRuleForm(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveRule()}
+                disabled={
+                  busy ||
+                  !ruleForm.name.trim() ||
+                  !ruleForm.event.trim() ||
+                  !ruleForm.recipients.trim() ||
+                  ruleForm.channels.length === 0
+                }
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {busy ? "Saving…" : ruleForm.id ? "Save Changes" : "Add Rule"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title={
+          deleteTarget?.kind === "template"
+            ? "Delete email template"
+            : "Delete notification rule"
+        }
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={busy}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

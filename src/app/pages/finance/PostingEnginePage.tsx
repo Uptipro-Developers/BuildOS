@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { getChartAccounts, getTransactions } from "../../api/finance-extras";
 import {
-  getCurrencySymbol,
-  formatNumberByGeneralSettings,
+  csvAmountHeader,
   formatDateByGeneralSettings,
+  formatNumberByGeneralSettings,
+  getCurrencySymbol,
 } from "../../utils/generalSettings";
 import {
   Zap,
@@ -721,7 +722,7 @@ function CategoryDetailView({
       <DataTable columns={[
         { key: "id", label: "Transaction ID", render: t => <span className="font-mono text-xs text-gray-500">{t.id}</span>, sortable: true, filterable: true, minWidth: 100 },
         { key: "description", label: "Description", render: t => <div><p className="font-medium text-gray-900 max-w-xs truncate">{t.description}</p><p className="text-xs text-gray-400 font-mono">{t.reference}</p></div>, sortable: true, filterable: true, minWidth: 200 },
-        { key: "amount", label: "Amount (₦)", render: t => <span className="text-sm font-semibold text-gray-800">{fmt(t.amount)}</span>, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
+        { key: "amount", label: csvAmountHeader("Amount"), render: t => <span className="text-sm font-semibold text-gray-800">{fmt(t.amount)}</span>, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
         { key: "date", label: "Date", render: t => <span className="text-xs text-gray-500">{t.date}</span>, sortable: true, filterable: false },
         { key: "submittedBy", label: "Submitted By", render: t => <span className="text-xs text-gray-600">{t.submittedBy}</span>, sortable: true, filterable: true },
         { key: "status", label: "Status", render: t => { const sc = STATUS_CFG[t.status]; return <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium ${sc.badge}`}>{sc.icon} {sc.label}</span>; }, sortable: true, filterable: true },

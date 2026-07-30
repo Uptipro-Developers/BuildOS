@@ -1,4 +1,5 @@
 import { apiFetch } from './client';
+import { formatDateByGeneralSettings } from '../utils/generalSettings';
 
 const statusMap: Record<string, string> = {
     Active: 'Active', Planning: 'Planning', OnHold: 'On Hold',
@@ -7,7 +8,7 @@ const statusMap: Record<string, string> = {
 
 function fmt(date: string | null) {
     if (!date) return '';
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDateByGeneralSettings(date);
 }
 
 function mapProject(p: any) {

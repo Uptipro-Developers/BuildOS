@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
+  formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
@@ -285,7 +286,7 @@ export function JournalEntryPage() {
     { key: "date", label: "Date", render: e => <span className="text-sm text-gray-600">{e.date}</span>, sortable: true, filterable: false },
     { key: "reference", label: "Reference", render: e => <span className="text-sm text-gray-600">{e.reference}</span>, sortable: true, filterable: true },
     { key: "description", label: "Description", render: e => <span className="text-sm text-gray-900 font-medium">{e.description}</span>, sortable: true, filterable: true, minWidth: 200 },
-    { key: "total", label: "Total (₦)", render: e => <span className="text-sm font-medium text-gray-900">{fmt(e.lines.reduce((s, l) => s + l.debit, 0))}</span>, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
+    { key: "total", label: csvAmountHeader("Total"), render: e => <span className="text-sm font-medium text-gray-900">{fmt(e.lines.reduce((s, l) => s + l.debit, 0))}</span>, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
     { key: "status", label: "Status", render: e => <span className={`px-2 py-0.5 text-xs rounded font-semibold ${STATUS_STYLES[e.status]}`}>{e.status}</span>, sortable: true, filterable: true },
     { key: "createdBy", label: "Created By", render: e => <span className="text-sm text-gray-500">{e.createdBy}</span>, sortable: true, filterable: true },
     { key: "actions", label: "Actions", render: e => (
@@ -577,8 +578,8 @@ export function JournalEntryPage() {
                     <tfoot className="bg-gray-50 border-t border-gray-200">
                       <tr>
                         <td colSpan={2} className="px-3 py-2 text-xs font-semibold text-gray-600 text-right">Totals:</td>
-                        <td className="px-3 py-2 text-xs font-bold text-emerald-700">{totalDebits.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-xs font-bold text-red-600">{totalCredits.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-xs font-bold text-emerald-700">{formatNumberByGeneralSettings(totalDebits)}</td>
+                        <td className="px-3 py-2 text-xs font-bold text-red-600">{formatNumberByGeneralSettings(totalCredits)}</td>
                         <td colSpan={2} className="px-3 py-2">
                           {totalDebits > 0 && (
                             <span

@@ -1,4 +1,5 @@
 import { apiFetch } from './client';
+import { formatDateByGeneralSettings } from '../utils/generalSettings';
 
 export const EMPLOYMENT_TYPE_TO_DISPLAY: Record<string, string> = { FullTime: 'Full-time', Contract: 'Contract' };
 export const EMPLOYMENT_TYPE_TO_BACKEND: Record<string, string> = { 'Full-time': 'FullTime', Contract: 'Contract' };
@@ -31,7 +32,7 @@ function mapEmployee(e: any) {
         personalEmail: e.email ?? '',
         phone: e.phone ?? '',
         personalPhone: e.phone ?? '',
-        dateHired: e.dateHired ? new Date(e.dateHired).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
+        dateHired: e.dateHired ? formatDateByGeneralSettings(e.dateHired) : '',
         dateHiredISO: toLocalDateInput(e.dateHired),
         employmentDate: toLocalDateInput(e.dateHired),
         employmentType: EMPLOYMENT_TYPE_TO_DISPLAY[e.employmentType] ?? e.employmentType,

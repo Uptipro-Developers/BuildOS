@@ -1,8 +1,15 @@
 import {
     Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query,
+    Param, Body, Query, Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { HrExtrasService } from './hr-extras.service';
+
+/** The JWT signs the user id as `sub`; older tokens used `id`. */
+function actingUserId(req: Request): string {
+    const user = req.user as any;
+    return String(user?.sub ?? user?.id ?? '');
+}
 
 @Controller()
 export class HrExtrasController {
@@ -15,6 +22,23 @@ export class HrExtrasController {
     }
     @Get('attendance/:id')
     getOne(@Param('id') id: string) { return this.svc.findAttendance(id); }
+
+    // ── Self-service clock in / out ──
+    // The employee is derived from the JWT, never from the body: the generic
+    // POST /attendance accepts an employeeId, so accepting one here would let any
+    // signed-in user record attendance for somebody else.
+    @Get('attendance/me/today')
+    myAttendanceToday(@Req() req: Request) {
+        return this.svc.myAttendanceToday(actingUserId(req));
+    }
+    @Post('attendance/me/clock-in')
+    clockIn(@Req() req: Request) {
+        return this.svc.clockIn(actingUserId(req));
+    }
+    @Post('attendance/me/clock-out')
+    clockOut(@Req() req: Request) {
+        return this.svc.clockOut(actingUserId(req));
+    }
     @Post('attendance')
     create(@Body() body: any) { return this.svc.createAttendance(body); }
     @Put('attendance/:id')

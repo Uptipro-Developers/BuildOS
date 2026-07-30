@@ -1,8 +1,9 @@
 import { apiFetch } from './client';
+import { formatDateByGeneralSettings } from '../utils/generalSettings';
 
 function fmt(date: string | null) {
     if (!date) return '';
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDateByGeneralSettings(date);
 }
 
 function mapPO(p: any) {

@@ -9,8 +9,27 @@ import {
   Hash,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+
+/** Shapes the edit forms work with; the lists themselves come back untyped. */
+interface AccountRow {
+  id: string;
+  name: string;
+  code: string;
+  type: string;
+}
+interface TaxRow {
+  id: string;
+  name: string;
+  rate: number;
+}
+interface MethodRow {
+  id: string;
+  name: string;
+}
 import { apiFetch } from "../../api/client";
 import { useNumbering, type ModuleNumbering } from "../../stores/numberingStore";
+import { toast } from "sonner";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getChartAccounts,
   getTaxConfigs,
@@ -91,105 +110,111 @@ export function FinancialConfigurationPage() {
     });
   };
 
-  const addAccount = async () => {
-    const name = window.prompt("Account name", "New Account")?.trim();
-    if (!name) return;
-    const code = window.prompt("Account code", "0000")?.trim() || "0000";
-    const type = window.prompt("Account type", "Asset")?.trim() || "Asset";
-    try {
-      const created = await createChartAccount({ name, code, type });
-      setChartOfAccounts((prev) => [
-        ...prev,
-        { id: created.id, name: created.name, code: created.code, type: created.type, parent: null },
-      ]);
-    } catch (err) {
-      console.error("Failed to add account:", err);
-      window.alert("Failed to add account. Please try again.");
-    }
-  };
+  // ── Modal state ──
+  // These three entities were all edited through chains of window.prompt: one
+  // browser dialog per field, no validation, no cancel, and errors surfaced with
+  // window.alert. Replaced with real forms, a confirmation for deletes, and toasts.
+  const [accountForm, setAccountForm] = useState<AccountRow | null>(null);
+  const [taxForm, setTaxForm] = useState<TaxRow | null>(null);
+  const [methodForm, setMethodForm] = useState<MethodRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "account" | "tax" | "method"; id: string; name: string } | null
+  >(null);
+  const [busy, setBusy] = useState(false);
 
-  const editAccount = async (id: string) => {
-    const account = chartOfAccounts.find((a) => a.id === id);
-    if (!account) return;
-    const name = window.prompt("Account name", account.name)?.trim();
-    if (!name) return;
-    const code = window.prompt("Account code", account.code)?.trim() || account.code;
-    const type = window.prompt("Account type", account.type)?.trim() || account.type;
+  const saveAccount = async () => {
+    if (!accountForm) return;
+    const { id, name, code, type } = accountForm;
+    setBusy(true);
     try {
-      await updateChartAccount(id, { name, code, type });
-      setChartOfAccounts((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, name, code, type } : a)),
+      if (id) {
+        await updateChartAccount(id, { name, code, type });
+        setChartOfAccounts((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, name, code, type } : a)),
+        );
+        toast.success(`Account "${name}" updated.`);
+      } else {
+        const created = await createChartAccount({ name, code, type });
+        setChartOfAccounts((prev) => [
+          ...prev,
+          {
+            id: created.id,
+            name: created.name,
+            code: created.code,
+            type: created.type,
+            parent: null,
+          },
+        ]);
+        toast.success(`Account "${name}" created.`);
+      }
+      setAccountForm(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the account.",
       );
-    } catch (err) {
-      console.error("Failed to update account:", err);
-      window.alert("Failed to update account. Please try again.");
+    } finally {
+      setBusy(false);
     }
   };
 
-  const deleteAccount = async (id: string) => {
-    if (!window.confirm("Delete this account?")) return;
+  const saveTaxRate = () => {
+    if (!taxForm) return;
+    const { id, name, rate } = taxForm;
+    if (id) {
+      setTaxSettings((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, name, rate } : t)),
+      );
+      toast.success(`Tax rate "${name}" updated.`);
+    } else {
+      setTaxSettings((prev) => [
+        ...prev,
+        { id: `tax-${Date.now()}`, name, rate, default: prev.length === 0 },
+      ]);
+      toast.success(`Tax rate "${name}" added.`);
+    }
+    setTaxForm(null);
+  };
+
+  const savePaymentMethod = () => {
+    if (!methodForm) return;
+    const { id, name } = methodForm;
+    if (id) {
+      setPaymentMethods((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, name } : m)),
+      );
+      toast.success(`Payment method "${name}" updated.`);
+    } else {
+      setPaymentMethods((prev) => [
+        ...prev,
+        { id: `pm-${Date.now()}`, name, enabled: true },
+      ]);
+      toast.success(`Payment method "${name}" added.`);
+    }
+    setMethodForm(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const { kind, id, name } = deleteTarget;
+    setBusy(true);
     try {
-      await deleteChartAccount(id);
-      setChartOfAccounts((prev) => prev.filter((a) => a.id !== id));
+      if (kind === "account") {
+        await deleteChartAccount(id);
+        setChartOfAccounts((prev) => prev.filter((a) => a.id !== id));
+      } else if (kind === "tax") {
+        setTaxSettings((prev) => prev.filter((t) => t.id !== id));
+      } else {
+        setPaymentMethods((prev) => prev.filter((m) => m.id !== id));
+      }
+      toast.success(`"${name}" deleted.`);
+      setDeleteTarget(null);
     } catch (err) {
-      console.error("Failed to delete account:", err);
-      window.alert("Failed to delete account. Please try again.");
+      toast.error(
+        err instanceof Error ? err.message : `Failed to delete "${name}".`,
+      );
+    } finally {
+      setBusy(false);
     }
-  };
-
-  const addTaxRate = () => {
-    const name = window.prompt("Tax name", "New Tax")?.trim();
-    if (!name) return;
-    const rateRaw = window.prompt("Tax rate (%)", "7.5");
-    const rate = Number(rateRaw);
-    if (Number.isNaN(rate)) return;
-    setTaxSettings((prev) => [
-      ...prev,
-      { id: `tax-${Date.now()}`, name, rate, default: prev.length === 0 },
-    ]);
-  };
-
-  const editTaxRate = (id: string) => {
-    setTaxSettings((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        const name = window.prompt("Tax name", t.name)?.trim();
-        if (!name) return t;
-        const rateRaw = window.prompt("Tax rate (%)", String(t.rate));
-        const rate = Number(rateRaw);
-        if (Number.isNaN(rate)) return t;
-        return { ...t, name, rate };
-      }),
-    );
-  };
-
-  const deleteTaxRate = (id: string) => {
-    if (!window.confirm("Delete this tax rate?")) return;
-    setTaxSettings((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const addPaymentMethod = () => {
-    const name = window.prompt("Payment method", "Card")?.trim();
-    if (!name) return;
-    setPaymentMethods((prev) => [
-      ...prev,
-      { id: `pm-${Date.now()}`, name, enabled: true },
-    ]);
-  };
-
-  const editPaymentMethod = (id: string) => {
-    setPaymentMethods((prev) =>
-      prev.map((m) => {
-        if (m.id !== id) return m;
-        const name = window.prompt("Payment method", m.name)?.trim();
-        return name ? { ...m, name } : m;
-      }),
-    );
-  };
-
-  const deletePaymentMethod = (id: string) => {
-    if (!window.confirm("Delete this payment method?")) return;
-    setPaymentMethods((prev) => prev.filter((m) => m.id !== id));
   };
 
   useEffect(() => {
@@ -319,7 +344,9 @@ export function FinancialConfigurationPage() {
             </p>
           </div>
           <button
-            onClick={addAccount}
+            onClick={() =>
+              setAccountForm({ id: "", name: "", code: "", type: "Asset" })
+            }
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -361,13 +388,26 @@ export function FinancialConfigurationPage() {
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={() => editAccount(account.id)}
+                    onClick={() =>
+                      setAccountForm({
+                        id: account.id,
+                        name: account.name,
+                        code: account.code,
+                        type: account.type,
+                      })
+                    }
                     className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors"
                   >
                     <Edit className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => deleteAccount(account.id)}
+                    onClick={() =>
+                      setDeleteTarget({
+                        kind: "account",
+                        id: account.id,
+                        name: account.name,
+                      })
+                    }
                     className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -391,7 +431,7 @@ export function FinancialConfigurationPage() {
             </p>
           </div>
           <button
-            onClick={addTaxRate}
+            onClick={() => setTaxForm({ id: "", name: "", rate: 7.5 })}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -432,13 +472,17 @@ export function FinancialConfigurationPage() {
               </div>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => editTaxRate(tax.id)}
+                  onClick={() =>
+                    setTaxForm({ id: tax.id, name: tax.name, rate: tax.rate })
+                  }
                   className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors"
                 >
                   <Edit className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => deleteTaxRate(tax.id)}
+                  onClick={() =>
+                    setDeleteTarget({ kind: "tax", id: tax.id, name: tax.name })
+                  }
                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -461,7 +505,7 @@ export function FinancialConfigurationPage() {
             </p>
           </div>
           <button
-            onClick={addPaymentMethod}
+            onClick={() => setMethodForm({ id: "", name: "" })}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -495,13 +539,19 @@ export function FinancialConfigurationPage() {
               </div>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => editPaymentMethod(method.id)}
+                  onClick={() => setMethodForm({ id: method.id, name: method.name })}
                   className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors"
                 >
                   <Edit className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => deletePaymentMethod(method.id)}
+                  onClick={() =>
+                    setDeleteTarget({
+                      kind: "method",
+                      id: method.id,
+                      name: method.name,
+                    })
+                  }
                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -622,6 +672,225 @@ export function FinancialConfigurationPage() {
           )}
         </div>
       </div>
+
+      {/* ── Chart of accounts form ── */}
+      {accountForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">
+                {accountForm.id ? "Edit Account" : "Add Account"}
+              </h2>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Account Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  value={accountForm.name}
+                  onChange={(e) =>
+                    setAccountForm((prev) =>
+                      prev ? { ...prev, name: e.target.value } : prev,
+                    )
+                  }
+                  placeholder="Accounts Receivable"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Account Code <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    value={accountForm.code}
+                    onChange={(e) =>
+                      setAccountForm((prev) =>
+                        prev ? { ...prev, code: e.target.value } : prev,
+                      )
+                    }
+                    placeholder="1200"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Account Type
+                  </label>
+                  {/* A select rather than free text: the old prompt accepted any
+                      string, so a typo created an account with an invalid type. */}
+                  <select
+                    value={accountForm.type}
+                    onChange={(e) =>
+                      setAccountForm((prev) =>
+                        prev ? { ...prev, type: e.target.value } : prev,
+                      )
+                    }
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {["Asset", "Liability", "Equity", "Revenue", "Expense"].map(
+                      (t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 pb-5 flex justify-end gap-3">
+              <button
+                onClick={() => setAccountForm(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveAccount()}
+                disabled={
+                  busy || !accountForm.name.trim() || !accountForm.code.trim()
+                }
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {busy ? "Saving…" : accountForm.id ? "Save Changes" : "Add Account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tax rate form ── */}
+      {taxForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">
+                {taxForm.id ? "Edit Tax Rate" : "Add Tax Rate"}
+              </h2>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Tax Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  value={taxForm.name}
+                  onChange={(e) =>
+                    setTaxForm((prev) =>
+                      prev ? { ...prev, name: e.target.value } : prev,
+                    )
+                  }
+                  placeholder="VAT"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Rate (%) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={taxForm.rate}
+                  onChange={(e) =>
+                    setTaxForm((prev) =>
+                      prev ? { ...prev, rate: Number(e.target.value) } : prev,
+                    )
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="px-6 pb-5 flex justify-end gap-3">
+              <button
+                onClick={() => setTaxForm(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveTaxRate}
+                disabled={
+                  !taxForm.name.trim() ||
+                  !Number.isFinite(taxForm.rate) ||
+                  taxForm.rate < 0
+                }
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {taxForm.id ? "Save Changes" : "Add Tax Rate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Payment method form ── */}
+      {methodForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">
+                {methodForm.id ? "Edit Payment Method" : "Add Payment Method"}
+              </h2>
+            </div>
+            <div className="px-6 py-5">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Method Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={methodForm.name}
+                onChange={(e) =>
+                  setMethodForm((prev) =>
+                    prev ? { ...prev, name: e.target.value } : prev,
+                  )
+                }
+                placeholder="Bank Transfer"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div className="px-6 pb-5 flex justify-end gap-3">
+              <button
+                onClick={() => setMethodForm(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={savePaymentMethod}
+                disabled={!methodForm.name.trim()}
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {methodForm.id ? "Save Changes" : "Add Method"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title={
+          deleteTarget?.kind === "account"
+            ? "Delete account"
+            : deleteTarget?.kind === "tax"
+              ? "Delete tax rate"
+              : "Delete payment method"
+        }
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={busy}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

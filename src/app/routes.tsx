@@ -123,6 +123,7 @@ const MyProfilePage = lazy(() => import("./pages/ess/MyProfilePage").then((m) =>
 const ActivityHistoryPage = lazy(() => import("./pages/ess/ActivityHistoryPage").then((m) => ({ default: m.ActivityHistoryPage })));
 const MyTasksPage = lazy(() => import("./pages/ess/MyTasksPage").then((m) => ({ default: m.MyTasksPage })));
 const PayslipHistoryPage = lazy(() => import("./pages/ess/PayslipHistoryPage").then((m) => ({ default: m.PayslipHistoryPage })));
+const MyAttendancePage = lazy(() => import("./pages/ess/MyAttendancePage").then((m) => ({ default: m.MyAttendancePage })));
 const AppraisalPage = lazy(() => import("./pages/ess/AppraisalPage").then((m) => ({ default: m.AppraisalPage })));
 const LogIssuesPage = lazy(() => import("./pages/ess/LogIssuesPage").then((m) => ({ default: m.LogIssuesPage })));
 
@@ -410,6 +411,7 @@ export const router = createBrowserRouter([
               { path: "tasks", Component: MyTasksPage },
               { path: "approvals", Component: ESSApprovalsPage },
               { path: "payslips", Component: PayslipHistoryPage },
+              { path: "attendance", Component: MyAttendancePage },
               { path: "appraisals", Component: AppraisalPage },
               { path: "log-issues", Component: LogIssuesPage },
             ],

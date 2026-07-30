@@ -4,7 +4,9 @@ import { getReferenceData } from "../../api/reference-data";
 import {
   csvAmountHeader,
   getCurrencySymbol,
+  formatCurrencyByGeneralSettings,
   formatDateByGeneralSettings,
+  formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
 import {
   ShoppingCart,
@@ -24,6 +26,8 @@ import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
 import { useNumbering } from "../../stores/numberingStore";
+import { toast } from "sonner";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 
 type POStatus =
   | "draft"
@@ -604,6 +608,7 @@ function RecordReceiptModal({
 export function PurchaseOrdersPage() {
   const { logChange } = useChangelog();
   const [poList, setPoList] = useState<PurchaseOrder[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<PurchaseOrder | null>(null);
   useEffect(() => {
     fetchPurchaseOrders().then(setPoList);
   }, []);
@@ -663,9 +668,17 @@ export function PurchaseOrdersPage() {
     });
   }
 
+  /** Opens the confirmation; the deletion itself runs in confirmDeletePO. */
   function deletePO(po: PurchaseOrder) {
-    if (!window.confirm(`Delete ${po.id}?`)) return;
+    setDeleteTarget(po);
+  }
+
+  function confirmDeletePO() {
+    const po = deleteTarget;
+    if (!po) return;
+    setDeleteTarget(null);
     setPoList((prev) => prev.filter((p) => p.id !== po.id));
+    toast.success(`Purchase order ${po.id} deleted.`);
     logChange({
       module: "Procurement",
       action: "Deleted",
@@ -725,7 +738,7 @@ export function PurchaseOrdersPage() {
       headerClassName: "text-right",
       render: (po) => (
         <span className="font-semibold text-gray-900">
-          {po.totalValue.toLocaleString()}
+          {formatNumberByGeneralSettings(po.totalValue)}
         </span>
       ),
     },
@@ -891,7 +904,7 @@ export function PurchaseOrdersPage() {
       po.totalValue,
       po.expectedDate,
       po.items
-        .map((it) => `${it.material} (${it.qty} ${it.unit} @ ₦${it.unitCost})`)
+        .map((it) => `${it.material} (${it.qty} ${it.unit} @ ${formatCurrencyByGeneralSettings(it.unitCost)})`)
         .join("; "),
     ]);
     exportCSV("purchase-orders", headers, rows);
@@ -1097,6 +1110,19 @@ export function PurchaseOrdersPage() {
           }}
         />
       )}
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title="Delete purchase order"
+        description={
+          deleteTarget
+            ? `Purchase order ${deleteTarget.id} will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={confirmDeletePO}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -155,6 +155,7 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/ess/requests", label: "My Requests", section: "Requests" },
     { id: "/apps/ess/submit", label: "Create Request", section: "Requests" },
     { id: "/apps/ess/approvals", label: "Approvals", section: "Requests" },
+    { id: "/apps/ess/attendance", label: "My Attendance", section: "Attendance" },
     { id: "/apps/ess/payslips", label: "Payslip History", section: "Payroll" },
     { id: "/apps/ess/appraisals", label: "Appraisals", section: "Performance" },
     { id: "/apps/ess/log-issues", label: "Log Issues", section: "Performance" },

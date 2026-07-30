@@ -13,6 +13,7 @@ import {
   ScrollText,
   Star,
   AlertTriangle,
+  Clock,
 } from "lucide-react";
 
 const sidebarSections = [
@@ -63,6 +64,17 @@ const sidebarSections = [
         label: "Approvals",
         href: "/apps/ess/approvals",
         icon: <CheckSquare className="w-4 h-4" />,
+        end: true,
+      },
+    ],
+  },
+  {
+    label: "Attendance",
+    items: [
+      {
+        label: "My Attendance",
+        href: "/apps/ess/attendance",
+        icon: <Clock className="w-4 h-4" />,
         end: true,
       },
     ],

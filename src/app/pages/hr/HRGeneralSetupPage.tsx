@@ -24,9 +24,11 @@ interface FieldProps {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  type?: "text" | "number" | "select";
+  type?: "text" | "number" | "select" | "time";
   options?: string[];
   suffix?: string;
+  /** Explanatory note under the input, for settings whose effect is not obvious. */
+  hint?: string;
 }
 
 function Field({
@@ -36,6 +38,7 @@ function Field({
   type = "text",
   options,
   suffix,
+  hint,
 }: FieldProps) {
   return (
     <div>
@@ -69,6 +72,7 @@ function Field({
           </span>
         )}
       </div>
+      {hint && <p className="mt-1 text-[11px] text-gray-400">{hint}</p>}
     </div>
   );
 }
@@ -76,6 +80,11 @@ function Field({
 export function HRGeneralSetupPage() {
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({
+    // Drives whether a self-service clock-in is recorded as present or late.
+    // Blank means "do not judge lateness" — the backend records everyone present
+    // rather than marking staff late against a start time nobody configured.
+    workDayStart: "",
+    lateGraceMinutes: "0",
     workHoursPerDay: "8",
     workDaysPerWeek: "5",
     weekStartDay: "Monday",
@@ -182,6 +191,20 @@ export function HRGeneralSetupPage() {
             <Clock className="w-4 h-4 text-indigo-600" /> Work Schedule
           </h2>
           <div className="grid grid-cols-2 gap-4">
+            <Field
+              label="Work Day Start"
+              value={form.workDayStart}
+              onChange={f("workDayStart")}
+              type="time"
+              hint="Clock-ins after this (plus grace) are marked late. Leave blank to record everyone as present."
+            />
+            <Field
+              label="Late After (grace)"
+              value={form.lateGraceMinutes}
+              onChange={f("lateGraceMinutes")}
+              type="number"
+              suffix="mins"
+            />
             <Field
               label="Work Hours / Day"
               value={form.workHoursPerDay}

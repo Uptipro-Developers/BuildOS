@@ -6,7 +6,10 @@ import { useChangelog } from "../../stores/changelogStore";
 import type { FiscalYear, FiscalYearStatus } from "./types";
 import { DataTable, type Column } from "../../components/DataTable";
 import { exportCSV, type CsvCell } from "../../utils/exportCSV";
-import { csvAmountHeader } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 
 
 const FISCAL_STATUS_STYLES: Record<FiscalYearStatus, string> = {
@@ -15,7 +18,8 @@ const FISCAL_STATUS_STYLES: Record<FiscalYearStatus, string> = {
   closed: "bg-gray-100 text-gray-600",
 };
 
-const fmt = (n: number) => `₦${n.toLocaleString()}`;
+const fmt = (n: number) =>
+  formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
 
 interface BSRow {
   section: string;

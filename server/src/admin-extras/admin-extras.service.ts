@@ -109,12 +109,15 @@ export class AdminExtrasService {
     // PermissionsService so role configuration and enforcement read one list.
     private readonly defaultProcessCatalog = DEFAULT_PROCESS_CATALOG;
 
+    // Nigerian defaults: BuildOS is deployed for a Nigerian construction group.
+    // Only the fallback for a fresh install — Admin → General Settings overrides
+    // them and is what every formatter actually reads.
     private readonly defaultGeneralSettings = {
-        currency: 'USD',
-        currencySymbol: '$',
-        timezone: 'America/New_York',
-        dateFormat: 'MM/DD/YYYY',
-        timeFormat: '12',
+        currency: 'NGN',
+        currencySymbol: '₦',
+        timezone: 'Africa/Lagos',
+        dateFormat: 'DD/MM/YYYY',
+        timeFormat: '24',
         numberFormat: '1,234.56',
         fiscalYearStart: '01',
         language: 'en',
@@ -2028,8 +2031,31 @@ export class AdminExtrasService {
         const settings = await this.readAdminSettings();
         return settings.emailConfigs;
     }
+    /**
+     * One configuration per trigger event.
+     *
+     * Two templates on the same event would make which one fires arbitrary. The UI
+     * disables events that are already configured; this enforces it server-side so
+     * the rule holds regardless of how the request arrives.
+     */
+    private assertTriggerAvailable(configs: any[], trigger: unknown, exceptId?: string) {
+        const wanted = String(trigger ?? '').trim().toLowerCase();
+        if (!wanted) return;
+        const clash = configs.find(
+            (item: any) =>
+                item?.id !== exceptId &&
+                String(item?.trigger ?? '').trim().toLowerCase() === wanted,
+        );
+        if (clash) {
+            throw new ConflictException(
+                `"${clash.trigger}" already has an email configuration. Edit the existing one instead.`,
+            );
+        }
+    }
+
     async createEmailConfig(data: any) {
         const settings = await this.readAdminSettings();
+        this.assertTriggerAvailable(settings.emailConfigs, data?.trigger);
         const created = { id: `EC-${Date.now()}`, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         settings.emailConfigs.push(created);
         await this.writeAdminSettings(settings);
@@ -2037,6 +2063,9 @@ export class AdminExtrasService {
     }
     async updateEmailConfig(id: string, data: any) {
         const settings = await this.readAdminSettings();
+        // Re-pointing a config at an event another config already owns is the same
+        // clash as creating a duplicate.
+        this.assertTriggerAvailable(settings.emailConfigs, data?.trigger, id);
         settings.emailConfigs = settings.emailConfigs.map((item: any) =>
             item.id === id ? { ...item, ...data, id, updatedAt: new Date().toISOString() } : item,
         );

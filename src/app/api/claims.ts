@@ -1,4 +1,5 @@
 import { apiFetch } from './client';
+import { formatDateByGeneralSettings } from '../utils/generalSettings';
 
 const statusMap: Record<string, string> = {
     UnderReview: 'Under Review',
@@ -6,7 +7,7 @@ const statusMap: Record<string, string> = {
 
 function fmt(date: string | null) {
     if (!date) return '';
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDateByGeneralSettings(date);
 }
 
 function mapClaim(c: any) {

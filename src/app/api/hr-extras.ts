@@ -123,3 +123,29 @@ export const updateIssue = (id: string, data: Partial<Issue>) =>
     apiFetch<Issue>(`/issues/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteIssue = (id: string) =>
     apiFetch<void>(`/issues/${id}`, { method: 'DELETE' });
+
+// ── Self-service clock in / out ──────────────────────────────────────────────
+/**
+ * The employee is resolved from the authenticated user on the server, never sent
+ * from the client: the generic attendance endpoints take an employeeId, so
+ * accepting one here would let any signed-in user record attendance for someone
+ * else.
+ */
+export interface MyAttendanceToday {
+    employeeId: string;
+    employeeName: string;
+    department: string;
+    record: AttendanceRecord | null;
+    clockedIn: boolean;
+    clockedOut: boolean;
+    /** From HR Setup. Null when no start time is configured, so nothing is late. */
+    workDayStart: string | null;
+    lateGraceMinutes: number;
+}
+
+export const getMyAttendanceToday = () =>
+    apiFetch<MyAttendanceToday>('/attendance/me/today');
+export const clockIn = () =>
+    apiFetch<AttendanceRecord>('/attendance/me/clock-in', { method: 'POST' });
+export const clockOut = () =>
+    apiFetch<AttendanceRecord>('/attendance/me/clock-out', { method: 'POST' });

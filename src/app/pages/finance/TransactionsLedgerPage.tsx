@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
-  getCurrencySymbol,
+  csvAmountHeader,
   formatNumberByGeneralSettings,
+  getCurrencySymbol,
 } from "../../utils/generalSettings";
 import {
   Download,
@@ -345,7 +346,7 @@ export function TransactionsLedgerPage() {
         <p className="text-xs text-gray-400 mt-0.5">{t.sourceProcess}</p>
       </div>
     ), sortable: true, filterable: true },
-    { key: "amount", label: "Amount (₦)", render: t => (
+    { key: "amount", label: csvAmountHeader("Amount"), render: t => (
       <span className={`text-sm font-semibold ${t.amount >= 0 ? "text-emerald-600" : "text-red-600"}`}>{fmtAmt(t.amount)}</span>
     ), sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
     { key: "date", label: "Date", render: t => <span className="text-sm text-gray-500 whitespace-nowrap">{t.date}</span>, sortable: true, filterable: false },

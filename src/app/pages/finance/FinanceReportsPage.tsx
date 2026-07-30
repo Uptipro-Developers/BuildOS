@@ -84,7 +84,8 @@ function toDisplayRow(row: ApiReportRow): ReportRow {
   return { label: row.label, value, sub: row.sub, positive: row.positive };
 }
 
-const fmt = (n: number) => `₦${n.toLocaleString()}`;
+const fmt = (n: number) =>
+  formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
 
 // ── Column definitions ──────────────────────────────────────────────────────
 

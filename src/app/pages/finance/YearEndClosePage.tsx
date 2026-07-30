@@ -8,7 +8,10 @@ import { useFinance, type IncomeStatementRow } from "../../stores/financeStore";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import { exportCSV, type CsvCell } from "../../utils/exportCSV";
-import { csvAmountHeader } from "../../utils/generalSettings";
+import {
+  csvAmountHeader,
+  formatCurrencyByGeneralSettings,
+} from "../../utils/generalSettings";
 
 const CLOSE_STEPS = [
   { id: "verify", label: "Verify Transactions", icon: <FileText className="w-4 h-4" />, desc: "Ensure all ledger entries are complete and the trial balance is balanced before proceeding." },
@@ -17,7 +20,8 @@ const CLOSE_STEPS = [
   { id: "lock", label: "Close Account for Fiscal Year", icon: <Lock className="w-4 h-4" />, desc: "Once closed, the account will be locked. No further postings, edits, or reversals will be permitted for this period." },
 ];
 
-const fmt = (n: number) => `₦${n.toLocaleString()}`;
+const fmt = (n: number) =>
+  formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
 
 interface ClosingEntry {
   label: string;

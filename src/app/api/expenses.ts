@@ -1,12 +1,20 @@
 import { apiFetch } from './client';
+import { formatDateByGeneralSettings } from '../utils/generalSettings';
 
 const statusMap: Record<string, string> = {
     SentToFinance: 'Sent to Finance',
 };
 
+/**
+ * Dates are formatted for display here, using the configured format.
+ *
+ * These API clients used to hardcode `en-US` month-day-year, which meant the date
+ * format chosen in Admin → General Settings had no effect on anything they
+ * returned — the raw value was already gone by the time the UI saw it.
+ */
 function fmt(date: string | null) {
     if (!date) return '';
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDateByGeneralSettings(date);
 }
 
 function mapExpense(e: any) {

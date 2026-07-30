@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
+import {
+  formatCurrencyByGeneralSettings,
+  getCurrencyCode,
+} from "../../utils/generalSettings";
 import { getBankAccounts, getTaxConfigs } from "../../api/finance-extras";
 import { createAccrualType, updateAccrualType, deleteAccrualType } from "../../api/accruals";
 import { apiFetch } from "../../api/client";
@@ -581,7 +584,7 @@ export function FinanceConfigPage() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-              Approval Threshold (USD)
+              Approval Threshold ({getCurrencyCode()})
             </label>
             <input
               value={approvalThreshold}

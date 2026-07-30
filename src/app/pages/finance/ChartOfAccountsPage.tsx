@@ -22,6 +22,10 @@ import { DataTable, type Column } from "../../components/DataTable";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import type { Account, AccountType } from "./types";
 import { ACCOUNT_TYPES } from "./types";
+import {
+  csvAmountHeader,
+  formatNumberByGeneralSettings,
+} from "../../utils/generalSettings";
 
 const typeColors: Record<AccountType, string> = {
   Assets: "bg-blue-100 text-blue-700",
@@ -42,7 +46,7 @@ const emptyForm = {
 };
 
 const fmt = (n: number) => {
-  const abs = `${Math.abs(n).toLocaleString()}`;
+  const abs = formatNumberByGeneralSettings(Math.abs(n));
   return n >= 0 ? abs : `(${abs})`;
 };
 
@@ -197,7 +201,7 @@ export function ChartOfAccountsPage() {
         ? <span className="text-xs text-gray-600">{parent.code} — {parent.name}</span>
         : <span className="text-xs text-gray-400 italic">Top-level</span>;
     }, sortable: false, filterable: false },
-    { key: "balance", label: "Amount (₦)", render: a => {
+    { key: "balance", label: csvAmountHeader("Amount"), render: a => {
       const bal = a.balance ?? 0;
       return <span className={`text-sm font-mono font-semibold ${bal >= 0 ? "text-gray-900" : "text-red-600"}`}>{fmt(bal)}</span>;
     }, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },

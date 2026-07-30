@@ -18,6 +18,9 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
+import {
+  formatDateByGeneralSettings,
+} from "../../utils/generalSettings";
 
 type AttStatus =
   "present" | "absent" | "late" | "half_day" | "leave" | "unmarked";
@@ -85,12 +88,7 @@ const statusConfig: Record<
 
 // NOTE: depts derived inside component from API records
 export function AttendancePage() {
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const today = formatDateByGeneralSettings(new Date());
   const [records, setRecords] = useState<AttRecord[]>([]);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");

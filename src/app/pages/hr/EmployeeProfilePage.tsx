@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import {
-  getCurrencySymbol,
-  getCurrencyCode,
-  formatNumberByGeneralSettings,
   formatDateByGeneralSettings,
+  formatDateTimeByGeneralSettings,
+  formatNumberByGeneralSettings,
+  getCurrencyCode,
+  getCurrencySymbol,
 } from "../../utils/generalSettings";
 import { exportCSV } from "../../utils/exportCSV";
 import {
@@ -724,7 +725,7 @@ export function EmployeeProfilePage() {
                       {a.description ? ` — ${a.description}` : ""}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      {new Date(a.createdAt).toLocaleString()}
+                      {formatDateTimeByGeneralSettings(a.createdAt)}
                     </p>
                   </div>
                 </li>
