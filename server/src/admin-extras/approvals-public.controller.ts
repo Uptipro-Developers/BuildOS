@@ -25,7 +25,12 @@ export class ApprovalsPublicController {
         return this.svc.findApprovals(
             module,
             wantsMine
-                ? { name: user?.name, email: user?.email, role: user?.role }
+                ? {
+                      userId: String(user?.sub ?? user?.id ?? ''),
+                      name: user?.name,
+                      email: user?.email,
+                      role: user?.role,
+                  }
                 : undefined,
         );
     }

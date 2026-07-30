@@ -1101,7 +1101,7 @@ export class AdminExtrasService {
      */
     async findApprovals(
         module?: string,
-        forUser?: { name?: string; email?: string; role?: string },
+        forUser?: { userId?: string; name?: string; email?: string; role?: string },
     ) {
         const target = String(module || 'all').toLowerCase();
         const rows: any[] = [];
@@ -1249,7 +1249,28 @@ export class AdminExtrasService {
 
         if (!forUser) return sorted;
 
-        const identities = [forUser.name, forUser.email, forUser.role]
+        // The JWT carries only sub/email/role — not the display name, which is what
+        // a workflow usually names its approver by. Resolve the full identity from
+        // the user record so "Admin User" in a config matches the signed-in admin.
+        let identity = forUser;
+        if (forUser.userId) {
+            const user = await this.prisma.user
+                .findUnique({
+                    where: { id: forUser.userId },
+                    select: { name: true, email: true, role: true },
+                })
+                .catch(() => null);
+            if (user) {
+                identity = {
+                    ...forUser,
+                    name: user.name ?? forUser.name,
+                    email: user.email ?? forUser.email,
+                    role: user.role ?? forUser.role,
+                };
+            }
+        }
+
+        const identities = [identity.name, identity.email, identity.role]
             .map((v) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ''))
             .filter(Boolean);
         // No identity means match nothing, rather than accidentally returning
