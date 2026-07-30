@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   Search,
   Download,
@@ -99,7 +100,11 @@ export function StockMovementPage() {
         setMaterials(materialNames);
         setForm((prev) => ({ ...prev, material: prev.material || materialNames[0] || "" }));
       })
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load stock movements.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -147,8 +152,15 @@ export function StockMovementPage() {
       setMovements((prev) => [mov, ...prev]);
       setShowModal(false);
       setForm({ ...BLANK_FORM });
-    } catch (e) {
-      console.error(e);
+      toast.success(
+        `${form.type} of ${form.quantity} ${form.unit} ${form.material} recorded.`,
+      );
+    } catch (err) {
+      // A stock movement that failed to record used to close nothing and say
+      // nothing, leaving the operator unsure whether stock had moved.
+      toast.error(
+        err instanceof Error ? err.message : "Failed to record the movement.",
+      );
     }
   }
 

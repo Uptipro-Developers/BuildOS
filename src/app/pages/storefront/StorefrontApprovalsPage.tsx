@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, Eye, Search } from "lucide-react";
+import { toast } from "sonner";
 import {
   getConstructionApprovals,
   updateConstructionApproval,
@@ -64,7 +65,11 @@ export function StorefrontApprovalsPage() {
   useEffect(() => {
     getConstructionApprovals()
       .then((data) => setItems(data.map(fromApi)))
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load approvals.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -87,8 +92,11 @@ export function StorefrontApprovalsPage() {
       });
       setItems((prev) => prev.map((a) => (a.id === id ? fromApi(updated) : a)));
       setSelected(null);
-    } catch (e) {
-      console.error(e);
+      toast.success("Request approved.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to approve the request.",
+      );
     }
   }
 
@@ -100,8 +108,11 @@ export function StorefrontApprovalsPage() {
       });
       setItems((prev) => prev.map((a) => (a.id === id ? fromApi(updated) : a)));
       setSelected(null);
-    } catch (e) {
-      console.error(e);
+      toast.success("Request rejected.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to reject the request.",
+      );
     }
   }
 

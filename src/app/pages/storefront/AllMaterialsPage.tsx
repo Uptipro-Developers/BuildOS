@@ -6,6 +6,7 @@ import {
   deleteMaterial,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
+import { toast } from "sonner";
 import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
@@ -280,7 +281,11 @@ export function AllMaterialsPage() {
         setMaterials(materialData.map(toMaterial));
         setProjectOptions(refs.projects.map((p) => p.name));
       })
-      .catch(console.error)
+            .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load materials.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -310,32 +315,46 @@ export function AllMaterialsPage() {
     setForm(rest);
     setShowModal(true);
   }
-  function save() {
-    if (editTarget) {
-      updateMaterial(editTarget.id, form)
-        .then((updated) =>
-          setMaterials((prev) =>
-            prev.map((m) => (m.id === updated.id ? toMaterial(updated) : m)),
-          ),
-        )
-        .catch(console.error);
-    } else {
-      createMaterial(form)
-        .then((newMat) => setMaterials((prev) => [...prev, toMaterial(newMat)]))
-        .catch(console.error);
+  // The modal used to close before the request resolved, and failures only hit
+  // console.error — so a rejected save looked like it had worked and the material
+  // silently reappeared unchanged on the next load.
+  async function save() {
+    const name = form.name;
+    try {
+      if (editTarget) {
+        const updated = await updateMaterial(editTarget.id, form);
+        setMaterials((prev) =>
+          prev.map((m) => (m.id === updated.id ? toMaterial(updated) : m)),
+        );
+        toast.success(`"${name}" updated.`);
+      } else {
+        const newMat = await createMaterial(form);
+        setMaterials((prev) => [...prev, toMaterial(newMat)]);
+        toast.success(`"${name}" added.`);
+      }
+      setShowModal(false);
+      setForm({ ...BLANK });
+      setEditTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the material.",
+      );
     }
-    setShowModal(false);
-    setForm({ ...BLANK });
-    setEditTarget(null);
   }
-  function doDelete() {
-    if (deleteTarget)
-      deleteMaterial(deleteTarget.id)
-        .then(() =>
-          setMaterials((prev) => prev.filter((m) => m.id !== deleteTarget.id)),
-        )
-        .catch(console.error);
-    setDeleteTarget(null);
+
+  async function doDelete() {
+    if (!deleteTarget) return;
+    const { id, name } = deleteTarget;
+    try {
+      await deleteMaterial(id);
+      setMaterials((prev) => prev.filter((m) => m.id !== id));
+      toast.success(`"${name}" deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Failed to delete "${name}".`,
+      );
+    }
   }
   function exportCSV() {
     const rows = [
@@ -751,7 +770,7 @@ export function AllMaterialsPage() {
                 Cancel
               </button>
               <button
-                onClick={save}
+                onClick={() => void save()}
                 className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
               >
                 {editTarget ? "Save Changes" : "Add Material"}
@@ -780,7 +799,7 @@ export function AllMaterialsPage() {
                 Cancel
               </button>
               <button
-                onClick={doDelete}
+                onClick={() => void doDelete()}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
               >
                 Delete

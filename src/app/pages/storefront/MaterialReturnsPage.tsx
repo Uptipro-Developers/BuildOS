@@ -15,6 +15,7 @@ import {
   MaterialReturn as ApiMaterialReturn,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
+import { toast } from "sonner";
 
 type ReturnStatus =
   | "Draft"
@@ -113,7 +114,11 @@ export function MaterialReturnsPage() {
   useEffect(() => {
     getMaterialReturns()
       .then((data) => setReturns(data.map(fromApi)))
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load material returns.",
+        ),
+      )
       .finally(() => setLoading(false));
     getReferenceData()
       .then((data) => {
@@ -157,8 +162,13 @@ export function MaterialReturnsPage() {
       setReturns((prev) => [fromApi(created), ...prev]);
       setShowModal(false);
       setForm({ ...BLANK });
-    } catch (e) {
-      console.error(e);
+      toast.success(
+        `Return of ${form.quantity} ${form.unit} ${form.material} submitted for approval.`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to submit the return.",
+      );
     }
   }
 
@@ -172,8 +182,11 @@ export function MaterialReturnsPage() {
         prev.map((r) => (r.id === id ? fromApi(updated) : r)),
       );
       setSelected(null);
-    } catch (e) {
-      console.error(e);
+      toast.success(`Return ${id} approved.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to mark the return approved.",
+      );
     }
   }
 
@@ -184,8 +197,11 @@ export function MaterialReturnsPage() {
         prev.map((r) => (r.id === id ? fromApi(updated) : r)),
       );
       setSelected(null);
-    } catch (e) {
-      console.error(e);
+      toast.success(`Return ${id} received.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to mark the return received.",
+      );
     }
   }
 
@@ -199,8 +215,11 @@ export function MaterialReturnsPage() {
         prev.map((r) => (r.id === id ? fromApi(updated) : r)),
       );
       setSelected(null);
-    } catch (e) {
-      console.error(e);
+      toast.success(`Return ${id} rejected.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to mark the return rejected.",
+      );
     }
   }
 

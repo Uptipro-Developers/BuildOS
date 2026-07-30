@@ -8,6 +8,7 @@ import {
 } from "../../api/materials";
 import { Plus, ArrowRight, Search } from "lucide-react";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
+import { toast } from "sonner";
 
 type TransferStatus = "Pending" | "In Transit" | "Completed" | "Rejected";
 
@@ -80,7 +81,11 @@ export function StockTransferPage() {
         setTransfers(ts.map(toTransfer));
         setStoreNames(ss.map((s) => s.name));
       })
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load transfers.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -131,8 +136,11 @@ export function StockTransferPage() {
       setTransfers((prev) => [toTransfer(created), ...prev]);
       setShowModal(false);
       setForm({ ...BLANK_FORM });
+      toast.success(`Transfer from ${fromStore} to ${toStore} submitted.`);
     } catch (err) {
-      console.error(err);
+      toast.error(
+        err instanceof Error ? err.message : "Failed to submit the transfer.",
+      );
     }
   }
 
@@ -145,9 +153,15 @@ export function StockTransferPage() {
       setTransfers((prev) =>
         prev.map((x) => (x.id === id ? toTransfer(updated) : x)),
       );
-    } catch {
-      setTransfers((prev) =>
-        prev.map((x) => (x.id === id ? { ...x, status } : x)),
+      toast.success(`Transfer ${t.id} marked ${String(status).toLowerCase()}.`);
+    } catch (err) {
+      // The previous version applied the new status locally when the request
+      // FAILED, so a rejected update looked successful and reverted on refresh.
+      // The row is left as the server has it and the failure is surfaced.
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : `Failed to mark transfer ${t.id} as ${String(status).toLowerCase()}.`,
       );
     }
   }

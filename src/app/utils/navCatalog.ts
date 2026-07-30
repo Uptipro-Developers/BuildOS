@@ -129,7 +129,7 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/storefront/stock-movement", label: "Stock Movement", section: "Distribution" },
     { id: "/apps/storefront/approvals", label: "Approvals", section: "Approvals" },
     { id: "/apps/storefront/reports", label: "Reports", section: "Reports" },
-    { id: "/apps/storefront/config", label: "Configuration", section: "Configuration" },
+    { id: "/apps/storefront/config", label: "Settings", section: "Settings" },
   ],
   admin: [
     { id: "/apps/admin/dashboard", label: "Dashboard", section: "" },

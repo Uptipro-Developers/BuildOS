@@ -107,10 +107,10 @@ const sidebarSections = [
     ],
   },
   {
-    label: "Configuration",
+    label: "Settings",
     items: [
       {
-        label: "Configuration",
+        label: "Settings",
         href: "/apps/storefront/config",
         icon: <Settings className="w-4 h-4" />,
         end: true,

@@ -6,6 +6,12 @@ export interface AppUser {
     department?: string; position?: string; status: string;
     phone?: string;
     assignedApps?: string[];
+    /**
+     * How many process permissions this user has explicitly granted or revoked on
+     * top of their role. Supplied by the list endpoint so the Active Overrides
+     * column can report it without resolving every user's full permission set.
+     */
+    overrideCount?: number;
     lastLogin?: string; createdAt: string;
 }
 export interface AppRole {

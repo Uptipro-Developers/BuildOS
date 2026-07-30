@@ -128,7 +128,11 @@ function StoreLevelsPanel() {
           );
         }
       })
-      .catch(console.error);
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load store levels.",
+        ),
+      );
   }, []);
 
   function openEdit(l: StoreLevelConfig) {
@@ -395,7 +399,11 @@ function StoresPanel() {
           setLevelCaps(caps);
         }
       })
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load store levels.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -863,7 +871,11 @@ function StockThresholdsPanel() {
         if (Array.isArray(thresholdData)) setThresholds(thresholdData);
         setStores(storeData);
       })
-      .catch(console.error);
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load stores.",
+        ),
+      );
   }, []);
 
   async function persist(next: StoreThreshold[], successMsg: string) {
@@ -1979,7 +1991,7 @@ export function StorefrontConfigPage() {
         </div>
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Storefront Configuration
+            Storefront Settings
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Manage store hierarchy, stock thresholds and units of measurement

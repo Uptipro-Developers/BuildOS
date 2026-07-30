@@ -1,6 +1,6 @@
 import {
     Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query, UseGuards,
+    Param, Body, Query, Req, UseGuards,
 } from '@nestjs/common';
 import { AdminExtrasService } from './admin-extras.service';
 import { UserActivityService } from './user-activity.service';
@@ -31,9 +31,27 @@ export class AdminExtrasController {
     }
 
     // ── Approvals ──
+    /** `mine=true` restricts to items whose configured workflow names the caller. */
     @Get('approvals')
-    @Roles('admin', 'approver')
-    getApprovals(@Query('module') module?: string) { return this.svc.findApprovals(module); }
+    @Roles('admin', 'approver', 'manager', 'hr-manager', 'finance-manager', 'procurement-manager')
+    getApprovals(
+        @Req() req: any,
+        @Query('module') module?: string,
+        @Query('mine') mine?: string,
+    ) {
+        const user = req?.user;
+        return this.svc.findApprovals(
+            module,
+            String(mine ?? '').toLowerCase() === 'true'
+                ? {
+                      userId: String(user?.sub ?? user?.id ?? ''),
+                      name: user?.name,
+                      email: user?.email,
+                      role: user?.role,
+                  }
+                : undefined,
+        );
+    }
 
     @Patch('approvals/:id')
     @Roles('admin', 'approver')

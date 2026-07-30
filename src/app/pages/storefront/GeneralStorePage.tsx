@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   Plus,
   Search,
@@ -6,13 +8,22 @@ import {
   Package,
   ShoppingCart,
   CheckCircle,
+  Pencil,
+  Trash2,
   X,
 } from "lucide-react";
 import {
   getStoreItems,
   createStoreItem,
+  updateStoreItem,
+  deleteStoreItem,
+  getMaterials,
   type StoreItem as ApiStoreItem,
 } from "../../api/materials";
+import {
+  getMaterialCategories,
+  getUnits,
+} from "../../api/admin-extras";
 import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
@@ -85,11 +96,53 @@ export function GeneralStorePage() {
     new Set(),
   );
 
+  // The Add Stock Item form picks from what already exists rather than accepting
+  // free text: materials from the material register, and categories and units from
+  // Storefront Settings. Typing them by hand produced near-duplicate categories
+  // ("Cement" vs "cement") and unit strings the rest of the app did not recognise.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; category: string; unit: string }[]
+  >([]);
+  const [configuredCategories, setConfiguredCategories] = useState<string[]>([]);
+  const [configuredUnits, setConfiguredUnits] = useState<string[]>([]);
+
+  // One shared, de-duplicated handler: four widget loads failing on a network
+  // outage should not stack four identical toasts.
+  const reportLoadFailure = (what: string) => (err: unknown) =>
+    toast.error(
+      err instanceof Error ? `${what}: ${err.message}` : `Failed to load ${what}.`,
+      { id: "general-store-load" },
+    );
+
   useEffect(() => {
     getStoreItems()
       .then((data) => setItems(data.map(toStockItem)))
-      .catch(console.error)
+      .catch(reportLoadFailure("stock items"))
       .finally(() => setLoading(false));
+
+    getMaterials()
+      .then((data) =>
+        setMaterialOptions(
+          data.map((m) => ({
+            name: m.name,
+            category: m.category ?? "",
+            unit: m.unit ?? "",
+          })),
+        ),
+      )
+      .catch(reportLoadFailure("materials"));
+
+    getMaterialCategories()
+      .then((data) => setConfiguredCategories(data.map((c) => c.name).filter(Boolean)))
+      .catch(reportLoadFailure("categories"));
+
+    getUnits()
+      .then((data) =>
+        setConfiguredUnits(
+          data.map((u) => u.abbreviation || u.name).filter(Boolean),
+        ),
+      )
+      .catch(reportLoadFailure("units"));
   }, []);
 
   const filtered = items.filter((i) => {
@@ -106,21 +159,71 @@ export function GeneralStorePage() {
   ];
   const editableCategories = categories.filter((c) => c !== "All");
 
+  // Configured values win; values already in use are a fallback so an environment
+  // with nothing configured yet still offers something rather than an empty list.
+  const categoryOptions =
+    configuredCategories.length > 0
+      ? configuredCategories
+      : editableCategories;
+  const unitOptions =
+    configuredUnits.length > 0
+      ? configuredUnits
+      : Array.from(new Set(items.map((i) => i.unit).filter(Boolean)));
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StockItem | null>(null);
+  const [busy, setBusy] = useState(false);
+
   async function saveItem() {
+    const payload = {
+      materialName: form.name,
+      category: form.category,
+      unit: form.unit,
+      qty: form.qty,
+      reorderLevel: form.reorderLevel,
+      unitCost: form.unitCost,
+      bin: form.bin,
+    };
+    setBusy(true);
     try {
-      const created = await createStoreItem({
-        materialName: form.name,
-        category: form.category,
-        unit: form.unit,
-        qty: form.qty,
-        reorderLevel: form.reorderLevel,
-        unitCost: form.unitCost,
-        bin: form.bin,
-      });
-      setItems((prev) => [...prev, toStockItem(created)]);
+      if (editingId) {
+        const updated = await updateStoreItem(editingId, payload);
+        setItems((prev) =>
+          prev.map((i) => (i.id === editingId ? toStockItem(updated) : i)),
+        );
+        toast.success(`"${form.name}" updated.`);
+      } else {
+        const created = await createStoreItem(payload);
+        setItems((prev) => [...prev, toStockItem(created)]);
+        toast.success(`"${form.name}" added to the store.`);
+      }
       setShowModal(false);
-    } catch (e) {
-      console.error(e);
+      setEditingId(null);
+    } catch (err) {
+      // Previously only console.error'd, so a failed save looked like nothing
+      // happened at all.
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the stock item.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await deleteStoreItem(deleteTarget.id);
+      setItems((prev) => prev.filter((i) => i.id !== deleteTarget.id));
+      toast.success(`"${deleteTarget.name}" removed from the store.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to remove the stock item.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -141,6 +244,7 @@ export function GeneralStorePage() {
         <button
           onClick={() => {
             setForm({ ...BLANK });
+            setEditingId(null);
             setShowModal(true);
           }}
           className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm px-4 py-2 rounded-xl"
@@ -279,7 +383,11 @@ export function GeneralStorePage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Always visible. These were hidden behind
+                        opacity-0 group-hover:opacity-100, so on the table they
+                        appeared to not exist at all — and on touch devices there is
+                        no hover to reveal them with. */}
+                    <div className="flex items-center gap-1.5">
                       {(status === "Low Stock" || status === "Out of Stock") &&
                         (sentToProcurement.has(item.id) ? (
                           <span className="flex items-center gap-1 text-xs text-emerald-600">
@@ -297,6 +405,33 @@ export function GeneralStorePage() {
                             <ShoppingCart className="w-3.5 h-3.5" />
                           </button>
                         ))}
+                      <button
+                        onClick={() => {
+                          setForm({
+                            name: item.name,
+                            category: item.category,
+                            unit: item.unit,
+                            qty: item.qty,
+                            reorderLevel: item.reorderLevel,
+                            unitCost: item.unitCost,
+                            bin: item.bin,
+                            lastReceived: item.lastReceived,
+                          });
+                          setEditingId(item.id);
+                          setShowModal(true);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-teal-700 rounded-lg hover:bg-teal-50"
+                        title="Edit stock item"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(item)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                        title="Remove stock item"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -381,7 +516,7 @@ export function GeneralStorePage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center">
               <h2 className="text-base font-semibold text-gray-900">
-                Add Stock Item
+                {editingId ? "Edit Stock Item" : "Add Stock Item"}
               </h2>
               <button
                 onClick={() => setShowModal(false)}
@@ -396,12 +531,37 @@ export function GeneralStorePage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     Item Name
                   </label>
-                  <input
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                    placeholder="e.g. Cement (50kg bag)"
+                  {/* Picks from the material register. Selecting a material also
+                      fills its category and unit, so a stock item cannot disagree
+                      with the material it represents. */}
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-teal-500"
                     value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  />
+                    onChange={(e) => {
+                      const material = materialOptions.find(
+                        (m) => m.name === e.target.value,
+                      );
+                      setForm({
+                        ...form,
+                        name: e.target.value,
+                        category: material?.category || form.category,
+                        unit: material?.unit || form.unit,
+                      });
+                    }}
+                  >
+                    <option value="">Select a material…</option>
+                    {materialOptions.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                  {materialOptions.length === 0 && (
+                    <p className="mt-1 text-[11px] text-amber-600">
+                      No materials registered yet — add one under All Materials
+                      first.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -415,7 +575,10 @@ export function GeneralStorePage() {
                     }
                   >
                     <option value="">Select category</option>
-                    {editableCategories.map((c) => (
+                    {/* From Storefront Settings → Categories. This used to list
+                        categories derived from existing stock items, so a new
+                        category could only ever be introduced by typing it. */}
+                    {categoryOptions.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
                   </select>
@@ -424,12 +587,17 @@ export function GeneralStorePage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     Unit
                   </label>
-                  <input
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                    placeholder="e.g. Bags, Metres, Units"
+                  {/* From Storefront Settings → Units of Measurement. */}
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white outline-none focus:ring-2 focus:ring-teal-500"
                     value={form.unit}
                     onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  />
+                  >
+                    <option value="">Select unit</option>
+                    {unitOptions.map((u) => (
+                      <option key={u}>{u}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -494,16 +662,30 @@ export function GeneralStorePage() {
                 Cancel
               </button>
               <button
-                onClick={saveItem}
-                disabled={!form.name.trim()}
+                onClick={() => void saveItem()}
+                disabled={busy || !form.name.trim() || !form.unit.trim()}
                 className="px-4 py-2 text-sm bg-teal-700 text-white rounded-xl hover:bg-teal-800 disabled:opacity-50"
               >
-                Add Item
+                {busy ? "Saving…" : editingId ? "Save Changes" : "Add Item"}
               </button>
             </div>
           </div>
         </div>
       )}
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title="Remove stock item"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will be removed from the General Store. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Remove"
+        isDangerous
+        isLoading={busy}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

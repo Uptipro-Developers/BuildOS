@@ -66,6 +66,12 @@ interface UserRecord {
   assignedApps: AppKey[];
   overrides: Record<string, ProcessOverride>;
   rolePerms: Record<string, RoleBasePerm>;
+  /**
+   * Override count from the list endpoint. The full `overrides` map is only
+   * resolved when the pane opens, so the list column cannot be derived from it —
+   * it read as 0 for everyone regardless of how many overrides existed.
+   */
+  overrideCount: number;
 }
 
 // ── App config ─────────────────────────────────────────────────────────────────
@@ -459,6 +465,7 @@ export function UserPermissionsPage() {
               // rather than one per row on load.
               rolePerms: {},
               overrides: {},
+              overrideCount: Number(u.overrideCount ?? 0),
             };
           }),
         );
@@ -564,14 +571,15 @@ export function UserPermissionsPage() {
         processOverrides,
       });
       const { rolePerms, overrides } = fromEffective(effective);
-      const updated = { ...selectedUser, rolePerms, overrides };
-      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-      setSelectedUser(null);
-
       const count = Object.values(processOverrides).reduce(
         (sum, actions) => sum + Object.keys(actions).length,
         0,
       );
+      // Keep the list column in step with what was just saved, so it does not go
+      // stale until the next full reload.
+      const updated = { ...selectedUser, rolePerms, overrides, overrideCount: count };
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setSelectedUser(null);
       toast.success(
         count === 0
           ? "Overrides cleared — this user now follows their role."
@@ -677,14 +685,10 @@ export function UserPermissionsPage() {
               </tr>
             )}
             {filtered.map((user) => {
-              const overrideCount = Object.values(user.overrides).reduce(
-                (s, ov) => {
-                  return (
-                    s + Object.values(ov).filter((v) => v !== "inherit").length
-                  );
-                },
-                0,
-              );
+              // From the list endpoint. Deriving it from `user.overrides` reported
+              // 0 for everyone, because that map is only populated once the pane
+              // for that user has been opened.
+              const overrideCount = user.overrideCount;
               return (
                 <tr
                   key={user.id}

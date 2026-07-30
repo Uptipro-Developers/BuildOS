@@ -337,14 +337,28 @@ export class AdminExtrasService {
             status: string;
             lastLogin?: Date | null;
             assignedApps: string[];
+            permissionOverrides?: string[];
             createdAt: Date;
         },
         prefix: string,
     ) {
+        const overrides = Array.isArray(user.permissionOverrides)
+            ? user.permissionOverrides
+            : [];
+
         return {
             ...user,
             status: this.normalizeStatus(user.status),
             userId: String(user.userId ?? '').trim() || this.formatBusinessUserId(user, prefix),
+            // How many process permissions this user has explicitly granted or
+            // revoked on top of their role. Surfaced on the list so the Active
+            // Overrides column can report it without resolving each user's full
+            // permission set — nav grants are excluded because the column counts
+            // process overrides.
+            overrideCount: overrides.filter(
+                (entry) =>
+                    String(entry).startsWith('proc:') || String(entry).startsWith('deny:'),
+            ).length,
         };
     }
 
@@ -1585,6 +1599,9 @@ export class AdminExtrasService {
                 id: true, userId: true, name: true, email: true, role: true,
                 department: true, phone: true, status: true, lastLogin: true,
                 assignedApps: true,
+                // Needed so the Users and User Permissions lists can show how many
+                // permission overrides a user carries without a call per row.
+                permissionOverrides: true,
                 createdAt: true,
             },
             orderBy: { name: 'asc' },
@@ -1607,6 +1624,9 @@ export class AdminExtrasService {
                 id: true, userId: true, name: true, email: true, role: true,
                 department: true, phone: true, status: true, lastLogin: true,
                 assignedApps: true,
+                // Needed so the Users and User Permissions lists can show how many
+                // permission overrides a user carries without a call per row.
+                permissionOverrides: true,
                 createdAt: true,
             },
         });

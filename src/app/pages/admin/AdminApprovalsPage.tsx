@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   CheckCircle,
   XCircle,
@@ -9,6 +9,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { getApprovals, approveItem, rejectItem } from "../../api/approvals";
+import { toast } from "sonner";
 
 type AdminApprovalType = string;
 type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -67,11 +68,24 @@ export function AdminApprovalsPage() {
   const [infoNote, setInfoNote] = useState("");
   const [sentInfoFor, setSentInfoFor] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    getApprovals("admin")
+  // "mine" shows only what this user's configured workflows put in front of them;
+  // "all" is the full cross-module queue. The page used to request module=admin,
+  // which scoped it to a single module's rows rather than everything awaiting a
+  // decision.
+  const [scope, setScope] = useState<"mine" | "all">("all");
+
+  const loadApprovals = useCallback(() => {
+    getApprovals(undefined, scope === "mine")
       .then((items) => setApprovals(items as AdminApproval[]))
-      .catch(() => setApprovals([]));
-  }, []);
+      .catch((err: unknown) => {
+        setApprovals([]);
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load approvals.",
+        );
+      });
+  }, [scope]);
+
+  useEffect(loadApprovals, [loadApprovals]);
 
   function getStatus(a: AdminApproval): ApprovalStatus {
     return approvalStates[a.id] ?? a.status;
@@ -79,25 +93,25 @@ export function AdminApprovalsPage() {
   function approve(id: string) {
     approveItem(id)
       .then(() => {
-        getApprovals("admin")
-          .then((items) => setApprovals(items as AdminApproval[]))
-          .catch(() => setApprovals([]));
+        toast.success("Approved.");
+        loadApprovals();
       })
-      .catch((err) => {
-        alert("Failed to approve. Please try again.");
-        console.error(err);
+      .catch((err: unknown) => {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to approve. Please try again.",
+        );
       });
   }
   function reject(id: string) {
     rejectItem(id)
       .then(() => {
-        getApprovals("admin")
-          .then((items) => setApprovals(items as AdminApproval[]))
-          .catch(() => setApprovals([]));
+        toast.success("Rejected.");
+        loadApprovals();
       })
-      .catch((err) => {
-        alert("Failed to reject. Please try again.");
-        console.error(err);
+      .catch((err: unknown) => {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to reject. Please try again.",
+        );
       });
   }
   function sendInfoRequest(id: string) {
@@ -158,6 +172,33 @@ export function AdminApprovalsPage() {
             <span className="ml-1 text-xs text-gray-400">({counts[s]})</span>
           </button>
         ))}
+      </div>
+
+      {/* Scope: my approvals vs the full queue */}
+      <div className="flex items-center gap-2">
+        {(
+          [
+            { key: "mine", label: "My Approvals" },
+            { key: "all", label: "All Approvals" },
+          ] as const
+        ).map((option) => (
+          <button
+            key={option.key}
+            onClick={() => setScope(option.key)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              scope === option.key
+                ? "bg-gray-900 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+        <p className="text-xs text-gray-400 ml-1">
+          {scope === "mine"
+            ? "Items whose configured approval workflow names you as an approver."
+            : "Everything awaiting a decision across all modules."}
+        </p>
       </div>
 
       {/* Search + type filter */}

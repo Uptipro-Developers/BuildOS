@@ -14,6 +14,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
+import { toast } from "sonner";
 
 type RequestStatus =
   | "Pending"
@@ -84,7 +85,11 @@ export function IncomingRequestsPage() {
   useEffect(() => {
     getMaterialRequests()
       .then((data) => setRequests(data.map(toRequest)))
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load requests.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -104,19 +109,17 @@ export function IncomingRequestsPage() {
       setRequests((prev) =>
         prev.map((r) => (r.id === id ? toRequest(updated) : r)),
       );
-    } catch {
-      setRequests((prev) =>
-        prev.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                status: "Approved",
-                approvedBy: "Store Manager",
-                approvalDate: formatDateByGeneralSettings(new Date()),
-              }
-            : r,
-        ),
+      toast.success(`Request ${id} approved.`);
+    } catch (err) {
+      // This used to apply the change locally when the request FAILED, so a
+      // rejected update looked successful and silently reverted on refresh.
+      // The row now stays as the server has it and the failure is surfaced.
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to approve the request.",
       );
+      return;
     }
     setSelected(null);
   }
@@ -127,19 +130,17 @@ export function IncomingRequestsPage() {
       setRequests((prev) =>
         prev.map((r) => (r.id === id ? toRequest(updated) : r)),
       );
-    } catch {
-      setRequests((prev) =>
-        prev.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                status: "Rejected",
-                approvedBy: "Store Manager",
-                approvalDate: formatDateByGeneralSettings(new Date()),
-              }
-            : r,
-        ),
+      toast.success(`Request ${id} rejected.`);
+    } catch (err) {
+      // This used to apply the change locally when the request FAILED, so a
+      // rejected update looked successful and silently reverted on refresh.
+      // The row now stays as the server has it and the failure is surfaced.
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to reject the request.",
       );
+      return;
     }
     setSelected(null);
   }
@@ -152,12 +153,16 @@ export function IncomingRequestsPage() {
       setRequests((prev) =>
         prev.map((r) => (r.id === id ? toRequest(updated) : r)),
       );
-    } catch {
-      setRequests((prev) =>
-        prev.map((r) =>
-          r.id === id ? { ...r, status: "Forwarded to Procurement" } : r,
-        ),
+    } catch (err) {
+      // This used to apply the change locally when the request FAILED, so a
+      // rejected update looked successful and silently reverted on refresh.
+      // The row now stays as the server has it and the failure is surfaced.
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to forward the request.",
       );
+      return;
     }
     setSelected(null);
   }
@@ -168,10 +173,14 @@ export function IncomingRequestsPage() {
       setRequests((prev) =>
         prev.map((r) => (r.id === id ? toRequest(updated) : r)),
       );
-    } catch {
-      setRequests((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: "Fulfilled" } : r)),
+      toast.success(`Request ${id} fulfilled.`);
+    } catch (err) {
+      // Applied the change locally on failure, so an unfulfilled request appeared
+      // fulfilled until the next load.
+      toast.error(
+        err instanceof Error ? err.message : "Failed to fulfil the request.",
       );
+      return;
     }
     setSelected(null);
   }

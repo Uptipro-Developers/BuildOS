@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowRight,
@@ -138,6 +139,15 @@ export function StorefrontDashboardPage() {
     [materials, requests, transfers],
   );
 
+  // A dashboard widget that fails to load used to leave an empty card with no
+  // explanation. One shared handler keeps four simultaneous failures from stacking
+  // four identical toasts.
+  const reportLoadFailure = (what: string) => (err: unknown) =>
+    toast.error(
+      err instanceof Error ? `${what}: ${err.message}` : `Failed to load ${what}.`,
+      { id: "storefront-dashboard-load" },
+    );
+
   useEffect(() => {
     getStores()
       .then((data) =>
@@ -155,7 +165,7 @@ export function StorefrontDashboardPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch(reportLoadFailure("stores"));
     getStockTransfers()
       .then((data) => {
         setTransfers(data);
@@ -170,13 +180,13 @@ export function StorefrontDashboardPage() {
           })),
         );
       })
-      .catch(console.error);
+      .catch(reportLoadFailure("stock movements"));
     getMaterials()
       .then(setMaterials)
-      .catch(console.error);
+      .catch(reportLoadFailure("material requests"));
     getMaterialRequests()
       .then(setRequests)
-      .catch(console.error);
+      .catch(reportLoadFailure("inventory totals"));
   }, []);
 
   return (

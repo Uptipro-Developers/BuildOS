@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** Must match the key AdminExtrasService writes its settings row under. */
+const ADMIN_SETTINGS_KEY = 'admin-settings';
 
 @Injectable()
 export class MaterialsService {
@@ -49,8 +52,53 @@ export class MaterialsService {
         });
     }
 
-    createStore(data: any) {
+    /**
+     * Creates a store, honouring the per-level cap configured in Storefront
+     * Settings.
+     *
+     * The cap ("2 central stores", "5 regional hubs") was configurable and shown in
+     * the UI but never enforced anywhere: this was a bare `store.create`, so the
+     * limit could be exceeded by any client that skipped the form. `Store.type`
+     * carries the level name the cap is keyed on.
+     */
+    async createStore(data: any) {
+        await this.assertStoreLevelCapacity(String(data?.type ?? ''));
         return this.prisma.store.create({ data });
+    }
+
+    /** Refuses when the configured maximum for a store level is already reached. */
+    private async assertStoreLevelCapacity(type: string) {
+        const level = type.trim();
+        if (!level) return;
+
+        let levels: any[] = [];
+        try {
+            const row = await this.prisma.systemSetting.findUnique({
+                where: { key: ADMIN_SETTINGS_KEY },
+            });
+            const value = row?.value as Record<string, any> | undefined;
+            levels = Array.isArray(value?.storeLevels) ? value!.storeLevels : [];
+        } catch {
+            // Settings unavailable — do not block store creation over it.
+            return;
+        }
+
+        const configured = levels.find(
+            (item: any) =>
+                String(item?.name ?? '').trim().toLowerCase() === level.toLowerCase(),
+        );
+        const cap = Number(configured?.maxCount);
+        // null/undefined means unlimited, which is how Project Store ships.
+        if (!Number.isFinite(cap) || cap <= 0) return;
+
+        const existing = await this.prisma.store.count({
+            where: { type: { equals: level, mode: 'insensitive' } },
+        });
+        if (existing >= cap) {
+            throw new BadRequestException(
+                `Storefront settings allow a maximum of ${cap} ${level}${cap === 1 ? '' : 's'}; ${existing} already exist. Raise the limit in Storefront Settings first.`,
+            );
+        }
     }
 
     updateStore(id: string, data: any) {

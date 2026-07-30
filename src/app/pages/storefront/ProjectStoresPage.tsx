@@ -1,15 +1,24 @@
 import { useState, useEffect } from "react";
 import {
-  FolderOpen,
-  Package,
   AlertTriangle,
+  CheckCircle,
   ChevronDown,
   ChevronUp,
+  FolderOpen,
+  Package,
+  Pencil,
   ShoppingCart,
-  CheckCircle,
+  Trash2,
   X,
 } from "lucide-react";
-import { getStores, type Store } from "../../api/materials";
+import {
+  getStores,
+  updateStore,
+  deleteStore,
+  type Store,
+} from "../../api/materials";
+import { toast } from "sonner";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 
 type StockStatus = "In Stock" | "Low Stock" | "Out of Stock";
 
@@ -65,6 +74,54 @@ export function ProjectStoresPage() {
     new Set(),
   );
 
+  // Store-level edit and delete. The card previously offered neither, and its
+  // item-row actions were hidden behind hover.
+  const [storeForm, setStoreForm] = useState<ProjectStore | null>(null);
+  const [deleteStoreTarget, setDeleteStoreTarget] = useState<ProjectStore | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function saveStore() {
+    if (!storeForm) return;
+    setBusy(true);
+    try {
+      await updateStore(storeForm.id, {
+        name: storeForm.project,
+        location: storeForm.location,
+        manager: storeForm.custodian,
+      });
+      setStores((prev) =>
+        prev.map((s) => (s.id === storeForm.id ? { ...s, ...storeForm } : s)),
+      );
+      toast.success(`"${storeForm.project}" store updated.`);
+      setStoreForm(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update the store.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDeleteStore() {
+    if (!deleteStoreTarget) return;
+    setBusy(true);
+    try {
+      await deleteStore(deleteStoreTarget.id);
+      setStores((prev) => prev.filter((s) => s.id !== deleteStoreTarget.id));
+      toast.success(`"${deleteStoreTarget.project}" store deleted.`);
+      setDeleteStoreTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to delete the store.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     getStores()
       .then((data) => {
@@ -72,7 +129,11 @@ export function ProjectStoresPage() {
         setStores(ps);
         if (ps.length > 0) setExpanded(ps[0].id);
       })
-      .catch(console.error)
+      .catch((err: unknown) =>
+        toast.error(
+          err instanceof Error ? err.message : "Failed to load project stores.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -136,21 +197,23 @@ export function ProjectStoresPage() {
               key={store.id}
               className="bg-white border border-gray-200 rounded-xl overflow-hidden"
             >
-              <button
-                className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 text-left"
-                onClick={() => setExpanded(isOpen ? null : store.id)}
-              >
+              <div className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 text-left">
                 <div className="w-10 h-10 bg-teal-100 rounded-xl flex items-center justify-center flex-shrink-0">
                   <FolderOpen className="w-5 h-5 text-teal-600" />
                 </div>
-                <div className="flex-1">
+                {/* Only this region toggles the card, leaving room for the
+                    actions to be real buttons of their own. */}
+                <button
+                  className="flex-1 text-left"
+                  onClick={() => setExpanded(isOpen ? null : store.id)}
+                >
                   <p className="text-sm font-semibold text-gray-900">
                     {store.project} Project Store
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {store.location} · Custodian: {store.custodian}
                   </p>
-                </div>
+                </button>
                 <div className="flex items-center gap-3 flex-shrink-0">
                   <span className="text-xs text-gray-500">
                     {store.items.length} items
@@ -161,13 +224,35 @@ export function ProjectStoresPage() {
                       attention
                     </span>
                   )}
-                  {isOpen ? (
-                    <ChevronUp className="w-4 h-4 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
-                  )}
+                  {/* Always visible, not revealed on hover — there is no hover on
+                      a touch device, so hidden actions read as missing ones. */}
+                  <button
+                    onClick={() => setStoreForm({ ...store })}
+                    className="p-1.5 text-gray-400 hover:text-teal-700 rounded-lg hover:bg-teal-50"
+                    title="Edit store"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setDeleteStoreTarget(store)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                    title="Delete store"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : store.id)}
+                    aria-label={isOpen ? "Collapse store" : "Expand store"}
+                    className="p-1 text-gray-400"
+                  >
+                    {isOpen ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
-              </button>
+              </div>
 
               {isOpen && (
                 <div className="border-t border-gray-100 px-5 py-4">
@@ -211,7 +296,7 @@ export function ProjectStoresPage() {
                               </span>
                             </td>
                             <td className="py-2.5 text-right">
-                              <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center justify-end">
                                 {(status === "Low Stock" ||
                                   status === "Out of Stock") &&
                                   (sentToProcurement.has(procKey) ? (
@@ -319,6 +404,76 @@ export function ProjectStoresPage() {
           </div>
         </div>
       )}
+      {/* ── Edit store ── */}
+      {storeForm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">
+                Edit Project Store
+              </h2>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              {(
+                [
+                  { key: "project", label: "Project", placeholder: "Lekki Tower A" },
+                  { key: "location", label: "Location", placeholder: "Lekki, Lagos" },
+                  { key: "custodian", label: "Custodian", placeholder: "Store officer" },
+                ] as const
+              ).map((field) => (
+                <div key={field.key}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    {field.label}
+                    {field.key === "project" && (
+                      <span className="text-red-500"> *</span>
+                    )}
+                  </label>
+                  <input
+                    value={storeForm[field.key]}
+                    placeholder={field.placeholder}
+                    onChange={(e) =>
+                      setStoreForm((prev) =>
+                        prev ? { ...prev, [field.key]: e.target.value } : prev,
+                      )
+                    }
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="px-6 pb-5 flex justify-end gap-3">
+              <button
+                onClick={() => setStoreForm(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveStore()}
+                disabled={busy || !storeForm.project.trim()}
+                className="px-4 py-2 text-sm bg-teal-700 text-white rounded-xl hover:bg-teal-800 disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmationModal
+        isOpen={Boolean(deleteStoreTarget)}
+        title="Delete project store"
+        description={
+          deleteStoreTarget
+            ? `"${deleteStoreTarget.project} Project Store" and its ${deleteStoreTarget.items.length} stock record(s) will be removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={busy}
+        onConfirm={() => void confirmDeleteStore()}
+        onCancel={() => setDeleteStoreTarget(null)}
+      />
     </div>
   );
 }

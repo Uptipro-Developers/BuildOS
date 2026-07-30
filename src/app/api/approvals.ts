@@ -27,8 +27,15 @@ export interface ApprovalItem {
     approvalFlow?: ApprovalFlow | null;
 }
 
-export function getApprovals(module?: string) {
-    const query = module ? `?module=${encodeURIComponent(module)}` : "";
+/**
+ * Approval items. `mine` restricts the result to items whose configured workflow
+ * names the caller as an approver, resolved server-side from the session.
+ */
+export function getApprovals(module?: string, mine?: boolean) {
+    const params = new URLSearchParams();
+    if (module) params.set("module", module);
+    if (mine) params.set("mine", "true");
+    const query = params.toString() ? `?${params.toString()}` : "";
     return apiFetch<ApprovalItem[]>(`/admin/approvals${query}`);
 }
 
