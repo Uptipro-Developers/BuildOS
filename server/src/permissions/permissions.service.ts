@@ -519,7 +519,41 @@ export class PermissionsService {
         for (const role of roles) {
             if (role.isSuper) continue;
             const existing = Array.isArray(role.inheritedRoles) ? role.inheritedRoles : [];
-            if (existing.some((e) => String(e).startsWith('proc:'))) continue;
+
+            // "Already configured" means configured against processes that still
+            // exist. A role whose every grant names a retired process id is
+            // effectively unconfigured: those grants resolve to nothing, and a
+            // plain `.startsWith('proc:')` check would treat them as configuration
+            // and skip the role forever. This happened in practice when the catalog
+            // moved from action-grained ids ("p_approve_lv") to entity-grained ones
+            // ("p_leave_requests"), leaving every role holding dead grants.
+            const procEntries = existing.filter((e) => String(e).startsWith('proc:'));
+            const liveGrants = procEntries.filter((e) => {
+                const [, processId] = String(e).split(':');
+                return processId ? Boolean(actionsOf[processId]) : false;
+            });
+            const deadGrants = procEntries.length - liveGrants.length;
+
+            // Reseed when most of a role's grants are dead. A handful of live ones
+            // among many dead is residue from a catalog restructure, not
+            // configuration: when the catalog moved to entity-grained ids, a few
+            // ids (p_goods_receipt, p_supplier_compliance) happened to survive
+            // unchanged, leaving roles "configured" on two of nine procurement
+            // processes. Because an app counts as configured the moment it has one
+            // live grant, that would have *restricted* Procurement Managers to
+            // exactly those two and silently removed the rest.
+            //
+            // A genuinely configured role has no dead grants and is left untouched.
+            if (liveGrants.length > 0 && liveGrants.length >= deadGrants) continue;
+
+            // Drop the dead grants rather than accumulating them alongside the
+            // fresh ones.
+            // Keep nav grants and any still-valid process grants; only the dead
+            // ones are discarded.
+            const retained = [
+                ...existing.filter((e) => !String(e).startsWith('proc:')),
+                ...liveGrants,
+            ];
 
             const actions: PermissionAction[] = AUTHORITY.test(String(role.name ?? ''))
                 ? ['view', 'create', 'edit', 'approve', 'delete']
@@ -539,9 +573,13 @@ export class PermissionsService {
 
             await this.prisma.appRole.update({
                 where: { id: role.id },
-                data: { inheritedRoles: Array.from(new Set([...existing, ...additions])) },
+                data: { inheritedRoles: Array.from(new Set([...retained, ...additions])) },
             });
-            seeded.push(role.name);
+            seeded.push(
+                deadGrants > 0
+                    ? `${role.name} (cleared ${deadGrants} stale grants)`
+                    : role.name,
+            );
         }
 
         if (seeded.length > 0) {

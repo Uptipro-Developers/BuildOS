@@ -2,7 +2,10 @@ import { apiFetch } from './client';
 
 export interface AttendanceRecord {
     id: string; employeeId: string; employeeName: string; department?: string;
-    date: string; clockIn?: string; clockOut?: string; hoursWorked?: number;
+    date: string;
+    // Nullable in the database, and null is meaningful on write: it clears a
+    // recorded time when someone is re-marked absent or on leave.
+    clockIn?: string | null; clockOut?: string | null; hoursWorked?: number;
     status: string; notes?: string; createdAt: string;
 }
 export interface PayrollPeriod {

@@ -74,6 +74,12 @@ interface Field {
   key: string;
   label: string;
   type: FieldType;
+  /**
+   * False for fields the database cannot filter or sort by — joins,
+   * concatenations and counts, which are computed after the rows are loaded.
+   * Supplied by the backend registry.
+   */
+  queryable?: boolean;
 }
 interface DataSource {
   value: string;
@@ -531,12 +537,42 @@ export function ReportBuilderPage() {
       .catch((err) => console.error("Failed to load report sources:", err));
   }, []);
 
+  // Data sources are scoped to the selected application: picking Finance offers
+  // Finance's sources and nothing else. The list used to show every source
+  // regardless of application, so the Application select had no effect at all.
+  const appSources = liveSources.filter((s) => s.app === tplApp);
+
+  // Keep the selected source valid for the chosen application.
+  useEffect(() => {
+    if (liveSources.length === 0) return;
+    if (appSources.some((s) => s.value === tplDataSource)) return;
+
+    const next = appSources[0]?.value ?? "";
+    setTplDataSource(next);
+    setSelectedFields([]);
+    setFilters([]);
+    setSortRules([]);
+    setHasRun(false);
+    // appSources is derived from these two, so they are the real inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tplApp, liveSources]);
+
+  const liveSource =
+    liveSources.find((s) => s.value === tplDataSource) ?? appSources[0];
+
   const baseSource =
-    DATA_SOURCES.find((s) => s.value === tplDataSource) ?? DATA_SOURCES[0];
-  const liveSource = liveSources.find((s) => s.value === baseSource.value);
+    DATA_SOURCES.find((s) => s.value === (liveSource?.value ?? tplDataSource)) ??
+    DATA_SOURCES[0];
+
+  // Field definitions always come from the backend registry; DATA_SOURCES only
+  // supplies presentation metadata (module colour) for sources it happens to know.
   const source = liveSource
     ? {
         ...baseSource,
+        value: liveSource.value,
+        label: liveSource.label,
+        module: liveSource.module,
+        appKey: liveSource.app,
         fields: liveSource.fields.map((f) => ({
           key: f.key,
           label: f.label,
@@ -559,6 +595,86 @@ export function ReportBuilderPage() {
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Derived fields (joins, concatenations, counts) are computed after loading, so
+  // the database cannot filter or sort by them. Offering them silently did
+  // nothing — the backend dropped the clause — which is why filters appeared not
+  // to work. Only queryable fields are offered as filter and sort targets.
+  const queryableFields = source.fields.filter((f) => f.queryable !== false);
+
+  /**
+   * The SQL equivalent of the current visual configuration.
+   *
+   * SQL mode used to be an independent free-text editor, so switching to it made
+   * every field, filter and sort input appear dead — nothing they changed had any
+   * effect on what the editor showed or on what ran. Generating the SQL from the
+   * same configuration keeps one source of truth: the inputs stay live, and the
+   * query shown is the query that runs.
+   *
+   * Arbitrary SQL execution is deliberately not offered. Filters and sorts are
+   * resolved through the backend field registry precisely so a report cannot reach
+   * columns or relations it was never granted.
+   */
+  const generatedSql = (() => {
+    const cols =
+      selectedFields.length > 0
+        ? selectedFields.map((f) => `  ${f.key}`).join(",\n")
+        : source.fields.map((f) => `  ${f.key}`).join(",\n");
+
+    const lines = [`SELECT`, cols, `FROM ${source.value}`];
+
+    const applied = filters.filter((f) => f.field);
+    if (applied.length > 0) {
+      lines.push(
+        `WHERE ${applied
+          .map((f, i) => {
+            const prefix = i === 0 ? "" : "  AND ";
+            const value = /^\d+(\.\d+)?$/.test(f.value ?? "")
+              ? f.value
+              : `'${String(f.value ?? "").replace(/'/g, "''")}'`;
+            switch (f.operator) {
+              case "not_equals":
+                return `${prefix}${f.field} <> ${value}`;
+              case "contains":
+                return `${prefix}${f.field} ILIKE '%${String(f.value ?? "").replace(/'/g, "''")}%'`;
+              case "greater_than":
+                return `${prefix}${f.field} > ${value}`;
+              case "less_than":
+                return `${prefix}${f.field} < ${value}`;
+              case "between":
+                return `${prefix}${f.field} BETWEEN ${value} AND ${
+                  /^\d+(\.\d+)?$/.test(f.valueTo ?? "")
+                    ? f.valueTo
+                    : `'${String(f.valueTo ?? "").replace(/'/g, "''")}'`
+                }`;
+              case "is_empty":
+                return `${prefix}${f.field} IS NULL`;
+              default:
+                return `${prefix}${f.field} = ${value}`;
+            }
+          })
+          .join("\n")}`,
+      );
+    }
+
+    const sorts = sortRules.filter((r) => r.field);
+    if (sorts.length > 0) {
+      lines.push(
+        `ORDER BY ${sorts
+          .map((r) => `${r.field} ${(r.direction ?? "asc").toUpperCase()}`)
+          .join(", ")}`,
+      );
+    }
+
+    lines.push(`LIMIT ${rowLimit};`);
+    return lines.join("\n");
+  })();
+
+  // Keep the stored template's SQL in step with the builder, so saving a template
+  // records the query it actually runs.
+  useEffect(() => {
+    setSqlQuery(generatedSql);
+  }, [generatedSql]);
 
   const requestKey = JSON.stringify({
     source: source.value,
@@ -840,7 +956,7 @@ export function ReportBuilderPage() {
       ...prev,
       {
         id: Date.now().toString(),
-        field: source.fields[0].key,
+        field: (queryableFields[0] ?? source.fields[0])?.key ?? "",
         operator: "equals",
         value: "",
         valueTo: "",
@@ -1008,12 +1124,25 @@ export function ReportBuilderPage() {
                 }}
                 className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                {DATA_SOURCES.map((s) => (
+                {appSources.length === 0 && (
+                  <option value="">
+                    {liveSources.length === 0
+                      ? "Loading data sources…"
+                      : "No data sources for this application"}
+                  </option>
+                )}
+                {appSources.map((s) => (
                   <option key={s.value} value={s.value}>
                     {s.module} — {s.label}
                   </option>
                 ))}
               </select>
+              {liveSources.length > 0 && appSources.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-amber-600">
+                  This application has no reportable data sources yet. Pick another
+                  application to build a report.
+                </p>
+              )}
             </div>
 
             {/* Tabs */}
@@ -1184,7 +1313,7 @@ export function ReportBuilderPage() {
                           }
                           className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
                         >
-                          {source.fields.map((f) => (
+                          {queryableFields.map((f) => (
                             <option key={f.key} value={f.key}>
                               {f.label}
                             </option>
@@ -1295,7 +1424,7 @@ export function ReportBuilderPage() {
                             }
                             className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
                           >
-                            {source.fields.map((f) => (
+                            {queryableFields.map((f) => (
                               <option key={f.key} value={f.key}>
                                 {f.label}
                               </option>
@@ -1344,7 +1473,11 @@ export function ReportBuilderPage() {
                         onClick={() =>
                           setSortRules((prev) => [
                             ...prev,
-                            { field: source.fields[0].key, direction: "asc" },
+                            {
+                              field:
+                                (queryableFields[0] ?? source.fields[0])?.key ?? "",
+                              direction: "asc",
+                            },
                           ])
                         }
                         className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
@@ -1634,15 +1767,28 @@ export function ReportBuilderPage() {
                   Schema Reference
                 </p>
                 <p className="text-[10px] text-gray-400 mb-3">
-                  Click a field to insert into SQL
+                  {APPLICATIONS.find((a) => a.key === tplApp)?.label ??
+                    "This application"}
+                  's reportable tables and their real columns.
                 </p>
-                {DATA_SOURCES.map((src) => {
-                  const app = APPLICATIONS.find((a) => a.key === src.appKey);
+                {appSources.length === 0 && (
+                  <p className="text-[11px] text-amber-600">
+                    No reportable tables for this application.
+                  </p>
+                )}
+                {/* Scoped to the selected application and sourced from the backend
+                    registry, so it lists the columns that actually exist rather
+                    than a hardcoded list that had drifted from the database. */}
+                {appSources.map((src) => {
+                  const app = APPLICATIONS.find((a) => a.key === src.app);
                   return (
                     <div key={src.value} className="mb-4">
                       <div className="flex items-center gap-1.5 mb-1">
                         <span
-                          className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${src.moduleColor}`}
+                          className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                            DATA_SOURCES.find((d) => d.value === src.value)
+                              ?.moduleColor ?? "bg-gray-100 text-gray-600"
+                          }`}
                         >
                           {app?.icon}
                         </span>
@@ -1725,16 +1871,41 @@ export function ReportBuilderPage() {
                 <div className="bg-white border-b border-gray-100 p-4 shrink-0">
                   <textarea
                     value={sqlQuery}
-                    onChange={(e) => setSqlQuery(e.target.value)}
+                    readOnly
                     rows={7}
                     spellCheck={false}
                     id="sql-editor"
+                    aria-label="Generated SQL for the current report configuration"
                     className="w-full px-4 py-3 bg-gray-950 text-emerald-400 border border-gray-800 rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                   />
+                  <div className="flex items-start gap-2 mt-2 text-[11px] text-gray-500">
+                    <Code className="w-3.5 h-3.5 mt-px shrink-0 text-gray-400" />
+                    <p>
+                      Generated from the fields, filters and sorting on the left, and
+                      updates as you change them — so this is always the query that
+                      runs. It is read-only by design: reports resolve through a
+                      field registry so they cannot reach columns or relations the
+                      report was not granted.
+                    </p>
+                  </div>
                   <div className="flex items-center justify-between mt-3">
                     <p className="text-xs text-gray-500">
-                      Tables: {DATA_SOURCES.map((s) => s.value).join(", ")}
+                      {source.module} — {source.label}:{" "}
+                      {source.fields.length} field
+                      {source.fields.length === 1 ? "" : "s"}
                     </p>
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard
+                          ?.writeText(sqlQuery)
+                          .then(() => toast.success("SQL copied to clipboard."))
+                          .catch(() => toast.error("Could not copy the SQL."));
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors mr-2"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy SQL
+                    </button>
                     <button
                       onClick={() => setHasRun(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"

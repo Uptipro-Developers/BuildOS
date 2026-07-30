@@ -138,28 +138,109 @@ export function AttendancePage() {
       .catch(() => toast.error("Failed to load attendance"));
   }, []);
 
-  /** Persists a status change for one employee, creating or updating their
-   * attendance record for today as appropriate. */
-  function persistStatus(rec: AttRecord, status: AttStatus) {
+  /** "HH:MM" for a time input, from a stored "HH:MM" or "HH:MM:SS" value. */
+  const toTimeInput = (value: string) =>
+    /^\d{2}:\d{2}/.test(value) ? value.slice(0, 5) : "";
+
+  /** Hours between two "HH:MM" clock times, to one decimal place. */
+  function hoursBetween(clockIn: string, clockOut: string): number {
+    const inMinutes = toMinutes(clockIn);
+    const outMinutes = toMinutes(clockOut);
+    if (inMinutes === null || outMinutes === null) return 0;
+    // A clock-out before clock-in means the shift ran past midnight.
+    const span =
+      outMinutes >= inMinutes
+        ? outMinutes - inMinutes
+        : outMinutes + 24 * 60 - inMinutes;
+    return Math.round((span / 60) * 10) / 10;
+  }
+
+  function toMinutes(value: string): number | null {
+    const match = /^(\d{1,2}):(\d{2})/.exec(value ?? "");
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  }
+
+  const nowTime = () =>
+    new Date().toTimeString().slice(0, 5); // "HH:MM" in local time
+
+  /**
+   * Persists an attendance change, creating or updating today's record.
+   *
+   * Marking a status used to send only the status, so clockIn/clockOut/hoursWorked
+   * were never written and the Check In / Check Out / Hours columns could never
+   * show anything. Marking someone present or late now stamps their clock-in if it
+   * is not already recorded, marking them absent or on leave clears the times, and
+   * the hours are always derived from the two clock values rather than stored
+   * independently.
+   */
+  function persistAttendance(
+    rec: AttRecord,
+    changes: { status?: AttStatus; checkIn?: string; checkOut?: string },
+  ) {
+    const status = changes.status ?? rec.status;
+    const clears = status === "absent" || status === "leave";
+
+    let checkIn = changes.checkIn ?? toTimeInput(rec.checkIn);
+    let checkOut = changes.checkOut ?? toTimeInput(rec.checkOut);
+
+    if (clears) {
+      checkIn = "";
+      checkOut = "";
+    } else if (
+      changes.status &&
+      (status === "present" || status === "late") &&
+      !checkIn
+    ) {
+      // Marking someone in is the clock-in.
+      checkIn = nowTime();
+    }
+
+    const hrs = hoursBetween(checkIn, checkOut);
+
     const payload = {
       employeeId: rec.id,
       employeeName: rec.name,
       department: rec.department,
-      date: new Date().toISOString(),
       status,
+      clockIn: checkIn || null,
+      clockOut: checkOut || null,
+      hoursWorked: hrs,
+      // Only stamp the date when creating; updating must not move an existing
+      // record to today.
+      ...(rec.recordId ? {} : { date: new Date().toISOString() }),
     };
+
     const request = rec.recordId
       ? updateAttendanceRecord(rec.recordId, payload)
       : createAttendanceRecord(payload);
+
     request
       .then((saved) => {
         setRecords((prev) =>
           prev.map((r) =>
-            r.id === rec.id ? { ...r, status, recordId: saved.id } : r,
+            r.id === rec.id
+              ? {
+                  ...r,
+                  status,
+                  recordId: saved.id,
+                  checkIn: checkIn || "—",
+                  checkOut: checkOut || "—",
+                  hrs,
+                }
+              : r,
           ),
         );
       })
       .catch(() => toast.error(`Failed to save attendance for ${rec.name}`));
+  }
+
+  /** Kept for the status buttons, which only ever change the status. */
+  function persistStatus(rec: AttRecord, status: AttStatus) {
+    persistAttendance(rec, { status });
   }
 
   const counts = {
@@ -483,8 +564,42 @@ export function AttendancePage() {
                   <td className="px-4 py-3 text-xs text-gray-500">
                     {rec.department}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{rec.checkIn}</td>
-                  <td className="px-4 py-3 text-gray-600">{rec.checkOut}</td>
+                  {/* Check In / Check Out are editable so HR can record a time
+                      directly or correct one; Hours is always derived from them
+                      rather than typed, so the three can never disagree. */}
+                  <td className="px-4 py-3">
+                    <input
+                      type="time"
+                      value={toTimeInput(rec.checkIn)}
+                      disabled={rec.status === "absent" || rec.status === "leave"}
+                      onChange={(e) =>
+                        persistAttendance(rec, { checkIn: e.target.value })
+                      }
+                      aria-label={`Check in time for ${rec.name}`}
+                      className="text-xs border border-gray-200 rounded px-2 py-1 bg-white hover:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="time"
+                      value={toTimeInput(rec.checkOut)}
+                      disabled={
+                        rec.status === "absent" ||
+                        rec.status === "leave" ||
+                        !toTimeInput(rec.checkIn)
+                      }
+                      title={
+                        !toTimeInput(rec.checkIn)
+                          ? "Record a check-in time first"
+                          : undefined
+                      }
+                      onChange={(e) =>
+                        persistAttendance(rec, { checkOut: e.target.value })
+                      }
+                      aria-label={`Check out time for ${rec.name}`}
+                      className="text-xs border border-gray-200 rounded px-2 py-1 bg-white hover:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none disabled:bg-gray-50 disabled:text-gray-300"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-gray-600">
                     {rec.hrs > 0 ? `${rec.hrs}h` : "—"}
                   </td>
