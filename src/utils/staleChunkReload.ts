@@ -12,6 +12,17 @@
  * names. The reload is guarded by a sessionStorage flag so a genuine, persistent
  * load failure — an offline network, a broken deploy — surfaces as an error
  * instead of an infinite refresh loop.
+ *
+ * This depends on the rewrite rule in vercel.json, whose SPA catch-all
+ * deliberately excludes /assets via a negative lookahead: `/((?!assets/).*)`.
+ * Client-side routing needs the catch-all, but it was also swallowing missing
+ * build assets — answering a gone chunk with index.html is what made the browser
+ * report "'text/html' is not a valid JavaScript MIME type", since it asked for a
+ * module and got HTML. Excluding /assets keeps a missing chunk a real 404, which
+ * is what isStaleChunkError below detects. A self-rewrite
+ * (/assets/(.*) -> /assets/$1) does NOT work as a substitute: it is a no-op and
+ * the catch-all still applies. vercel.json cannot carry this note itself — its
+ * schema rejects a "//" comment key.
  */
 
 const RELOAD_FLAG = "buildos_stale_chunk_reloaded";
