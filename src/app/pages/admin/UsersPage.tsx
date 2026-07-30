@@ -11,7 +11,18 @@ import {
   getPendingSyncEmployees,
   syncEmployeeToUser,
   AppUser,
+  getProcessCatalog,
+  getUserActivity,
+  getUserPermissions,
+  getUserRequests,
+  setUserPermissions,
+  type EffectivePermissions,
+  type OverrideState,
   type PendingSyncEmployee,
+  type PermissionAction,
+  type ProcessCatalogItem,
+  type UserActivityEntry,
+  type UserRequestEntry,
 } from "../../api/admin-extras";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import {
@@ -200,6 +211,323 @@ function userFromApi(u: AppUser): UserRecord {
   };
 }
 
+/**
+ * Process permissions for one user, per assigned application.
+ *
+ * Lists the full process catalog — the same `/admin/process-catalog` endpoint
+ * Process Configuration reads — for every application the user is assigned to, so
+ * the matrix here matches Process Configuration exactly instead of a hardcoded
+ * subset. Each cell shows how the permission resolved (inherited from the role,
+ * added on the user, revoked on the user, or unrestricted) and cycles through
+ * inherit → allow → deny on click.
+ *
+ * Only explicit allows and denies are saved. Leaving a cell on "inherit" is what
+ * lets a later change to the role flow through to this user.
+ */
+function UserProcessPermissions({
+  userId,
+  role,
+  assignedApps,
+  effective,
+  catalog,
+  loading,
+  error,
+  onSaved,
+}: {
+  userId: string;
+  role: string;
+  assignedApps: AppKey[];
+  effective: EffectivePermissions | null;
+  catalog: ProcessCatalogItem[];
+  loading: boolean;
+  error: string | null;
+  onSaved: (next: EffectivePermissions) => void;
+}) {
+  const [draft, setDraft] = useState<
+    Record<string, Partial<Record<PermissionAction, OverrideState>>>
+  >({});
+  const [saving, setSaving] = useState(false);
+
+  // Reset the draft whenever a fresh resolution arrives, so the matrix always
+  // starts from what is actually stored.
+  useEffect(() => {
+    if (!effective) return;
+    const next: Record<string, Partial<Record<PermissionAction, OverrideState>>> = {};
+    for (const [processId, sources] of Object.entries(effective.processSources)) {
+      for (const action of PERM_ACTIONS) {
+        const source = sources[action.key as PermissionAction];
+        if (source === "allow" || source === "deny") {
+          (next[processId] ??= {})[action.key as PermissionAction] = source;
+        }
+      }
+    }
+    setDraft(next);
+  }, [effective]);
+
+  const OVERRIDE_CYCLE: Record<OverrideState, OverrideState> = {
+    inherit: "allow",
+    allow: "deny",
+    deny: "inherit",
+  };
+
+  const stateOf = (
+    processId: string,
+    action: PermissionAction,
+  ): OverrideState => draft[processId]?.[action] ?? "inherit";
+
+  /** What the role alone grants, ignoring any user override. */
+  const roleGrants = (processId: string, action: PermissionAction) => {
+    const source = effective?.processSources[processId]?.[action];
+    if (source === "role") return Boolean(effective?.processPermissions[processId]?.[action]);
+    // "open" means no configuration restricts it; "allow"/"deny" are user-level,
+    // so the role's own answer is whatever it was before the override.
+    return source === "open";
+  };
+
+  const effectiveOf = (processId: string, action: PermissionAction) => {
+    const state = stateOf(processId, action);
+    if (state === "allow") return true;
+    if (state === "deny") return false;
+    return roleGrants(processId, action);
+  };
+
+  const cycle = (processId: string, action: PermissionAction) => {
+    const next = OVERRIDE_CYCLE[stateOf(processId, action)];
+    setDraft((prev) => {
+      const forProcess = { ...(prev[processId] ?? {}) };
+      if (next === "inherit") delete forProcess[action];
+      else forProcess[action] = next;
+      const copy = { ...prev };
+      if (Object.keys(forProcess).length === 0) delete copy[processId];
+      else copy[processId] = forProcess;
+      return copy;
+    });
+  };
+
+  const overrideCount = Object.values(draft).reduce(
+    (sum, actions) => sum + Object.keys(actions).length,
+    0,
+  );
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const next = await setUserPermissions(userId, { processOverrides: draft });
+      onSaved(next);
+      toast.success(
+        overrideCount === 0
+          ? "Overrides cleared — this user now follows their role."
+          : `Saved ${overrideCount} permission override${overrideCount > 1 ? "s" : ""}.`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save permissions.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Only applications the user is actually assigned to, so the matrix reflects
+  // what they can reach — including apps granted beyond their role.
+  const groups = ALL_APPS.filter((app) => assignedApps.includes(app.key))
+    .map((app) => ({
+      app,
+      processes: catalog.filter(
+        (proc) => String(proc.app ?? "").toLowerCase() === app.key,
+      ),
+    }))
+    .filter((group) => group.processes.length > 0);
+
+  if (loading) {
+    return (
+      <p className="text-sm text-gray-400 text-center py-8">
+        Loading permissions…
+      </p>
+    );
+  }
+  if (error) {
+    return <p className="text-sm text-red-600 py-4">{error}</p>;
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs text-gray-500">
+            Process permissions per application, inherited from{" "}
+            <strong>{role || "no role"}</strong> and overridable here.
+          </p>
+          {effective?.isSuper && (
+            <p className="text-xs text-indigo-600 mt-1">
+              This is a super role — it has every permission and cannot be
+              restricted.
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => void save()}
+          disabled={saving || effective?.isSuper}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0"
+        >
+          {saving ? "Saving…" : "Save Overrides"}
+        </button>
+      </div>
+
+      {/* Legend — explains what each cell state means. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+        <span className="flex items-center gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Inherited from
+          role
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3.5 h-3.5 rounded-full bg-indigo-100 border border-indigo-400" />
+          Added on this user
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3.5 h-3.5 rounded-full bg-red-100 border border-red-400" />
+          Revoked on this user
+        </span>
+        <span className="flex items-center gap-1.5">
+          <XCircle className="w-3.5 h-3.5 text-gray-300" /> Not granted
+        </span>
+        <span className="text-gray-400">· Click a cell to cycle</span>
+      </div>
+
+      {groups.length === 0 && (
+        <div className="text-center py-8 text-gray-400 text-sm">
+          No applications assigned yet. Grant application access on the App Access
+          tab to configure process permissions.
+        </div>
+      )}
+
+      {groups.map(({ app, processes }) => (
+        <div key={app.key}>
+          <div className="flex items-center gap-2 mb-2">
+            <span
+              className={`px-2 py-0.5 rounded text-xs font-semibold ${app.color}`}
+            >
+              {app.label}
+            </span>
+            {effective?.processUnrestrictedApps.includes(app.key) && (
+              <span className="text-xs text-gray-400">
+                unrestricted — no process config on this role
+              </span>
+            )}
+          </div>
+          <div className="border border-gray-200 rounded-lg overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-3 py-2 text-gray-500 font-medium">
+                    Process
+                  </th>
+                  {PERM_ACTIONS.map((a) => (
+                    <th
+                      key={a.key}
+                      className="px-2 py-2 text-gray-500 font-medium text-center whitespace-nowrap"
+                    >
+                      {a.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {processes.map((proc) => (
+                  <tr key={proc.id} className="hover:bg-gray-50/50">
+                    <td className="px-3 py-2 text-gray-700 font-medium">
+                      {proc.label}
+                    </td>
+                    {PERM_ACTIONS.map((a) => {
+                      const action = a.key as PermissionAction;
+                      const state = stateOf(proc.id, action);
+                      const allowed = effectiveOf(proc.id, action);
+                      const title =
+                        state === "allow"
+                          ? "Added on this user — click to revoke"
+                          : state === "deny"
+                            ? "Revoked on this user — click to inherit"
+                            : "Inherited from role — click to add";
+
+                      return (
+                        <td key={a.key} className="px-2 py-2 text-center">
+                          <button
+                            type="button"
+                            title={title}
+                            disabled={effective?.isSuper}
+                            onClick={() => cycle(proc.id, action)}
+                            className={`w-6 h-6 inline-flex items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed ${
+                              state === "allow"
+                                ? "bg-indigo-100 border-indigo-400"
+                                : state === "deny"
+                                  ? "bg-red-100 border-red-400"
+                                  : "border-transparent hover:bg-gray-100"
+                            }`}
+                          >
+                            {allowed ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                            ) : (
+                              <XCircle className="w-3.5 h-3.5 text-gray-300" />
+                            )}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A role plus the apps its Layer 1 configuration covers. */
+interface RoleAppScope {
+  id: string;
+  name: string;
+  isSuper: boolean;
+  appAccess: AppKey[];
+}
+
+/**
+ * Reads a role's Layer 1 (application access) configuration off the API response.
+ *
+ * `GET /admin/roles` has always returned this under `permissions.appAccess`, but
+ * every caller mapped the response down to `{id, name}` and threw it away — which
+ * is why the Add User form offered all seven applications regardless of role. A
+ * super role is scoped to everything.
+ */
+function toRoleAppScope(role: {
+  id: string;
+  name: string;
+  isSuper?: boolean;
+  permissions?: unknown;
+}): RoleAppScope {
+  const appAccessSource = (role.permissions as { appAccess?: unknown } | undefined)
+    ?.appAccess;
+  const granted =
+    appAccessSource && typeof appAccessSource === "object"
+      ? Object.entries(appAccessSource as Record<string, unknown>)
+          .filter(([, allowed]) => Boolean(allowed))
+          .map(([app]) => app.toLowerCase())
+      : [];
+
+  const appAccess = ALL_APPS.map((a) => a.key).filter(
+    (key) => role.isSuper || granted.includes(key),
+  );
+
+  return {
+    id: role.id,
+    name: role.name,
+    isSuper: Boolean(role.isSuper),
+    // ESS is every user's baseline, matching what the backend resolver grants.
+    appAccess: Array.from(new Set<AppKey>(["ess", ...appAccess])),
+  };
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const STATUS_COLOR: Record<UserStatus, string> = {
   Active: "bg-emerald-100 text-emerald-700",
@@ -298,11 +626,61 @@ function UserDetailPanel({
     { key: "requests", label: "Requests" },
   ] as const;
 
-  // Group processes by app
-  const processesByApp = ALL_APPS.map((app) => ({
-    app,
-    processes: user.processes.filter((p) => p.app === app.key),
-  })).filter((g) => g.processes.length > 0);
+  // ── Live data for the Permissions / Activity / Requests tabs ──
+  // All three tabs already had complete rendering code but were handed hardcoded
+  // empty arrays, so they always read as "nothing recorded".
+  const [effective, setEffective] = useState<EffectivePermissions | null>(null);
+  const [catalog, setCatalog] = useState<ProcessCatalogItem[]>([]);
+  const [activity, setActivity] = useState<UserActivityEntry[]>([]);
+  const [requests, setRequests] = useState<UserRequestEntry[]>([]);
+  const [roleApps, setRoleApps] = useState<AppKey[]>([]);
+  const [tabError, setTabError] = useState<string | null>(null);
+  const [loadingTab, setLoadingTab] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setLoadingTab(true);
+    setTabError(null);
+
+    // The process catalog is fetched from the same endpoint Process Configuration
+    // uses, so this matrix lists exactly the processes configured there.
+    Promise.all([
+      getUserPermissions(user.id),
+      getProcessCatalog(),
+      getUserActivity(user.id),
+      getUserRequests(user.id),
+      getAppRoles(),
+    ])
+      .then(([perms, processCatalog, acts, reqs, roles]) => {
+        if (!alive) return;
+        setEffective(perms);
+        setCatalog(processCatalog);
+        setActivity(acts);
+        setRequests(reqs);
+
+        // The role's own app scope, so App Access can distinguish what the role
+        // grants from what an admin added on top of it.
+        const canonical = (value: string) =>
+          value.trim().toLowerCase().replace(/[\s_-]+/g, "");
+        const match = roles.find(
+          (r) => canonical(r.name) === canonical(user.role ?? ""),
+        );
+        setRoleApps(match ? toRoleAppScope(match).appAccess : []);
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setTabError(
+          err instanceof Error ? err.message : "Failed to load user details.",
+        );
+      })
+      .finally(() => {
+        if (alive) setLoadingTab(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [user.id]);
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -405,8 +783,10 @@ function UserDetailPanel({
           {tab === "apps" && (
             <div className="space-y-3">
               <p className="text-xs text-gray-500 mb-4">
-                {selectedApps.length} of {ALL_APPS.length} applications
-                assigned.
+                {selectedApps.length} of {ALL_APPS.length} applications assigned.
+                Applications beyond <strong>{user.role || "the role"}</strong> can
+                be granted here; each one also unlocks its process permissions on
+                the Permissions tab.
               </p>
               {ALL_APPS.map((app) => {
                 const has = selectedApps.includes(app.key);
@@ -444,7 +824,7 @@ function UserDetailPanel({
                         <>
                           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                           <span className="text-xs text-emerald-700 font-medium">
-                            Assigned
+                            {roleApps.includes(app.key) ? "From role" : "Extended"}
                           </span>
                         </>
                       ) : (
@@ -483,77 +863,35 @@ function UserDetailPanel({
 
           {/* ── Permissions ── */}
           {tab === "permissions" && (
-            <div className="space-y-6">
-              <p className="text-xs text-gray-500">
-                Process-level permissions across all applications.
-              </p>
-              {processesByApp.length === 0 && (
-                <div className="text-center py-8 text-gray-400 text-sm">
-                  No processes assigned to this user.
-                </div>
-              )}
-              {processesByApp.map(({ app, processes }) => (
-                <div key={app.key}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span
-                      className={`px-2 py-0.5 rounded text-xs font-semibold ${app.color}`}
-                    >
-                      {app.label}
-                    </span>
-                  </div>
-                  <div className="border border-gray-200 rounded-lg overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="text-left px-3 py-2 text-gray-500 font-medium">
-                            Process
-                          </th>
-                          {PERM_ACTIONS.map((a) => (
-                            <th
-                              key={a.key}
-                              className="px-2 py-2 text-gray-500 font-medium text-center"
-                            >
-                              {a.label}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {processes.map((proc) => (
-                          <tr key={proc.id} className="hover:bg-gray-50/50">
-                            <td className="px-3 py-2 text-gray-700 font-medium">
-                              {proc.label}
-                            </td>
-                            {PERM_ACTIONS.map((a) => (
-                              <td key={a.key} className="px-2 py-2 text-center">
-                                {proc.permissions[a.key] ? (
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mx-auto" />
-                                ) : (
-                                  <XCircle className="w-3.5 h-3.5 text-gray-200 mx-auto" />
-                                )}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <UserProcessPermissions
+              userId={user.id}
+              role={user.role}
+              assignedApps={selectedApps}
+              effective={effective}
+              catalog={catalog}
+              loading={loadingTab}
+              error={tabError}
+              onSaved={setEffective}
+            />
           )}
 
           {/* ── Activity ── */}
           {tab === "activity" && (
             <div className="space-y-2">
-              {user.activity.length === 0 && (
+              {loadingTab && (
                 <p className="text-sm text-gray-400 text-center py-8">
-                  No activity recorded.
+                  Loading activity…
                 </p>
               )}
-              {user.activity.map((a, i) => (
+              {tabError && <p className="text-sm text-red-600 py-4">{tabError}</p>}
+              {!loadingTab && !tabError && activity.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">
+                  No activity recorded for this user yet.
+                </p>
+              )}
+              {activity.map((a) => (
                 <div
-                  key={i}
+                  key={a.id}
                   className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100"
                 >
                   <div
@@ -566,10 +904,12 @@ function UserDetailPanel({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-800">{a.action}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <AppBadge appKey={a.app} size="xs" />
+                      <AppBadge appKey={a.app as AppKey} size="xs" />
                       <span className="text-xs text-gray-400">{a.module}</span>
                       <span className="text-xs text-gray-300">·</span>
-                      <span className="text-xs text-gray-400">{a.date}</span>
+                      <span className="text-xs text-gray-400">
+                        {formatDateByGeneralSettings(a.date)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -580,12 +920,18 @@ function UserDetailPanel({
           {/* ── Requests ── */}
           {tab === "requests" && (
             <div className="space-y-2">
-              {user.requests.length === 0 && (
+              {loadingTab && (
                 <p className="text-sm text-gray-400 text-center py-8">
-                  No request history.
+                  Loading requests…
                 </p>
               )}
-              {user.requests.map((r, i) => {
+              {tabError && <p className="text-sm text-red-600 py-4">{tabError}</p>}
+              {!loadingTab && !tabError && requests.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">
+                  This user has not raised any requests yet.
+                </p>
+              )}
+              {requests.map((r) => {
                 const cfg = {
                   submitted: {
                     icon: <Clock className="w-4 h-4 text-amber-500" />,
@@ -609,7 +955,7 @@ function UserDetailPanel({
                 };
                 return (
                   <div
-                    key={i}
+                    key={r.id}
                     className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50"
                   >
                     {cfg.icon}
@@ -617,10 +963,18 @@ function UserDetailPanel({
                       <p className="text-sm text-gray-700 truncate">
                         {r.label}
                       </p>
-                      <p className="text-xs text-gray-400 mt-0.5">{r.date}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <AppBadge appKey={r.app as AppKey} size="xs" />
+                        <span className="text-xs text-gray-400">{r.module}</span>
+                        <span className="text-xs text-gray-300">·</span>
+                        <span className="text-xs text-gray-400">
+                          {formatDateByGeneralSettings(r.date)}
+                        </span>
+                      </div>
                     </div>
                     <span
                       className={`px-2 py-0.5 rounded text-xs font-medium shrink-0 ${cfg.badge}`}
+                      title={`Status: ${r.status}`}
                     >
                       {cfg.label}
                     </span>
@@ -1113,9 +1467,7 @@ function AddUserModal({
   >([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [roleOptions, setRoleOptions] = useState<
-    { id: string; name: string }[]
-  >([]);
+  const [roleOptions, setRoleOptions] = useState<RoleAppScope[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -1123,7 +1475,7 @@ function AddUserModal({
       getReferenceData(),
     ])
       .then(([roles, referenceData]) => {
-        setRoleOptions(roles.map((r) => ({ id: r.id, name: r.name })));
+        setRoleOptions(roles.map(toRoleAppScope));
         setDepartments(referenceData.departments);
         setForm((f) => ({
           ...f,
@@ -1135,6 +1487,30 @@ function AddUserModal({
         setError("Failed to load role and department options.");
       });
   }, []);
+
+  // A user may only be assigned applications the selected role is configured
+  // for. Until a role is picked there is nothing to offer, and switching role
+  // drops any app the new role does not cover.
+  const selectedRole = roleOptions.find((r) => r.name === form.role);
+  const selectableApps = selectedRole
+    ? ALL_APPS.filter((app) => selectedRole.appAccess.includes(app.key))
+    : [];
+
+  const handleRoleChange = (roleName: string) => {
+    const role = roleOptions.find((r) => r.name === roleName);
+    setForm((prev) => ({
+      ...prev,
+      role: roleName,
+      assignedApps: Array.from(
+        new Set<AppKey>([
+          "ess",
+          ...prev.assignedApps.filter(
+            (key) => role?.appAccess.includes(key) ?? false,
+          ),
+        ]),
+      ),
+    }));
+  };
 
   const toReadableError = (err: unknown) => {
     const fallback = "Failed to send invite. Please try again.";
@@ -1313,7 +1689,7 @@ function AddUserModal({
             </label>
             <select
               value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
+              onChange={(e) => handleRoleChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
               <option value="">Select role</option>
@@ -1329,7 +1705,19 @@ function AddUserModal({
               Assigned Applications
             </label>
             <div className="grid grid-cols-2 gap-2 rounded-lg border border-gray-200 p-3">
-              {ALL_APPS.map((app) => {
+              {!form.role && (
+                <p className="col-span-2 text-xs text-gray-500">
+                  Select a role first — a user can only be assigned applications
+                  configured for their role.
+                </p>
+              )}
+              {form.role && selectableApps.length === 0 && (
+                <p className="col-span-2 text-xs text-amber-600">
+                  <strong>{form.role}</strong> has no applications configured.
+                  Grant it application access under Roles &amp; Permissions first.
+                </p>
+              )}
+              {selectableApps.map((app) => {
                 const checked = form.assignedApps.includes(app.key);
                 return (
                   <label
@@ -1358,6 +1746,12 @@ function AddUserModal({
                   </label>
                 );
               })}
+              {form.role && selectableApps.length > 0 && (
+                <p className="col-span-2 text-xs text-gray-400 mt-1">
+                  Scoped to <strong>{form.role}</strong>. More applications can be
+                  granted afterwards from Edit User.
+                </p>
+              )}
             </div>
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { usePermissions } from "../utils/usePermissions";
 
 export interface SidebarItem {
   label: string;
@@ -23,6 +24,25 @@ interface CollapsibleSidebarProps {
 }
 
 export function CollapsibleSidebar({ sections, activeClass, baseClass }: CollapsibleSidebarProps) {
+  const { canNav } = usePermissions();
+
+  // Layer 2 (navigation) enforcement happens here rather than in each of the
+  // seven app layouts, so a role's navigation config gates every app from one
+  // place. `canNav` is keyed on the item's href, which is also the permission id,
+  // and it allows anything the role hasn't explicitly restricted — so an
+  // unconfigured role keeps its full sidebar.
+  const visibleSections = useMemo(
+    () =>
+      sections
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => canNav(item.href)),
+        }))
+        // A section whose every item is hidden would render as an empty header.
+        .filter((section) => section.items.length > 0),
+    [sections, canNav],
+  );
+
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
     sections.forEach((s) => {
@@ -39,7 +59,7 @@ export function CollapsibleSidebar({ sections, activeClass, baseClass }: Collaps
 
   return (
     <nav className="p-3 pt-4 space-y-1">
-      {sections.map((section) => {
+      {visibleSections.map((section) => {
         const isOpen = !section.label || openSections[section.label];
 
         if (!section.label) {

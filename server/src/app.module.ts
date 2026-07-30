@@ -37,6 +37,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { JobRolesModule } from './job-roles/job-roles.module';
 import { WorkforceAllocationModule } from './workforce-allocation/workforce-allocation.module';
 import { ActivityHistoryModule } from './activity-history/activity-history.module';
+import { PermissionsModule } from './permissions/permissions.module';
 import { ReportsModule } from './reports/reports.module';
 import { ResourcePlanningModule } from './resource-planning/resource-planning.module';
 import { ComplianceDocumentsModule } from './compliance-documents/compliance-documents.module';
@@ -113,6 +114,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         JobRolesModule,
         WorkforceAllocationModule,
         ActivityHistoryModule,
+        PermissionsModule,
         ReportsModule,
         ResourcePlanningModule,
         ComplianceDocumentsModule,

@@ -427,3 +427,67 @@ export const reorderDirectors = (items: Array<{ id: string; sequence: number }>)
     apiFetch<Director[]>('/admin/directors/reorder', { method: 'PATCH', body: JSON.stringify({ items }) });
 export const deleteDirector = (id: string) =>
     apiFetch<void>(`/admin/directors/${id}`, { method: 'DELETE' });
+// ── Effective permissions (role config + per-user overrides) ──────────────────
+/** Why a permission resolved as it did — drives the legend in the UI. */
+export type PermissionSource = 'role' | 'allow' | 'deny' | 'open';
+export type PermissionAction = 'view' | 'create' | 'edit' | 'approve' | 'delete';
+/** Tri-state used by the User Permissions matrix. */
+export type OverrideState = 'inherit' | 'allow' | 'deny';
+
+export interface EffectivePermissions {
+    userId: string;
+    role: string;
+    isSuper: boolean;
+    /** Apps the user may open. */
+    appAccess: string[];
+    /** Nav ids (route hrefs) the user may see, per app. */
+    navAccess: Record<string, string[]>;
+    /** Apps whose nav is unrestricted because no nav config applies. */
+    navUnrestrictedApps: string[];
+    processPermissions: Record<string, Record<PermissionAction, boolean>>;
+    /** What the role alone grants, before any per-user override. */
+    roleProcessPermissions: Record<string, Record<PermissionAction, boolean>>;
+    processSources: Record<string, Record<PermissionAction, PermissionSource>>;
+    processUnrestrictedApps: string[];
+    inherited: { navIds: string[]; processIds: string[] };
+    extended: { navIds: string[]; processIds: string[]; deniedProcessIds: string[] };
+}
+
+/** The caller's own effective permissions. Available to any signed-in user. */
+export const getMyPermissions = () => apiFetch<EffectivePermissions>('/me/permissions');
+export const getUserPermissions = (userId: string) =>
+    apiFetch<EffectivePermissions>(`/admin/users/${userId}/permissions`);
+/** Replaces a user's overrides. `inherit` is simply omitted, so the role keeps flowing through. */
+export const setUserPermissions = (
+    userId: string,
+    body: {
+        navIds?: string[];
+        processOverrides?: Record<string, Partial<Record<PermissionAction, OverrideState>>>;
+    },
+) =>
+    apiFetch<EffectivePermissions>(`/admin/users/${userId}/permissions`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+    });
+
+// ── Per-user activity & requests (Admin → Users sidebar tabs) ────────────────
+export interface UserActivityEntry {
+    id: string;
+    action: string;
+    module: string;
+    app: string;
+    date: string;
+}
+export interface UserRequestEntry {
+    id: string;
+    label: string;
+    module: string;
+    app: string;
+    type: 'submitted' | 'approved' | 'rejected';
+    status: string;
+    date: string;
+}
+export const getUserActivity = (userId: string, limit = 50) =>
+    apiFetch<UserActivityEntry[]>(`/admin/users/${userId}/activity?limit=${limit}`);
+export const getUserRequests = (userId: string) =>
+    apiFetch<UserRequestEntry[]>(`/admin/users/${userId}/requests`);

@@ -15,6 +15,7 @@ import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 import { LeaveBalanceService } from './leave-balance.service';
 import { LeaveRequestsService } from './leave-requests.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('leave-requests')
 @UseGuards(RolesGuard)
@@ -115,6 +116,9 @@ export class LeaveRequestsController {
   // ── Leave Approval ──
   @Post(':id/approve')
   @Roles('admin', 'hr-manager', 'manager')
+  // Fine-grained check on top of the role list: an admin can revoke "approve" on
+  // this process for a specific role or user, and that must hold at the API too.
+  @RequiresProcess('p_approve_lv', 'approve')
   async approve(
     @Param('id') id: string,
     @Body('comments') comments: string,
@@ -137,6 +141,7 @@ export class LeaveRequestsController {
 
   @Post(':id/reject')
   @Roles('admin', 'hr-manager', 'manager')
+  @RequiresProcess('p_approve_lv', 'approve')
   async reject(
     @Param('id') id: string,
     @Body('reason') reason: string,

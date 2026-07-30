@@ -3,13 +3,30 @@ import {
     Param, Body, Query, UseGuards,
 } from '@nestjs/common';
 import { AdminExtrasService } from './admin-extras.service';
+import { UserActivityService } from './user-activity.service';
 import { Roles, Public } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('admin')
 @UseGuards(RolesGuard)
 export class AdminExtrasController {
-    constructor(private readonly svc: AdminExtrasService) { }
+    constructor(
+        private readonly svc: AdminExtrasService,
+        private readonly userActivity: UserActivityService,
+    ) { }
+
+    // ── Per-user activity & requests (Admin → Users sidebar tabs) ──
+    @Get('users/:id/activity')
+    @Roles('admin')
+    getUserActivity(@Param('id') id: string, @Query('limit') limit?: number) {
+        return this.userActivity.findUserActivity(id, limit ? Number(limit) : 50);
+    }
+
+    @Get('users/:id/requests')
+    @Roles('admin')
+    getUserRequests(@Param('id') id: string) {
+        return this.userActivity.findUserRequests(id);
+    }
 
     // ── Approvals ──
     @Get('approvals')

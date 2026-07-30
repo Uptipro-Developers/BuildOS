@@ -105,11 +105,20 @@ export class JwtAuthGuard implements CanActivate {
         if (!requiredRoles || requiredRoles.length === 0) {
             return;
         }
+        // Compared ignoring case AND separators. Roles are stored in display form
+        // ("HR Manager") while the decorators use slugs ("hr-manager");
+        // lowercasing alone left "hr manager" !== "hr-manager", so as the global
+        // guard this closed every @Roles('hr-manager') endpoint to actual HR
+        // Managers. Matches RolesGuard and PermissionsService.
+        const canonical = (role: unknown) =>
+            String(role ?? '')
+                .trim()
+                .toLowerCase()
+                .replace(/[\s_-]+/g, '');
+
         const rawRoles = payload.role ?? payload.roles ?? [];
-        const userRoles = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((role) =>
-            String(role).trim().toLowerCase(),
-        );
-        const needed = requiredRoles.map((role) => String(role).trim().toLowerCase());
+        const userRoles = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map(canonical);
+        const needed = requiredRoles.map(canonical);
         if (!needed.some((role) => userRoles.includes(role))) {
             throw new ForbiddenException(
                 `User does not have required role(s): ${requiredRoles.join(', ')}`,

@@ -12,6 +12,7 @@ import {
 } from "../utils/authSession";
 import { ChangelogProvider } from "../stores/changelogStore";
 import { NumberingProvider } from "../stores/numberingStore";
+import { PermissionsProvider } from "../utils/usePermissions";
 
 export function AppLayout() {
   const navigate = useNavigate();
@@ -75,9 +76,11 @@ export function AppLayout() {
           <TaskProvider>
             <RolesProvider>
               <NumberingProvider>
-                <div className="min-h-screen bg-gray-50">
-                  <Outlet />
-                </div>
+                <PermissionsProvider>
+                  <div className="min-h-screen bg-gray-50">
+                    <Outlet />
+                  </div>
+                </PermissionsProvider>
               </NumberingProvider>
             </RolesProvider>
           </TaskProvider>

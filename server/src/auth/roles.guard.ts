@@ -49,11 +49,21 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('User not authenticated');
     }
 
-    // Check if user has any of the required roles (normalize to lowercase for case-insensitive comparison)
+    // Role names are compared ignoring case AND separators. Roles are stored in
+    // their display form ("HR Manager") while the decorators use slugs
+    // ("hr-manager"); lowercasing alone left "hr manager" !== "hr-manager", so
+    // every @Roles('hr-manager') endpoint was closed to actual HR Managers. This
+    // matches how WorkflowEngineService and PermissionsService resolve roles.
+    const canonical = (value: unknown) =>
+      String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]+/g, '');
+
     const userRole = user.role || user.roles || [];
     const userRolesArray = Array.isArray(userRole) ? userRole : [userRole];
-    const normalizedUserRoles = userRolesArray.map((r) => String(r).trim().toLowerCase());
-    const normalizedRequiredRoles = requiredRoles.map((r) => String(r).trim().toLowerCase());
+    const normalizedUserRoles = userRolesArray.map(canonical);
+    const normalizedRequiredRoles = requiredRoles.map(canonical);
 
     const hasRole = normalizedRequiredRoles.some((role) =>
       normalizedUserRoles.includes(role),

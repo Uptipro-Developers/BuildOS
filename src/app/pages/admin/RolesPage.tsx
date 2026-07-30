@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { NAV_CATALOG } from "../../utils/navCatalog";
 import {
   getAppRoles,
   getUsers,
@@ -166,64 +167,12 @@ const APP_LABELS: Record<AppKey, string> = {
 };
 
 // ── Navigation items per app (Layer 2 catalog) ────────────────────────────────
-const NAV_ITEMS: Record<AppKey, { id: string; label: string }[]> = {
-  construction: [
-    { id: "cs_dashboard", label: "Dashboard" },
-    { id: "cs_projects", label: "Projects List" },
-    { id: "cs_approvals", label: "Approvals" },
-    { id: "cs_tasks", label: "Tasks" },
-    { id: "cs_resources", label: "Resource Planning" },
-    { id: "cs_timeline", label: "Timeline Planning" },
-    { id: "cs_documents", label: "Documents" },
-    { id: "cs_reports", label: "Reports" },
-  ],
-  finance: [
-    { id: "fin_dashboard", label: "Dashboard" },
-    { id: "fin_expenses", label: "Expenses" },
-    { id: "fin_transactions", label: "Transactions" },
-    { id: "fin_budget", label: "Budget Tracking" },
-  ],
-  hr: [
-    { id: "hr_dashboard", label: "Dashboard" },
-    { id: "hr_employees", label: "Employees" },
-    { id: "hr_attendance", label: "Attendance" },
-    { id: "hr_leave", label: "Leave Requests" },
-    { id: "hr_payroll", label: "Payroll" },
-    { id: "hr_payroll_proc", label: "Payroll Processing" },
-    { id: "hr_config", label: "HR Configuration" },
-    { id: "hr_reports", label: "Reports" },
-  ],
-  procurement: [
-    { id: "pro_dashboard", label: "Dashboard" },
-    { id: "pro_inventory", label: "Inventory" },
-    { id: "pro_purchase_req", label: "Purchase Requests" },
-    { id: "pro_purchase_ord", label: "Purchase Orders" },
-    { id: "pro_suppliers", label: "Suppliers" },
-    { id: "pro_reports", label: "Reports" },
-  ],
-  storefront: [
-    { id: "sto_dashboard", label: "Dashboard" },
-    { id: "sto_inventory", label: "Inventory" },
-    { id: "sto_materials", label: "Materials" },
-    { id: "sto_requests", label: "Store Requests" },
-    { id: "sto_reports", label: "Reports" },
-  ],
-  admin: [
-    { id: "adm_users", label: "Users" },
-    { id: "adm_roles", label: "Roles & Permissions" },
-    { id: "adm_company", label: "Company Profile" },
-    { id: "adm_audit", label: "Audit Logs" },
-    { id: "adm_reports", label: "Report Builder" },
-  ],
-  ess: [
-    { id: "ess_dashboard", label: "Dashboard" },
-    { id: "ess_requests", label: "My Requests" },
-    { id: "ess_submit", label: "Submit Request" },
-    { id: "ess_projects", label: "My Projects" },
-    { id: "ess_tasks", label: "My Tasks" },
-    { id: "ess_profile", label: "My Profile" },
-  ],
-};
+// Sourced from navCatalog, which is generated from the real sidebars. The list
+// here used to be maintained by hand with synthetic ids ("hr_dashboard") that
+// existed nowhere else, so nothing could enforce a saved Layer 2 config and the
+// list had drifted to 45 items against the 115 the app actually renders. The
+// permission id is now the route href, which the sidebars and router already use.
+const NAV_ITEMS: Record<AppKey, { id: string; label: string }[]> = NAV_CATALOG;
 
 function navPartial(items: string[]): Record<string, boolean> {
   return Object.fromEntries(
@@ -659,11 +608,33 @@ export function RolesPage() {
     }));
   };
 
-  const toggleNavAccess = (roleId: string, navId: string) => {
-    updateAndPersistRole(roleId, (r) => ({
-      ...r,
-      navAccess: { ...r.navAccess, [navId]: !r.navAccess[navId] },
-    }));
+  /**
+   * Whether a role has any navigation configured for an app.
+   *
+   * An app with nothing configured is unrestricted at runtime (see
+   * PermissionsService), so the checkboxes show every item as granted — the
+   * honest picture of what users of this role can actually reach.
+   */
+  const navConfiguredForApp = (role: Role, app: AppKey) =>
+    (NAV_ITEMS[app] ?? []).some((item) => role.navAccess[item.id]);
+
+  const navGranted = (role: Role, app: AppKey, navId: string) =>
+    role.isSuper || !navConfiguredForApp(role, app) || Boolean(role.navAccess[navId]);
+
+  const toggleNavAccess = (roleId: string, app: AppKey, navId: string) => {
+    updateAndPersistRole(roleId, (r) => {
+      // Turning the first item off in an unconfigured app has to materialise the
+      // rest as granted first, otherwise saving one "off" would silently restrict
+      // the role to nothing instead of to everything-but-this-item.
+      const base = navConfiguredForApp(r, app)
+        ? { ...r.navAccess }
+        : {
+            ...r.navAccess,
+            ...Object.fromEntries((NAV_ITEMS[app] ?? []).map((item) => [item.id, true])),
+          };
+
+      return { ...r, navAccess: { ...base, [navId]: !navGranted(r, app, navId) } };
+    });
   };
 
   const duplicateRole = async (role: Role) => {
@@ -1025,27 +996,21 @@ export function RolesPage() {
                     )}
                   </tr>
 
-                  {/* Expanded role config moved out of the matrix — it now
-                      renders in a full-width panel below so Layer 1 (App
-                      Access) and Layer 2 (Navigation) stay on one page,
-                      unaffected by the matrix's horizontal scroll. */}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Expanded role config — rendered outside the horizontally-scrolling
-          matrix so Layer 1 (App Access) and Layer 2 (Navigation) always show
-          on a single page, unaffected by the matrix's horizontal scroll. */}
-      {expandedRoleId &&
-        roles
-          .filter((r) => r.id === expandedRoleId)
-          .map((role) => (
+                  {/* Role configuration — rendered directly under its own role
+                      row so each role's Layer 1 and Layer 2 settings sit with the
+                      role they belong to. The inner panel is sticky at a fixed
+                      width so it neither stretches to the process matrix's width
+                      nor scrolls away when the matrix is scrolled sideways. */}
+                  {expandedRoleId === role.id && (
+                    <tr className="bg-indigo-50/20">
+                      <td
+                        colSpan={1 + processes.length * PERM_KEYS.length}
+                        className="p-0"
+                      >
+                        <div className="sticky left-0 w-[min(920px,calc(100vw-6rem))] px-4 py-3">
             <div
               key={role.id}
-              className="mt-4 bg-white rounded-xl border border-indigo-100 shadow-sm"
+              className="bg-white rounded-xl border border-indigo-100 shadow-sm"
             >
               <div className="flex items-center justify-between px-5 py-3 border-b border-indigo-100 bg-indigo-50/40 rounded-t-xl">
                 <div className="flex items-center gap-2 min-w-0">
@@ -1094,7 +1059,7 @@ export function RolesPage() {
                     </button>
                   ))}
                   <span className="px-3 py-1.5 text-xs text-gray-400 ml-auto italic">
-                    Layer 3 — Process Permissions visible in matrix above
+                    Layer 3 — Process Permissions set in this role's row above
                   </span>
                   <button
                     onClick={() => void saveRolePermissions(role.id)}
@@ -1155,9 +1120,7 @@ export function RolesPage() {
                           </p>
                           <div className="space-y-1">
                             {NAV_ITEMS[app].map((item) => {
-                              const granted = role.isSuper
-                                ? true
-                                : (role.navAccess[item.id] ?? false);
+                              const granted = navGranted(role, app, item.id);
                               return (
                                 <label
                                   key={item.id}
@@ -1168,7 +1131,7 @@ export function RolesPage() {
                                     checked={granted}
                                     onChange={() =>
                                       !role.isSuper &&
-                                      toggleNavAccess(role.id, item.id)
+                                      toggleNavAccess(role.id, app, item.id)
                                     }
                                     disabled={role.isSuper}
                                     className="rounded accent-indigo-600 w-3 h-3"
@@ -1202,7 +1165,17 @@ export function RolesPage() {
                 )}
               </div>
             </div>
-          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
 
       {processes.length === 0 && (
         <div className="flex flex-col items-center justify-center py-10 gap-3 text-center bg-white rounded-xl border border-dashed border-gray-300">

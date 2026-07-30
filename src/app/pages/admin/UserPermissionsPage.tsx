@@ -1,5 +1,14 @@
 import { useState, useEffect } from "react";
-import { getUsers } from "../../api/admin-extras";
+import {
+  getProcessCatalog,
+  getUserPermissions,
+  getUsers,
+  setUserPermissions,
+  type EffectivePermissions,
+  type PermissionAction,
+  type ProcessCatalogItem,
+} from "../../api/admin-extras";
+import { toast } from "sonner";
 import {
   Search,
   ChevronDown,
@@ -72,30 +81,9 @@ const APP_LABELS: Record<AppKey, string> = {
 };
 
 // ── Process catalog ────────────────────────────────────────────────────────────
-const ALL_PROCESSES: ProcessDef[] = [
-  { id: "p_create_pr", label: "Create Purchase Request", app: "procurement" },
-  { id: "p_approve_po", label: "Approve Purchase Order", app: "procurement" },
-  { id: "p_issue_mat", label: "Issue Materials", app: "procurement" },
-  { id: "p_create_exp", label: "Create Expense", app: "finance" },
-  { id: "p_approve_exp", label: "Approve Expense", app: "finance" },
-  { id: "p_create_pay", label: "Create Payroll", app: "hr" },
-  { id: "p_approve_lv", label: "Approve Leave Request", app: "hr" },
-  { id: "p_assign_wf", label: "Assign Workforce", app: "construction" },
-  { id: "p_create_proj", label: "Create Project", app: "construction" },
-  { id: "p_approve_bud", label: "Approve Project Budget", app: "construction" },
-  {
-    id: "p_manage_store_inv",
-    label: "Manage Storefront Inventory",
-    app: "storefront",
-  },
-  {
-    id: "p_approve_store_req",
-    label: "Approve Storefront Request",
-    app: "storefront",
-  },
-  { id: "p_gen_rpt", label: "Generate Reports", app: "admin" },
-  { id: "p_manage_usr", label: "Manage Users", app: "admin" },
-];
+// The process catalog is fetched from /admin/process-catalog — the same source
+// Process Configuration uses — so this matrix always matches it. It used to be a
+// hardcoded list here that had drifted out of step with the configured processes.
 
 // ── Builder helpers ────────────────────────────────────────────────────────────
 const defOverride = (): ProcessOverride => ({
@@ -107,364 +95,10 @@ const defOverride = (): ProcessOverride => ({
 });
 
 // Default role base permissions config
-const ROLE_PERMS: Record<string, Record<string, RoleBasePerm>> = {
-  "Construction Manager": {
-    p_create_pr: {
-      view: true,
-      create: true,
-      edit: true,
-      approve: false,
-      delete: false,
-    },
-    p_approve_po: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_issue_mat: {
-      view: true,
-      create: true,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_exp: {
-      view: true,
-      create: true,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_exp: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_pay: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_lv: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_assign_wf: {
-      view: true,
-      create: true,
-      edit: true,
-      approve: false,
-      delete: false,
-    },
-    p_create_proj: {
-      view: true,
-      create: true,
-      edit: true,
-      approve: false,
-      delete: false,
-    },
-    p_approve_bud: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: true,
-      delete: false,
-    },
-    p_gen_rpt: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_manage_usr: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-  },
-  Accountant: {
-    p_create_pr: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_po: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_issue_mat: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_exp: {
-      view: true,
-      create: true,
-      edit: true,
-      approve: false,
-      delete: false,
-    },
-    p_approve_exp: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: true,
-      delete: false,
-    },
-    p_create_pay: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_lv: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_assign_wf: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_proj: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_bud: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_gen_rpt: {
-      view: true,
-      create: true,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_manage_usr: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-  },
-  "Procurement Officer": {
-    p_create_pr: {
-      view: true,
-      create: true,
-      edit: true,
-      approve: false,
-      delete: false,
-    },
-    p_approve_po: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_issue_mat: {
-      view: true,
-      create: true,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_exp: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_exp: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_pay: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_lv: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_assign_wf: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_proj: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_bud: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_gen_rpt: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_manage_usr: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-  },
-  "HR Manager": {
-    p_create_pr: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_po: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_issue_mat: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_exp: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_exp: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_pay: {
-      view: true,
-      create: true,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_lv: {
-      view: true,
-      create: false,
-      edit: false,
-      approve: true,
-      delete: false,
-    },
-    p_assign_wf: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_create_proj: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_approve_bud: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_gen_rpt: {
-      view: true,
-      create: true,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-    p_manage_usr: {
-      view: false,
-      create: false,
-      edit: false,
-      approve: false,
-      delete: false,
-    },
-  },
-  Employee: Object.fromEntries(
-    ALL_PROCESSES.map((p) => [
-      p.id,
-      {
-        view: false,
-        create: false,
-        edit: false,
-        approve: false,
-        delete: false,
-      },
-    ]),
-  ),
-};
+// Role and per-user process permissions are resolved by the API
+// (GET /admin/users/:id/permissions) rather than hardcoded here: the previous
+// hardcoded ROLE_PERMS table only covered a handful of role names and could not
+// reflect what an admin had actually configured under Roles & Permissions.
 
 // ── Compute effective permission (override > role) ─────────────────────────────
 function effectivePerm(
@@ -499,11 +133,16 @@ function UserPermPane({
   setUser,
   onClose,
   onSave,
+  catalog,
+  saving,
 }: {
   user: UserRecord;
   setUser: (u: UserRecord) => void;
   onClose: () => void;
   onSave: () => void;
+  /** The live process catalog, so this matrix matches Process Configuration. */
+  catalog: ProcessDef[];
+  saving: boolean;
 }) {
   const [expandedApp, setExpandedApp] = useState<AppKey | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
@@ -534,7 +173,7 @@ function UserPermPane({
     .filter((app) => assignedApps.includes(app))
     .map((app) => ({
       app,
-      processes: ALL_PROCESSES.filter((p) => p.app === app),
+      processes: catalog.filter((p) => p.app === app),
     }))
     .filter((g) => g.processes.length > 0);
 
@@ -722,11 +361,11 @@ function UserPermPane({
           </button>
           <button
             onClick={onSave}
-            disabled={!hasChanges}
+            disabled={!hasChanges || saving}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
             <Save className="w-4 h-4" />
-            Save Overrides
+            {saving ? "Saving…" : "Save Overrides"}
           </button>
         </div>
       </div>
@@ -741,9 +380,32 @@ export function UserPermissionsPage() {
   const [roleFilter, setRoleFilter] = useState("all");
   const [selectedUser, setSelectedUser] = useState<UserRecord | null>(null);
 
+  // The process catalog comes from the same endpoint Process Configuration uses,
+  // so this matrix lists exactly the processes configured there rather than a
+  // hardcoded subset that had drifted out of step with it.
+  const [catalog, setCatalog] = useState<ProcessDef[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
-    getUsers()
-      .then((data) =>
+    Promise.all([getUsers(), getProcessCatalog()])
+      .then(([data, processCatalog]) => {
+        setCatalog(
+          processCatalog
+            .filter((proc: ProcessCatalogItem) =>
+              (Object.keys(APP_LABELS) as string[]).includes(
+                String(proc.app ?? "").toLowerCase(),
+              ),
+            )
+            .map((proc: ProcessCatalogItem) => ({
+              id: proc.id,
+              label: proc.label,
+              app: String(proc.app).toLowerCase() as AppKey,
+            })),
+        );
+
         setUsers(
           data.map((u) => {
             const assignedApps: AppKey[] = Array.isArray(u.assignedApps)
@@ -764,13 +426,21 @@ export function UserPermissionsPage() {
                   ? "active"
                   : "inactive",
               lastLogin: u.lastLogin || "Never",
-              rolePerms: ROLE_PERMS[u.role] || {},
+              // Resolved per user when the pane opens — one call per user opened
+              // rather than one per row on load.
+              rolePerms: {},
               overrides: {},
             };
           }),
-        ),
-      )
-      .catch(() => {});
+        );
+        setLoadError(null);
+      })
+      .catch((err: unknown) => {
+        setLoadError(
+          err instanceof Error ? err.message : "Failed to load users.",
+        );
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const roles = Array.from(new Set(users.map((u) => u.role)));
@@ -783,16 +453,108 @@ export function UserPermissionsPage() {
     return matchSearch && matchRole;
   });
 
-  const openUser = (u: UserRecord) => {
-    setSelectedUser({ ...u, overrides: { ...u.overrides } });
+  /**
+   * Translates a resolved permission set into the pane's two inputs: what the
+   * role alone grants, and which cells an admin has explicitly overridden.
+   *
+   * `processSources` carries the provenance of every decision, so a cell marked
+   * `allow`/`deny` is a user-level override while `role`/`open` is inherited.
+   */
+  const fromEffective = (effective: EffectivePermissions) => {
+    const rolePerms: Record<string, RoleBasePerm> = {};
+    const overrides: Record<string, ProcessOverride> = {};
+
+    for (const [procId, sources] of Object.entries(effective.processSources)) {
+      const base: RoleBasePerm = {
+        view: false,
+        create: false,
+        edit: false,
+        approve: false,
+        delete: false,
+      };
+      let hasOverride = false;
+      const override = defOverride();
+
+      for (const key of PERM_KEYS) {
+        const action = key as PermissionAction;
+        const source = sources[action];
+        if (source === "allow" || source === "deny") {
+          override[key] = source;
+          hasOverride = true;
+        }
+        // Always the role's own answer, so clearing an override reveals the
+        // inherited value rather than a guess.
+        base[key] = Boolean(
+          effective.roleProcessPermissions[procId]?.[action],
+        );
+      }
+
+      rolePerms[procId] = base;
+      if (hasOverride) overrides[procId] = override;
+    }
+
+    return { rolePerms, overrides };
   };
 
-  const saveUserOverrides = () => {
+  const openUser = async (u: UserRecord) => {
+    setOpening(true);
+    try {
+      const effective = await getUserPermissions(u.id);
+      const { rolePerms, overrides } = fromEffective(effective);
+      setSelectedUser({ ...u, role: effective.role || u.role, rolePerms, overrides });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to load this user's permissions.",
+      );
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  const saveUserOverrides = async () => {
     if (!selectedUser) return;
-    setUsers((prev) =>
-      prev.map((u) => (u.id === selectedUser.id ? selectedUser : u)),
-    );
-    setSelectedUser(null);
+    setSaving(true);
+
+    // Only explicit allow/deny is persisted — leaving a cell on "inherit" is what
+    // lets a later change to the role flow through to this user.
+    const processOverrides: Record<
+      string,
+      Partial<Record<PermissionAction, "allow" | "deny">>
+    > = {};
+    for (const [procId, override] of Object.entries(selectedUser.overrides)) {
+      for (const key of PERM_KEYS) {
+        const state = override[key];
+        if (state === "allow" || state === "deny") {
+          (processOverrides[procId] ??= {})[key as PermissionAction] = state;
+        }
+      }
+    }
+
+    try {
+      const effective = await setUserPermissions(selectedUser.id, {
+        processOverrides,
+      });
+      const { rolePerms, overrides } = fromEffective(effective);
+      const updated = { ...selectedUser, rolePerms, overrides };
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setSelectedUser(null);
+
+      const count = Object.values(processOverrides).reduce(
+        (sum, actions) => sum + Object.keys(actions).length,
+        0,
+      );
+      toast.success(
+        count === 0
+          ? "Overrides cleared — this user now follows their role."
+          : `Saved ${count} permission override${count > 1 ? "s" : ""}.`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save permissions.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -864,6 +626,27 @@ export function UserPermissionsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
+            {loading && (
+              <tr>
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-400">
+                  Loading users and process catalog…
+                </td>
+              </tr>
+            )}
+            {loadError && (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-sm text-red-600">
+                  {loadError}
+                </td>
+              </tr>
+            )}
+            {!loading && !loadError && filtered.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-400">
+                  No users match this search.
+                </td>
+              </tr>
+            )}
             {filtered.map((user) => {
               const overrideCount = Object.values(user.overrides).reduce(
                 (s, ov) => {
@@ -877,7 +660,7 @@ export function UserPermissionsPage() {
                 <tr
                   key={user.id}
                   className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => openUser(user)}
+                  onClick={() => void openUser(user)}
                 >
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
@@ -915,12 +698,13 @@ export function UserPermissionsPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        openUser(user);
+                        void openUser(user);
                       }}
-                      className="flex items-center gap-1.5 text-xs text-indigo-600 font-medium hover:text-indigo-800 ml-auto"
+                      disabled={opening}
+                      className="flex items-center gap-1.5 text-xs text-indigo-600 font-medium hover:text-indigo-800 ml-auto disabled:opacity-50"
                     >
                       <PenLine className="w-3.5 h-3.5" />
-                      Edit Permissions
+                      {opening ? "Loading…" : "Edit Permissions"}
                     </button>
                   </td>
                 </tr>
@@ -936,7 +720,9 @@ export function UserPermissionsPage() {
           user={selectedUser}
           setUser={setSelectedUser}
           onClose={() => setSelectedUser(null)}
-          onSave={saveUserOverrides}
+          onSave={() => void saveUserOverrides()}
+          catalog={catalog}
+          saving={saving}
         />
       )}
     </div>
