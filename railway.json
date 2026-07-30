@@ -8,7 +8,8 @@
     "//": "Migrations run before the app starts. Without this, a schema change deployed fine and then failed at runtime on the missing column — production sat three migrations behind for days, which broke login and left Accruals with no tables. `prisma` is a runtime dependency so the binary survives the production install, and it is invoked directly rather than through npx so boot never reaches for the registry. `migrate deploy` only applies committed migrations and is a no-op when there are none, so the trade-off is deliberate: a migration that cannot apply now blocks the release instead of shipping a build that cannot serve requests.",
     "startCommand": "/app/node_modules/.bin/prisma migrate deploy --schema=/app/prisma/schema.prisma && node /app/dist/main",
     "healthcheckPath": "/api",
-    "healthcheckTimeout": 60,
+    "//healthcheckTimeout": "The window has to cover `migrate deploy` as well as boot, because migrations run in the start command above — not just the time Nest takes to listen. At 60s a slow migration failed the healthcheck and rolled back a release that was applying correctly.",
+    "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
