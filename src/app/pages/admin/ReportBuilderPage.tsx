@@ -2150,17 +2150,29 @@ export function ReportBuilderPage() {
 
                   {/* Actions */}
                   <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center gap-2">
+                    {/* A deployed report is run or viewed, not edited from here.
+                        The template is still editable once opened — Edit was
+                        removed from the overview, not from the builder. */}
                     {tpl.status === "deployed" && (
-                      <button
-                        onClick={() => {
-                          openEditTemplate(tpl);
-                          setTimeout(() => setHasRun(true), 50);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
-                      >
-                        <Play className="w-3 h-3" />
-                        Run
-                      </button>
+                      <>
+                        <button
+                          onClick={() => {
+                            openEditTemplate(tpl);
+                            setTimeout(() => runNow(), 50);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
+                        >
+                          <Play className="w-3 h-3" />
+                          Run
+                        </button>
+                        <button
+                          onClick={() => openEditTemplate(tpl)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                        >
+                          <Eye className="w-3 h-3" />
+                          View
+                        </button>
+                      </>
                     )}
                     {tpl.status === "draft" && (
                       <button
@@ -2190,13 +2202,15 @@ export function ReportBuilderPage() {
                         Restore
                       </button>
                     )}
-                    <button
-                      onClick={() => openEditTemplate(tpl)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
-                    >
-                      <Pencil className="w-3 h-3" />
-                      Edit
-                    </button>
+                    {tpl.status !== "deployed" && (
+                      <button
+                        onClick={() => openEditTemplate(tpl)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        Edit
+                      </button>
+                    )}
                     {/* More dropdown */}
                     <div className="relative ml-auto">
                       <button

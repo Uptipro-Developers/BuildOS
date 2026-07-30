@@ -8,12 +8,13 @@ import { SystemConfigController, ReportsController } from './system-config.contr
 import { SystemConfigService } from './system-config.service';
 import { ReportBuilderService } from '../reports/report-builder.service';
 import { ReportQueryService } from '../reports/report-query.service';
+import { ReportSchedulerService } from '../reports/report-scheduler.service';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
     imports: [PrismaModule],
     controllers: [AdminExtrasController, AdminPublicController, ApprovalsPublicController, SystemConfigController, ReportsController],
-    providers: [AdminExtrasService, UserActivityService, SystemConfigService, ReportBuilderService, ReportQueryService],
-    exports: [AdminExtrasService, UserActivityService, SystemConfigService, ReportBuilderService, ReportQueryService],
+    providers: [AdminExtrasService, UserActivityService, SystemConfigService, ReportBuilderService, ReportQueryService, ReportSchedulerService],
+    exports: [AdminExtrasService, UserActivityService, SystemConfigService, ReportBuilderService, ReportQueryService, ReportSchedulerService],
 })
 export class AdminExtrasModule { }

@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { Plus, Clock, Mail, BarChart3, Trash2 } from "lucide-react";
+import { Plus, Clock, Mail, BarChart3, Trash2, Send } from "lucide-react";
 import { apiFetch } from "../../api/client";
 import { getReportTemplates } from "../../api/admin-extras";
-import { useNumbering } from "../../stores/numberingStore";
+import { toast } from "sonner";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
+import { formatDateTimeByGeneralSettings } from "../../utils/generalSettings";
 
 type Frequency = "Daily" | "Weekly" | "Monthly";
 type ReportModule =
@@ -14,8 +16,12 @@ type ReportModule =
   | "Storefront";
 
 interface AvailableReport {
+  /** The deployed template's id, so a schedule binds to a real report. */
+  id: string;
   name: string;
   module: ReportModule;
+  /** The template's data source, used when running the schedule. */
+  dataSource?: string;
 }
 
 // Maps a Report Builder application key to an automation module bucket.
@@ -37,7 +43,9 @@ interface ReportSchedule {
   sendTime: string;
   recipients: string;
   enabled: boolean;
-  lastSent: string;
+  lastSent: string | null;
+  /** Set when the last automated attempt failed, so the failure is visible. */
+  lastError?: string | null;
 }
 
 const MODULE_COLORS: Record<ReportModule, string> = {
@@ -65,7 +73,6 @@ export function ReportAutomationPage() {
   );
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM });
-  const { getNextId } = useNumbering();
 
   useEffect(() => {
     apiFetch("/admin/report-schedules")
@@ -73,40 +80,126 @@ export function ReportAutomationPage() {
       .catch(() => setSchedules([]));
 
     getReportTemplates<{
+      id: string;
       name: string;
       application?: string;
       status?: string;
+      dataSource?: string;
     }>()
       .then((templates) => {
+        // Only deployed templates can be automated — a draft is still being built.
         const deployed = (templates || [])
           .filter((t) => t.status === "deployed" && t.name)
           .map((t) => ({
+            id: t.id,
             name: t.name,
             module: toReportModule(t.application || ""),
+            dataSource: t.dataSource,
           }));
         setAvailableReports(deployed);
       })
       .catch(() => setAvailableReports([]));
   }, []);
 
-  function toggleEnabled(id: string) {
+  const [deleteTarget, setDeleteTarget] = useState<ReportSchedule | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Every action here used to mutate local state only — schedules, toggles and
+  // deletions all vanished on refresh because the page had no write endpoints to
+  // call. They now persist, and the backend scheduler is what actually delivers.
+  async function toggleEnabled(id: string) {
+    const target = schedules.find((s) => s.id === id);
+    if (!target) return;
+    const enabled = !target.enabled;
+
     setSchedules((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)),
+      prev.map((s) => (s.id === id ? { ...s, enabled } : s)),
     );
+    try {
+      await apiFetch(`/admin/report-schedules/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      toast.success(
+        `"${target.name}" ${enabled ? "enabled" : "paused"}.`,
+      );
+    } catch (err) {
+      setSchedules((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, enabled: target.enabled } : s)),
+      );
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update the schedule.",
+      );
+    }
   }
 
-  function deleteSchedule(id: string) {
-    setSchedules((prev) => prev.filter((s) => s.id !== id));
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const { id, name } = deleteTarget;
+    setBusyId(id);
+    try {
+      await apiFetch(`/admin/report-schedules/${id}`, { method: "DELETE" });
+      setSchedules((prev) => prev.filter((s) => s.id !== id));
+      toast.success(`Schedule "${name}" deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Failed to delete "${name}".`,
+      );
+    } finally {
+      setBusyId(null);
+    }
   }
 
-  function saveSchedule() {
-    setSchedules([...schedules, {
-      ...form,
-      id: getNextId("ReportSchedule"),
-      lastSent: "—",
-    }]);
-    setShowModal(false);
-    setForm({ ...BLANK_FORM });
+  async function saveSchedule() {
+    const chosen = availableReports.find((r) => r.name === form.name);
+    setSaving(true);
+    try {
+      const created = await apiFetch<ReportSchedule>("/admin/report-schedules", {
+        method: "POST",
+        body: JSON.stringify({
+          ...form,
+          // Bind to the deployed template so the scheduler knows what to run.
+          templateId: chosen?.id,
+          source: chosen?.dataSource,
+        }),
+      });
+      setSchedules((prev) => [...prev, created]);
+      setShowModal(false);
+      setForm({ ...BLANK_FORM });
+      toast.success(
+        `"${form.name}" scheduled ${form.frequency.toLowerCase()} to ${form.recipients}.`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the schedule.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Runs a schedule immediately, so a new one can be proven without waiting. */
+  async function sendNow(schedule: ReportSchedule) {
+    setBusyId(schedule.id);
+    try {
+      const result = await apiFetch<{ recipients: string[]; total: number }>(
+        `/admin/report-schedules/${schedule.id}/send-now`,
+        { method: "POST" },
+      );
+      toast.success(
+        `Sent ${result.total} record${result.total === 1 ? "" : "s"} to ${result.recipients.join(", ")}.`,
+      );
+      const refreshed = await apiFetch<ReportSchedule[]>("/admin/report-schedules");
+      setSchedules(refreshed);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to send the report.",
+      );
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
@@ -193,12 +286,20 @@ export function ReportAutomationPage() {
                 </span>
               </div>
               <p className="text-xs text-gray-400 mt-0.5">
-                Last sent: {s.lastSent}
+                Last sent:{" "}
+                {s.lastSent && s.lastSent !== "—"
+                  ? formatDateTimeByGeneralSettings(s.lastSent)
+                  : "never"}
               </p>
+              {s.lastError && (
+                <p className="text-xs text-red-600 mt-0.5">
+                  Last attempt failed: {s.lastError}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
               <button
-                onClick={() => toggleEnabled(s.id)}
+                onClick={() => void toggleEnabled(s.id)}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${s.enabled ? "bg-gray-800" : "bg-gray-200"}`}
               >
                 <span
@@ -206,7 +307,16 @@ export function ReportAutomationPage() {
                 />
               </button>
               <button
-                onClick={() => deleteSchedule(s.id)}
+                onClick={() => void sendNow(s)}
+                disabled={busyId === s.id}
+                title="Run this report now and email it"
+                className="flex items-center gap-1.5 px-2.5 py-1 border border-gray-200 rounded-lg text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Send className="w-3.5 h-3.5" />
+                {busyId === s.id ? "Sending…" : "Send now"}
+              </button>
+              <button
+                onClick={() => setDeleteTarget(s)}
                 className="text-gray-400 hover:text-red-500 p-1 rounded-lg hover:bg-red-50"
               >
                 <Trash2 className="w-4 h-4" />
@@ -353,16 +463,30 @@ export function ReportAutomationPage() {
                 Cancel
               </button>
               <button
-                onClick={saveSchedule}
-                disabled={!form.recipients.trim()}
+                onClick={() => void saveSchedule()}
+                disabled={saving || !form.name.trim() || !form.recipients.trim()}
                 className="px-4 py-2 text-sm bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50"
               >
-                Create Schedule
+                {saving ? "Creating…" : "Create Schedule"}
               </button>
             </div>
           </div>
         </div>
       )}
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title="Delete report schedule"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" will stop being sent automatically. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={busyId === deleteTarget?.id}
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

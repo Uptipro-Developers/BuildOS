@@ -1206,24 +1206,15 @@ export class AdminExtrasService {
             })));
         }
 
-        if (target === 'all' || target === 'admin') {
-            const pendingUsers = await this.prisma.user.findMany({
-                where: { status: { contains: 'Pending', mode: 'insensitive' } },
-                orderBy: { createdAt: 'desc' },
-            });
-            rows.push(...pendingUsers.map((u) => ({
-                id: u.id,
-                module: 'admin',
-                type: 'User Creation',
-                title: `User account — ${u.name}`,
-                project: u.department ?? 'Admin',
-                requestedBy: u.name,
-                date: u.createdAt,
-                status: 'pending',
-                urgency: 'normal',
-                description: `Pending account for ${u.email}`,
-            })));
-        }
+        // Pending-invite users are deliberately NOT surfaced here.
+        //
+        // They used to appear as approval items of type "User Creation", but user
+        // creation has no approval step in this system: an admin reviews the
+        // employee in Users → Pending Sync, creates the account, and the invitee
+        // then activates it. A `pending_invite` user is waiting on the invitee, not
+        // on an approver — there was nothing for an approver to decide, and the rows
+        // also inflated the dashboard's pending-approvals count. Invites are managed
+        // on Admin → Users, which shows their real state and can resend them.
 
         return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }
@@ -2453,6 +2444,45 @@ export class AdminExtrasService {
     async findReportSchedules() {
         const settings = await this.readAdminSettings();
         return settings.reportSchedules;
+    }
+
+    // Report Automation had a read endpoint only, so schedules configured in the UI
+    // were never persisted anywhere and vanished on refresh.
+    async createReportSchedule(data: any) {
+        const settings = await this.readAdminSettings();
+        const created = {
+            id: `RS-${Date.now()}`,
+            ...data,
+            lastSent: null,
+            lastError: null,
+            createdAt: new Date().toISOString(),
+        };
+        settings.reportSchedules.push(created);
+        await this.writeAdminSettings(settings);
+        return created;
+    }
+
+    async updateReportSchedule(id: string, data: any) {
+        const settings = await this.readAdminSettings();
+        const existing = settings.reportSchedules.find((item: any) => item?.id === id);
+        if (!existing) throw new BadRequestException('Report schedule not found');
+
+        settings.reportSchedules = settings.reportSchedules.map((item: any) =>
+            item?.id === id
+                ? { ...item, ...data, id, updatedAt: new Date().toISOString() }
+                : item,
+        );
+        await this.writeAdminSettings(settings);
+        return settings.reportSchedules.find((item: any) => item?.id === id);
+    }
+
+    async deleteReportSchedule(id: string) {
+        const settings = await this.readAdminSettings();
+        settings.reportSchedules = settings.reportSchedules.filter(
+            (item: any) => item?.id !== id,
+        );
+        await this.writeAdminSettings(settings);
+        return { deleted: true };
     }
 
     // ── Report Templates ──

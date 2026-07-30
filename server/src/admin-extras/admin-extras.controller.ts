@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { AdminExtrasService } from './admin-extras.service';
 import { UserActivityService } from './user-activity.service';
+import { ReportSchedulerService } from '../reports/report-scheduler.service';
 import { Roles, Public } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 
@@ -13,6 +14,7 @@ export class AdminExtrasController {
     constructor(
         private readonly svc: AdminExtrasService,
         private readonly userActivity: UserActivityService,
+        private readonly scheduler: ReportSchedulerService,
     ) { }
 
     // ── Per-user activity & requests (Admin → Users sidebar tabs) ──
@@ -373,6 +375,25 @@ export class AdminExtrasController {
     // ── Report Schedules ──
     @Get('report-schedules')
     getReportSchedules() { return this.svc.findReportSchedules(); }
+
+    @Post('report-schedules')
+    @Roles('admin')
+    createReportSchedule(@Body() body: any) { return this.svc.createReportSchedule(body); }
+
+    @Patch('report-schedules/:id')
+    @Roles('admin')
+    updateReportSchedule(@Param('id') id: string, @Body() body: any) {
+        return this.svc.updateReportSchedule(id, body);
+    }
+
+    @Delete('report-schedules/:id')
+    @Roles('admin')
+    deleteReportSchedule(@Param('id') id: string) { return this.svc.deleteReportSchedule(id); }
+
+    /** Runs a schedule immediately and stamps its last-sent time. */
+    @Post('report-schedules/:id/send-now')
+    @Roles('admin')
+    sendReportScheduleNow(@Param('id') id: string) { return this.scheduler.sendNow(id); }
 
     // ── Report Templates ──
     @Get('report-templates')

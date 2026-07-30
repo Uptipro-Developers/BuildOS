@@ -47,7 +47,6 @@ const statusConfig: Record<
 };
 
 const typeColors: Record<string, string> = {
-  "User Creation": "bg-blue-50 text-blue-700",
   "Role Assignment": "bg-purple-50 text-purple-700",
   "Config Change": "bg-orange-50 text-orange-700",
   "Integration Request": "bg-teal-50 text-teal-700",
@@ -182,7 +181,6 @@ export function AdminApprovalsPage() {
           <option value="all">All Types</option>
           {(
             [
-              "User Creation",
               "Role Assignment",
               "Config Change",
               "Integration Request",
