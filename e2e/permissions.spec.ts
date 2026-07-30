@@ -21,7 +21,7 @@
  *     npx playwright test e2e/permissions.spec.ts --reporter=list
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const API = process.env.BUILDOS_API || "http://localhost:8080/api";
@@ -94,11 +94,11 @@ test.describe("role-driven permissions", () => {
 
     // Leave approval is an HR process, and HR Manager is a supervisory role, so it
     // is granted — and marked as coming from the role, not from an override.
-    expect(effective.processPermissions.p_approve_lv.approve).toBe(true);
-    expect(effective.processSources.p_approve_lv.approve).toBe("role");
+    expect(effective.processPermissions.p_leave_requests.approve).toBe(true);
+    expect(effective.processSources.p_leave_requests.approve).toBe("role");
 
     // A process in an app the role has no access to must not be granted.
-    expect(effective.processPermissions.p_create_exp).toBeUndefined();
+    expect(effective.processPermissions.p_expenses).toBeUndefined();
   });
 
   test("a per-user deny overrides the role and is enforced by the API", async ({ request }) => {
@@ -143,15 +143,15 @@ test.describe("role-driven permissions", () => {
     // Revoke just `approve` on this one process for this one user.
     const revoke = await request.put(`${API}/admin/users/${userId}/permissions`, {
       headers: auth(adminToken),
-      data: { processOverrides: { p_approve_lv: { approve: "deny" } } },
+      data: { processOverrides: { p_leave_requests: { approve: "deny" } } },
     });
     expect(revoke.ok(), await revoke.text()).toBeTruthy();
     const revoked = await revoke.json();
-    expect(revoked.processPermissions.p_approve_lv.approve).toBe(false);
-    expect(revoked.processSources.p_approve_lv.approve).toBe("deny");
+    expect(revoked.processPermissions.p_leave_requests.approve).toBe(false);
+    expect(revoked.processSources.p_leave_requests.approve).toBe("deny");
     // Only that action is narrowed — `view` still comes from the role.
-    expect(revoked.processPermissions.p_approve_lv.view).toBe(true);
-    expect(revoked.processSources.p_approve_lv.view).toBe("role");
+    expect(revoked.processPermissions.p_leave_requests.view).toBe(true);
+    expect(revoked.processSources.p_leave_requests.view).toBe("role");
 
     // The API must refuse, not merely the UI.
     const denied = await request.post(`${API}/leave-requests/does-not-exist/approve`, {
@@ -167,7 +167,7 @@ test.describe("role-driven permissions", () => {
       data: { processOverrides: {} },
     });
     expect(cleared.ok()).toBeTruthy();
-    expect((await cleared.json()).processSources.p_approve_lv.approve).toBe("role");
+    expect((await cleared.json()).processSources.p_leave_requests.approve).toBe("role");
 
     const after = await request.post(`${API}/leave-requests/does-not-exist/approve`, {
       headers: auth(userToken),
@@ -190,7 +190,7 @@ test.describe("role-driven permissions", () => {
     const scoped = await (
       await request.get(`${API}/admin/users/${userId}/permissions`, { headers: auth(token) })
     ).json();
-    expect(scoped.processPermissions.p_create_exp).toBeUndefined();
+    expect(scoped.processPermissions.p_expenses).toBeUndefined();
 
     // Grant Finance beyond the role, as Edit User does.
     const extend = await request.put(`${API}/admin/users/${userId}`, {
@@ -206,7 +206,7 @@ test.describe("role-driven permissions", () => {
     // The HR Manager role configures nothing for Finance, so Finance is
     // unrestricted for this user rather than resolving to no permissions at all.
     expect(extended.processUnrestrictedApps).toContain("finance");
-    expect(extended.processPermissions.p_create_exp.create).toBe(true);
+    expect(extended.processPermissions.p_expenses.create).toBe(true);
   });
 
   test("the Layer 2 catalog still covers every sidebar item", () => {
@@ -229,9 +229,14 @@ test.describe("role-driven permissions", () => {
       [...catalogSource.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]),
     );
 
+    // Commented-out nav items are not rendered, so they are not permission
+    // surfaces — strip comments before scanning or the check reports phantoms.
+    const stripComments = (source: string) =>
+      source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
     const missing: string[] = [];
     for (const layout of LAYOUTS) {
-      const source = readFileSync(layout, "utf-8");
+      const source = stripComments(readFileSync(layout, "utf-8"));
       for (const match of source.matchAll(/href:\s*"(\/apps\/[^"]+)"/g)) {
         if (!catalogIds.has(match[1])) missing.push(`${layout}: ${match[1]}`);
       }
@@ -264,12 +269,13 @@ test.describe("user detail tabs", () => {
 
     // The admin account is the one with recorded audit history in any environment
     // that has been used at all.
-    const row = page.getByRole("row", { name: new RegExp(ADMIN_EMAIL, "i") }).first();
+    const row = page.locator("tr", { hasText: ADMIN_EMAIL }).first();
     await expect(row).toBeVisible({ timeout: 20_000 });
     await row.click();
 
-    const panel = page.locator("div").filter({ hasText: "Basic Info" }).last();
-    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByRole("button", { name: "Basic Info", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
 
     // Permissions — must list real catalog processes, not the old empty state.
     await page.getByRole("button", { name: "Permissions", exact: true }).click();
@@ -286,5 +292,164 @@ test.describe("user detail tabs", () => {
       0,
       { timeout: 15_000 },
     );
+  });
+});
+
+test.describe("process catalog", () => {
+  /**
+   * The catalog is what roles are configured against, what approval workflows
+   * route, and what the API guards enforce. An entry with no implementation is a
+   * permission that governs nothing; a missing entry is an operation nobody can
+   * restrict. Three aspirational entries (Bank Reconciliation, Salary Advance,
+   * Approve Milestone) had accumulated with no route, service or model at all.
+   */
+  test("every catalog process names a real module and route", async ({ request }) => {
+    const token = await login(request);
+    const catalog: Array<{
+      id: string;
+      app: string;
+      actions?: string[];
+      backedBy?: { module?: string; route?: string };
+    }> = await (
+      await request.get(`${API}/admin/process-catalog`, { headers: auth(token) })
+    ).json();
+
+    // Read from the API rather than by parsing the source file: the catalog is
+    // built by a helper call now, so a source regex would silently match nothing
+    // and the assertions below would pass vacuously.
+    expect(catalog.length).toBeGreaterThan(20);
+
+    const navCatalog = readFileSync("src/app/utils/navCatalog.ts", "utf-8");
+    const navIds = new Set(
+      [...navCatalog.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]),
+    );
+
+    // A process one app owns but another app's page performs. Appraisals are
+    // HR-owned, but the only appraisal screen is under ESS; scoping it to `ess`
+    // would grant it to everyone, since ESS is every user's baseline app.
+    const CROSS_APP_BY_DESIGN = new Set(["p_appraisals"]);
+
+    const problems: string[] = [];
+    for (const proc of catalog) {
+      const module = proc.backedBy?.module;
+      const route = proc.backedBy?.route;
+
+      if (!module || !route) {
+        problems.push(`${proc.id}: missing backedBy`);
+        continue;
+      }
+      if (!existsSync(`server/src/${module}`)) {
+        problems.push(`${proc.id}: no server module "${module}"`);
+      }
+      if (!navIds.has(route)) {
+        problems.push(`${proc.id}: route "${route}" is not a nav destination`);
+      }
+      const routeApp = /^\/apps\/([^/]+)/.exec(route)?.[1];
+      if (routeApp && routeApp !== proc.app && !CROSS_APP_BY_DESIGN.has(proc.id)) {
+        problems.push(`${proc.id}: app "${proc.app}" but route is under "${routeApp}"`);
+      }
+      if (!proc.actions?.length) {
+        problems.push(`${proc.id}: supports no permissions`);
+      }
+    }
+
+    expect(problems, `process catalog is out of step:\n${problems.join("\n")}`).toEqual(
+      [],
+    );
+  });
+
+  test("the requisition and purchase-order processes both exist", async ({ request }) => {
+    const token = await login(request);
+    const catalog: Array<{ id: string }> = await (
+      await request.get(`${API}/admin/process-catalog`, { headers: auth(token) })
+    ).json();
+    const ids = new Set(catalog.map((p) => p.id));
+
+    // Material requisition and purchase requisition are distinct flows with their
+    // own pages, models and approval routes; only the latter used to be listed.
+    for (const id of [
+      "p_material_requests",
+      "p_purchase_requests",
+      "p_purchase_orders",
+      "p_goods_receipt",
+    ]) {
+      expect(ids.has(id), `${id} should be in the catalog`).toBe(true);
+    }
+
+    // Entries that named no implementation are gone.
+    for (const id of ["p_bank_recon", "p_salary_advance", "p_milestone_approve"]) {
+      expect(ids.has(id), `${id} is unimplemented and should not be listed`).toBe(
+        false,
+      );
+    }
+  });
+
+  test("processes are entity-grained and expose only supported permissions", async ({
+    request,
+  }) => {
+    const token = await login(request);
+    const catalog = await (
+      await request.get(`${API}/admin/process-catalog`, { headers: auth(token) })
+    ).json();
+
+    const byId = (id: string) => catalog.find((p: any) => p.id === id);
+
+    // A process is the activity, not the verb — Expenses carries the full
+    // lifecycle rather than "Create Expense" and "Approve Expense" being separate
+    // entries with a matrix row each.
+    expect(byId("p_expenses")?.actions).toEqual(
+      expect.arrayContaining(["view", "create", "edit", "approve", "delete"]),
+    );
+
+    // Actions with no workflow behind them are left out entirely, so the matrices
+    // cannot offer a permission that would govern nothing.
+    expect(byId("p_goods_receipt")?.actions).not.toContain("delete");
+    expect(byId("p_goods_receipt")?.actions).not.toContain("approve");
+    expect(byId("p_stock_movements")?.actions).not.toContain("edit");
+    expect(byId("p_rfqs")?.actions).not.toContain("approve");
+    expect(byId("p_ess_requests")?.actions).not.toContain("approve");
+    expect(byId("p_ess_payslips")?.actions).toEqual(["view"]);
+
+    // requiresApproval is derived, never independently set.
+    for (const proc of catalog) {
+      expect(
+        proc.requiresApproval,
+        `${proc.id}: requiresApproval must match whether Approve is supported`,
+      ).toBe((proc.actions ?? []).includes("approve"));
+    }
+  });
+
+  test("resolution omits unsupported permissions rather than denying them", async ({
+    request,
+  }) => {
+    const token = await login(request);
+    const userId = await inviteUser(request, token, {
+      name: "Perm Actions",
+      email: `perm.actions.${Date.now()}@buildos-e2e.ng`,
+      role: "HR Manager",
+      assignedApps: ["ess", "hr"],
+    });
+
+    const effective = await (
+      await request.get(`${API}/admin/users/${userId}/permissions`, {
+        headers: auth(token),
+      })
+    ).json();
+
+    // Payslips are read-only for an employee: only `view` exists as a key at all.
+    expect(Object.keys(effective.processPermissions.p_ess_payslips)).toEqual(["view"]);
+    // Departments are managed reference data — no approval step.
+    expect(Object.keys(effective.processPermissions.p_departments)).not.toContain(
+      "approve",
+    );
+
+    // Granting an unsupported verb must be inert, not silently stored as usable.
+    const attempted = await request.put(`${API}/admin/users/${userId}/permissions`, {
+      headers: auth(token),
+      data: { processOverrides: { p_ess_payslips: { delete: "allow" } } },
+    });
+    expect(attempted.ok()).toBeTruthy();
+    const after = await attempted.json();
+    expect(after.processPermissions.p_ess_payslips.delete).toBeUndefined();
   });
 });

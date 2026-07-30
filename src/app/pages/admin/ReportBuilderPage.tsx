@@ -5,6 +5,9 @@ import {
   createReportTemplate,
   updateReportTemplate,
   deleteReportTemplate,
+  getReportSources,
+  runReport,
+  type ReportSourceDef,
 } from "../../api/admin-extras";
 import { formatNumberByGeneralSettings } from "../../utils/generalSettings";
 import { exportCSV, type CsvCell } from "../../utils/exportCSV";
@@ -516,8 +519,98 @@ export function ReportBuilderPage() {
   const [deployedNotice, setDeployedNotice] = useState<string | null>(null);
   const dragIdx = useRef<number | null>(null);
 
-  const source =
+  // ── Live data sources ──
+  // Field definitions come from the backend registry so the picker can only offer
+  // fields that exist as columns; the local DATA_SOURCES entries supply presentation
+  // metadata (module colour, app key) and act as a fallback before the fetch lands.
+  const [liveSources, setLiveSources] = useState<ReportSourceDef[]>([]);
+
+  useEffect(() => {
+    getReportSources()
+      .then(setLiveSources)
+      .catch((err) => console.error("Failed to load report sources:", err));
+  }, []);
+
+  const baseSource =
     DATA_SOURCES.find((s) => s.value === tplDataSource) ?? DATA_SOURCES[0];
+  const liveSource = liveSources.find((s) => s.value === baseSource.value);
+  const source = liveSource
+    ? {
+        ...baseSource,
+        fields: liveSource.fields.map((f) => ({
+          key: f.key,
+          label: f.label,
+          type: f.type as (typeof baseSource.fields)[number]["type"],
+          queryable: f.queryable,
+        })),
+      }
+    : baseSource;
+
+  // ── Report execution ──
+  // The preview used to be derived from an empty array that nothing populated, so
+  // it always rendered headers with no rows and its CSV export produced a
+  // headers-only file. It now runs the report against the API.
+  const [previewData, setPreviewData] = useState<
+    Record<string, string | number>[]
+  >([]);
+  const [previewMeta, setPreviewMeta] = useState<{
+    total: number;
+    truncated: boolean;
+  } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const requestKey = JSON.stringify({
+    source: source.value,
+    fields: selectedFields.map((f) => f.key),
+    filters: filters
+      .filter((f) => f.field)
+      .map((f) => ({
+        field: f.field,
+        operator: f.operator,
+        value: f.value,
+        valueTo: f.valueTo,
+      })),
+    sort: sortRules
+      .filter((r) => r.field)
+      .map((r) => ({ field: r.field, direction: r.direction })),
+    limit: rowLimit,
+  });
+
+  useEffect(() => {
+    let alive = true;
+    const request = JSON.parse(requestKey);
+    setPreviewLoading(true);
+    setPreviewError(null);
+
+    runReport(request)
+      .then((result) => {
+        if (!alive) return;
+        setPreviewData(
+          result.rows.map((row) =>
+            Object.fromEntries(
+              Object.entries(row).map(([key, value]) => [key, value ?? ""]),
+            ),
+          ) as Record<string, string | number>[],
+        );
+        setPreviewMeta({ total: result.total, truncated: result.truncated });
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setPreviewData([]);
+        setPreviewMeta(null);
+        setPreviewError(
+          err instanceof Error ? err.message : "Failed to run this report.",
+        );
+      })
+      .finally(() => {
+        if (alive) setPreviewLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [requestKey]);
 
   useEffect(() => {
     getReportTemplates<ReportTemplate>()
@@ -778,49 +871,9 @@ export function ReportBuilderPage() {
     (f) => source.fields.find((sf) => sf.key === f.key)?.type === "number",
   );
 
-  const previewData = (() => {
-    let rows: Record<string, string | number>[] = [];
-    for (const f of filters) {
-      if (!f.field) continue;
-      rows = rows.filter((row) => {
-        const val = row[f.field];
-        const v = String(val ?? "").toLowerCase();
-        const fv = f.value.toLowerCase();
-        switch (f.operator) {
-          case "equals":
-            return v === fv;
-          case "not_equals":
-            return v !== fv;
-          case "contains":
-            return v.includes(fv);
-          case "greater_than":
-            return Number(val) > Number(f.value);
-          case "less_than":
-            return Number(val) < Number(f.value);
-          case "is_empty":
-            return !val || val === "";
-          case "between":
-            return (
-              Number(val) >= Number(f.value) && Number(val) <= Number(f.valueTo)
-            );
-          default:
-            return true;
-        }
-      });
-    }
-    for (const rule of [...sortRules].reverse()) {
-      rows.sort((a, b) => {
-        const av = a[rule.field],
-          bv = b[rule.field];
-        const cmp =
-          typeof av === "number"
-            ? (av as number) - (bv as number)
-            : String(av).localeCompare(String(bv));
-        return rule.direction === "asc" ? cmp : -cmp;
-      });
-    }
-    return rows.slice(0, rowLimit);
-  })();
+  // The client-side filter/sort/limit pipeline that used to live here operated on
+  // an array that was never populated. Filtering, sorting and limiting now happen
+  // in the database via runReport, which also keeps large sources off the client.
 
   // Exports the generated rows using the given columns, in order, as headers.
   const exportPreviewCSV = (
@@ -1413,10 +1466,25 @@ export function ReportBuilderPage() {
             <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
               <div className="bg-white border-b border-gray-100 px-5 py-2.5 flex items-center gap-3 shrink-0">
                 <span className="text-xs text-gray-500">
-                  {hasRun
-                    ? `${previewData.length} rows`
-                    : "Click Run to preview data"}
+                  {previewLoading
+                    ? "Running…"
+                    : previewError
+                      ? "Report failed"
+                      : hasRun
+                        ? `${previewData.length} of ${previewMeta?.total ?? previewData.length} rows`
+                        : "Click Run to preview data"}
                 </span>
+                {previewMeta?.truncated && !previewLoading && (
+                  <span className="text-xs text-amber-600">
+                    showing the first {previewData.length} — raise the row limit to
+                    see more
+                  </span>
+                )}
+                {previewError && (
+                  <span className="text-xs text-red-600 truncate max-w-[420px]">
+                    {previewError}
+                  </span>
+                )}
                 {hasRun && (
                   <div className="ml-auto flex gap-2">
                     <button
@@ -1469,7 +1537,7 @@ export function ReportBuilderPage() {
                         {tplName || source.label}
                       </span>
                       <span className="text-xs text-gray-500">
-                        · {previewData.length} rows
+                        · {previewData.length} of {previewMeta?.total ?? previewData.length} rows
                       </span>
                       {filters.length > 0 && (
                         <span className="px-2 py-0.5 bg-amber-50 text-amber-600 text-xs rounded-full">

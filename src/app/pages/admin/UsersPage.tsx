@@ -440,6 +440,24 @@ function UserProcessPermissions({
                     </td>
                     {PERM_ACTIONS.map((a) => {
                       const action = a.key as PermissionAction;
+
+                      // A process only exposes the permissions it supports; the
+                      // rest have no workflow behind them, so the cell is omitted
+                      // rather than shown as a box that could be ticked to no
+                      // effect. An older payload without `actions` means all five.
+                      const supported = proc.actions ?? PERM_ACTIONS.map((x) => x.key);
+                      if (!supported.includes(action)) {
+                        return (
+                          <td
+                            key={a.key}
+                            className="px-2 py-2 text-center text-gray-300"
+                            title={`${proc.label} has no ${a.label.toLowerCase()} step`}
+                          >
+                            —
+                          </td>
+                        );
+                      }
+
                       const state = stateOf(proc.id, action);
                       const allowed = effectiveOf(proc.id, action);
                       const title =

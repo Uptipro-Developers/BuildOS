@@ -35,7 +35,15 @@ interface ProcessDef {
   id: string;
   label: string;
   app: AppKey;
+  /**
+   * The permissions this process supports. A process is a major activity
+   * ("Expenses") and these are the verbs under it; anything absent has no workflow
+   * behind it and is omitted from the matrix rather than shown as an unticked box.
+   */
+  actions: OverrideKey[];
 }
+/** The permission verbs, matching the backend's action set. */
+type OverrideKey = "view" | "create" | "edit" | "approve" | "delete";
 interface ProcessOverride {
   view: OverrideState;
   create: OverrideState;
@@ -279,6 +287,19 @@ function UserPermPane({
                               {proc.label}
                             </td>
                             {PERM_KEYS.map((k) => {
+                              // Omit verbs this process does not support.
+                              if (!proc.actions.includes(k as OverrideKey)) {
+                                return (
+                                  <td
+                                    key={k}
+                                    className="px-3 py-2.5 text-center text-xs text-gray-300"
+                                    title={`${proc.label} has no ${k} step`}
+                                  >
+                                    —
+                                  </td>
+                                );
+                              }
+
                               const { effective } = effectivePerm(
                                 proc.id,
                                 k,
@@ -403,6 +424,14 @@ export function UserPermissionsPage() {
               id: proc.id,
               label: proc.label,
               app: String(proc.app).toLowerCase() as AppKey,
+              // An older payload without `actions` means the full lifecycle.
+              actions: (proc.actions ?? [
+                "view",
+                "create",
+                "edit",
+                "approve",
+                "delete",
+              ]) as OverrideKey[],
             })),
         );
 

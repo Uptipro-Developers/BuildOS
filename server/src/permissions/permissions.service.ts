@@ -89,6 +89,23 @@ export class PermissionsService {
 
     constructor(private prisma: PrismaService) {}
 
+    /**
+     * A permission map covering only the actions a process supports.
+     *
+     * Unsupported verbs are absent rather than false, so the matrices can omit the
+     * cell entirely instead of rendering a box an admin could tick to no effect.
+     */
+    private supportedOnly<T>(
+        actions: PermissionAction[] | undefined,
+        value: T,
+    ): Record<PermissionAction, T> {
+        const supported = actions?.length ? actions : PERMISSION_ACTIONS;
+        return Object.fromEntries(supported.map((a) => [a, value])) as Record<
+            PermissionAction,
+            T
+        >;
+    }
+
     private blankActions<T>(value: T): Record<PermissionAction, T> {
         return Object.fromEntries(PERMISSION_ACTIONS.map((a) => [a, value])) as Record<
             PermissionAction,
@@ -146,10 +163,15 @@ export class PermissionsService {
      * Read straight from the settings row rather than through AdminExtrasService,
      * which would make the dependency circular.
      */
-    private async processIdsByApp(): Promise<Record<string, string[]>> {
-        const byId = new Map<string, string>();
+    private async loadCatalog(): Promise<
+        { byApp: Record<string, string[]>; actionsOf: Record<string, PermissionAction[]> }
+    > {
+        const byId = new Map<string, { app: string; actions: PermissionAction[] }>();
         for (const proc of DEFAULT_PROCESS_CATALOG) {
-            byId.set(proc.id, String(proc.app ?? '').trim().toLowerCase());
+            byId.set(proc.id, {
+                app: String(proc.app ?? '').trim().toLowerCase(),
+                actions: proc.actions as PermissionAction[],
+            });
         }
 
         try {
@@ -161,7 +183,17 @@ export class PermissionsService {
             for (const item of custom) {
                 const id = String(item?.id ?? '').trim();
                 const app = String(item?.app ?? '').trim().toLowerCase();
-                if (id && app) byId.set(id, app);
+                if (!id || !app) continue;
+                // An admin-created process without an explicit action list supports
+                // the full set; anything listed is filtered to the known verbs.
+                const declared = Array.isArray(item?.actions)
+                    ? (item.actions as unknown[])
+                          .map((a) => String(a).trim().toLowerCase())
+                          .filter((a): a is PermissionAction =>
+                              PERMISSION_ACTIONS.includes(a as PermissionAction),
+                          )
+                    : PERMISSION_ACTIONS;
+                byId.set(id, { app, actions: declared.length > 0 ? declared : PERMISSION_ACTIONS });
             }
         } catch (error) {
             this.logger.warn(
@@ -170,11 +202,13 @@ export class PermissionsService {
         }
 
         const byApp: Record<string, string[]> = {};
-        for (const [id, app] of byId) {
-            if (!app) continue;
-            (byApp[app] ??= []).push(id);
+        const actionsOf: Record<string, PermissionAction[]> = {};
+        for (const [id, meta] of byId) {
+            if (!meta.app) continue;
+            (byApp[meta.app] ??= []).push(id);
+            actionsOf[id] = meta.actions;
         }
-        return byApp;
+        return { byApp, actionsOf };
     }
 
     async resolveForUser(userId: string): Promise<EffectivePermissions> {
@@ -203,7 +237,7 @@ export class PermissionsService {
             ]),
         ).filter(Boolean);
 
-        const processApps = await this.processIdsByApp();
+        const { byApp: processApps, actionsOf } = await this.loadCatalog();
         const appOfProcess: Record<string, string> = {};
         for (const [app, ids] of Object.entries(processApps)) {
             for (const id of ids) appOfProcess[id] = app;
@@ -219,8 +253,10 @@ export class PermissionsService {
             const sources: ProcessSourceMap = {};
             for (const ids of Object.values(processApps)) {
                 for (const id of ids) {
-                    permissions[id] = this.blankActions(true);
-                    sources[id] = this.blankActions<PermissionSource>('role');
+                    // Only the actions this process supports — an unsupported verb
+                    // must not appear even for a super role.
+                    permissions[id] = this.supportedOnly(actionsOf[id], true);
+                    sources[id] = this.supportedOnly<PermissionSource>(actionsOf[id], 'role');
                 }
             }
             return {
@@ -285,18 +321,23 @@ export class PermissionsService {
             const open = !roleConfiguredApps.has(app);
             if (open) processUnrestrictedApps.push(app);
             for (const id of processApps[app] ?? []) {
-                processPermissions[id] = this.blankActions(open);
-                processSources[id] = this.blankActions<PermissionSource>(open ? 'open' : 'role');
+                processPermissions[id] = this.supportedOnly(actionsOf[id], open);
+                processSources[id] = this.supportedOnly<PermissionSource>(
+                    actionsOf[id],
+                    open ? 'open' : 'role',
+                );
             }
         }
 
-        // Role grants.
+        // Role grants. Actions the process does not support are dropped, so a
+        // stored grant for a verb that was later removed from the catalog is inert.
         for (const [id, perms] of Object.entries(fromRole.allowed)) {
             const app = appOfProcess[id];
             if (app && !appAccess.includes(app)) continue; // no app access ⇒ no process
-            processPermissions[id] ??= this.blankActions(false);
-            processSources[id] ??= this.blankActions<PermissionSource>('role');
-            for (const action of PERMISSION_ACTIONS) {
+            if (!actionsOf[id]) continue; // not in the catalog at all
+            processPermissions[id] ??= this.supportedOnly(actionsOf[id], false);
+            processSources[id] ??= this.supportedOnly<PermissionSource>(actionsOf[id], 'role');
+            for (const action of actionsOf[id]) {
                 if (!perms[action]) continue;
                 processPermissions[id][action] = true;
                 processSources[id][action] = 'role';
@@ -313,9 +354,10 @@ export class PermissionsService {
         for (const [id, perms] of Object.entries(fromUser.allowed)) {
             const app = appOfProcess[id];
             if (app && !appAccess.includes(app)) continue;
-            processPermissions[id] ??= this.blankActions(false);
-            processSources[id] ??= this.blankActions<PermissionSource>('role');
-            for (const action of PERMISSION_ACTIONS) {
+            if (!actionsOf[id]) continue;
+            processPermissions[id] ??= this.supportedOnly(actionsOf[id], false);
+            processSources[id] ??= this.supportedOnly<PermissionSource>(actionsOf[id], 'role');
+            for (const action of actionsOf[id]) {
                 if (!perms[action]) continue;
                 processPermissions[id][action] = true;
                 processSources[id][action] = 'allow';
@@ -324,9 +366,10 @@ export class PermissionsService {
         for (const [id, perms] of Object.entries(fromUser.denied)) {
             const app = appOfProcess[id];
             if (app && !appAccess.includes(app)) continue;
-            processPermissions[id] ??= this.blankActions(false);
-            processSources[id] ??= this.blankActions<PermissionSource>('role');
-            for (const action of PERMISSION_ACTIONS) {
+            if (!actionsOf[id]) continue;
+            processPermissions[id] ??= this.supportedOnly(actionsOf[id], false);
+            processSources[id] ??= this.supportedOnly<PermissionSource>(actionsOf[id], 'role');
+            for (const action of actionsOf[id]) {
                 if (!perms[action]) continue;
                 processPermissions[id][action] = false;
                 processSources[id][action] = 'deny';
@@ -366,12 +409,35 @@ export class PermissionsService {
             if (effective.isSuper) return true;
 
             const source = effective.processSources[processId]?.[action];
+            // An explicit deny always bites.
             if (source === 'deny') return false;
-            if (source === undefined) {
-                // Process is outside the user's app access, or not in the catalog.
+            if (source !== undefined) {
                 return Boolean(effective.processPermissions[processId]?.[action]);
             }
-            return Boolean(effective.processPermissions[processId]?.[action]);
+
+            // Nothing resolved for this process/action. Distinguish the two causes:
+            // a process the catalog does not define (a guard naming a retired or
+            // mistyped id) must not lock everyone out of a working endpoint, so it
+            // is allowed and logged loudly. A process that exists but does not
+            // support this action, or sits outside the user's app access, is a real
+            // denial.
+            const { actionsOf } = await this.loadCatalog();
+            const supported = actionsOf[processId];
+            if (!supported) {
+                this.logger.warn(
+                    `Guard references process "${processId}", which is not in the catalog — allowing. ` +
+                        `Update the guard or add the process to DEFAULT_PROCESS_CATALOG.`,
+                );
+                return true;
+            }
+            if (!supported.includes(action)) {
+                this.logger.warn(
+                    `Guard requires "${action}" on "${processId}", which does not support it — allowing. ` +
+                        `Add "${action}" to that process's actions if it now has a workflow.`,
+                );
+                return true;
+            }
+            return false;
         } catch (error) {
             // A resolution failure must not silently deny a legitimate request;
             // log it loudly and fall back to the pre-enforcement behaviour.
@@ -444,7 +510,7 @@ export class PermissionsService {
         const roles = await this.prisma.appRole.findMany({
             select: { id: true, name: true, isSuper: true, appScope: true, inheritedRoles: true },
         });
-        const processApps = await this.processIdsByApp();
+        const { byApp: processApps, actionsOf } = await this.loadCatalog();
         if (Object.keys(processApps).length === 0) return { seeded: [] };
 
         const AUTHORITY = /manager|lead|head|director|officer|approver|supervisor|admin/i;
@@ -462,7 +528,11 @@ export class PermissionsService {
             const additions: string[] = [];
             for (const app of Array.isArray(role.appScope) ? role.appScope : []) {
                 for (const processId of processApps[String(app).trim().toLowerCase()] ?? []) {
-                    for (const action of actions) additions.push(`proc:${processId}:${action}`);
+                    // Never seed a verb the process does not support.
+                    const supported = actionsOf[processId] ?? PERMISSION_ACTIONS;
+                    for (const action of actions) {
+                        if (supported.includes(action)) additions.push(`proc:${processId}:${action}`);
+                    }
                 }
             }
             if (additions.length === 0) continue;

@@ -118,7 +118,7 @@ export class LeaveRequestsController {
   @Roles('admin', 'hr-manager', 'manager')
   // Fine-grained check on top of the role list: an admin can revoke "approve" on
   // this process for a specific role or user, and that must hold at the API too.
-  @RequiresProcess('p_approve_lv', 'approve')
+  @RequiresProcess('p_leave_requests', 'approve')
   async approve(
     @Param('id') id: string,
     @Body('comments') comments: string,
@@ -141,7 +141,7 @@ export class LeaveRequestsController {
 
   @Post(':id/reject')
   @Roles('admin', 'hr-manager', 'manager')
-  @RequiresProcess('p_approve_lv', 'approve')
+  @RequiresProcess('p_leave_requests', 'approve')
   async reject(
     @Param('id') id: string,
     @Body('reason') reason: string,

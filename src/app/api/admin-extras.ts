@@ -88,6 +88,14 @@ export interface ProcessCatalogItem {
     label: string;
     app: string;
     description: string;
+    /**
+     * The permissions this process supports. A process is a major activity
+     * ("Expenses") and these are the verbs under it; anything absent has no
+     * workflow behind it and is omitted from the permission matrices rather than
+     * shown as an unticked box. Older payloads may omit it — treat that as the
+     * full set.
+     */
+    actions?: PermissionAction[];
     requiresApproval: boolean;
 }
 
@@ -491,3 +499,48 @@ export const getUserActivity = (userId: string, limit = 50) =>
     apiFetch<UserActivityEntry[]>(`/admin/users/${userId}/activity?limit=${limit}`);
 export const getUserRequests = (userId: string) =>
     apiFetch<UserRequestEntry[]>(`/admin/users/${userId}/requests`);
+
+// ── Report Builder query execution ───────────────────────────────────────────
+/**
+ * The builder's sources and fields come from the backend registry rather than a
+ * hardcoded frontend list, so the picker can only offer fields that exist as
+ * columns. The old hardcoded list offered several that did not.
+ */
+export interface ReportSourceField {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'status';
+    /** Derived fields are computed after loading and cannot be filtered or sorted. */
+    queryable: boolean;
+}
+export interface ReportSourceDef {
+    value: string;
+    label: string;
+    module: string;
+    app: string;
+    fields: ReportSourceField[];
+}
+export interface ReportRunResult {
+    source: string;
+    columns: Array<{ key: string; label: string; type: string }>;
+    rows: Array<Record<string, string | number | null>>;
+    rowCount: number;
+    total: number;
+    truncated: boolean;
+    generatedAt: string;
+}
+
+export const getReportSources = () =>
+    apiFetch<{ success: boolean; data: ReportSourceDef[] }>('/reports/sources').then((r) => r.data);
+
+export const runReport = (body: {
+    source: string;
+    fields?: string[];
+    filters?: Array<{ field: string; operator: string; value?: string; valueTo?: string }>;
+    sort?: Array<{ field: string; direction?: 'asc' | 'desc' }>;
+    limit?: number;
+}) =>
+    apiFetch<{ success: boolean; data: ReportRunResult }>('/reports/run', {
+        method: 'POST',
+        body: JSON.stringify(body),
+    }).then((r) => r.data);

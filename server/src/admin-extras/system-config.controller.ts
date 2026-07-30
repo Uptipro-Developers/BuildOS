@@ -13,6 +13,7 @@ import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 import { SystemConfigService } from './system-config.service';
 import { ReportBuilderService } from '../reports/report-builder.service';
+import { ReportQueryService } from '../reports/report-query.service';
 
 @Controller('system-config')
 @UseGuards(RolesGuard)
@@ -160,7 +161,10 @@ export class SystemConfigController {
 @Controller('reports')
 @UseGuards(RolesGuard)
 export class ReportsController {
-  constructor(private reportService: ReportBuilderService) {}
+  constructor(
+    private reportService: ReportBuilderService,
+    private reportQuery: ReportQueryService,
+  ) {}
 
   // ── Report Definitions ──
   @Get('definitions')
@@ -217,6 +221,25 @@ export class ReportsController {
       body.endDate ? new Date(body.endDate) : undefined,
     );
     return { success: true, data: report, message: 'Procurement report generated' };
+  }
+
+  // ── Report Builder ──
+  /** The sources and fields Report Builder may offer, from the query registry. */
+  @Get('sources')
+  @Roles('admin', 'finance-manager', 'hr-manager')
+  listReportSources() {
+    return { success: true, data: this.reportQuery.listSources() };
+  }
+
+  /**
+   * Runs a built report. Filters and sorts are resolved through the registry, so
+   * only listed fields can reach the database.
+   */
+  @Post('run')
+  @Roles('admin', 'finance-manager', 'hr-manager')
+  async runReport(@Body() body: any) {
+    const result = await this.reportQuery.run(body ?? {});
+    return { success: true, data: result };
   }
 
   // ── Custom Reports ──

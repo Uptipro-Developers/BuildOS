@@ -616,16 +616,34 @@ export class AdminExtrasService {
         const label = String(input?.label ?? '').trim();
         const app = String(input?.app ?? '').trim();
         const description = String(input?.description ?? '').trim();
-        const requiresApproval = input?.requiresApproval !== false;
 
         if (!label) throw new BadRequestException('Process label is required');
         if (!app) throw new BadRequestException('Process app is required');
+
+        // `actions` is the set of permissions this process supports. Anything not
+        // listed is omitted from the permission matrices rather than shown as an
+        // unticked box, so a verb with no workflow behind it cannot be granted.
+        // An omitted list means the full lifecycle.
+        const known = ['view', 'create', 'edit', 'approve', 'delete'];
+        const actions = Array.isArray(input?.actions)
+            ? (input.actions as unknown[])
+                  .map((a) => String(a).trim().toLowerCase())
+                  .filter((a) => known.includes(a))
+            : known;
+        if (actions.length === 0) {
+            throw new BadRequestException('A process must support at least one permission');
+        }
+
+        // Kept consistent rather than independently settable: a process requires
+        // approval exactly when it exposes the Approve permission.
+        const requiresApproval = actions.includes('approve');
 
         return {
             id,
             label,
             app,
             description,
+            actions,
             requiresApproval,
         };
     }
