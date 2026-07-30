@@ -2,6 +2,7 @@ import {
     Controller, Get, Post, Patch, Delete, Param, Body, Query,
 } from '@nestjs/common';
 import { AccrualsService } from './accruals.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller()
 export class AccrualsController {
@@ -47,12 +48,16 @@ export class AccrualsController {
     ) { return this.svc.reverse(id, body?.amount, body?.reversedAt); }
 
     @Post('accruals/:id/approve')
+    // Fine-grained check on top of the role list: an admin can revoke Approve on
+    // Accruals for a role or a single user, and that must hold at the API too.
+    @RequiresProcess('p_accruals', 'approve')
     approve(
         @Param('id') id: string,
         @Body() body: { actedBy?: string; comment?: string },
     ) { return this.svc.decide(id, 'approved', body?.actedBy, body?.comment); }
 
     @Post('accruals/:id/reject')
+    @RequiresProcess('p_accruals', 'approve')
     reject(
         @Param('id') id: string,
         @Body() body: { actedBy?: string; comment?: string },

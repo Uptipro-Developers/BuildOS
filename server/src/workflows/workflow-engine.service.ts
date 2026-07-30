@@ -1,9 +1,70 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsService } from '../permissions/permissions.service';
+
+/**
+ * Which catalog process governs each entity a workflow can route.
+ *
+ * The generic approval endpoints approve whatever node they are given, so a fixed
+ * `@RequiresProcess` on the controller would be wrong — the process depends on
+ * what is being approved. Enforcement therefore happens here, where the workflow
+ * instance's entityType is known.
+ *
+ * An entity absent from this map is not blocked: it resolves to no process, and
+ * the approval proceeds under the coarse @Roles check alone rather than failing
+ * closed on an entity nobody has mapped yet.
+ */
+const PROCESS_BY_ENTITY: Record<string, string> = {
+  LeaveRequest: 'p_leave_requests',
+  Expense: 'p_expenses',
+  Accrual: 'p_accruals',
+  PurchaseRequest: 'p_purchase_requests',
+  PurchaseOrder: 'p_purchase_orders',
+  MaterialRequest: 'p_material_requests',
+  PurchaseInvoice: 'p_purchase_invoices',
+  Payment: 'p_payments',
+  Claim: 'p_claims',
+  JournalEntry: 'p_journal_entries',
+  Budget: 'p_budgets',
+  ChangeRequest: 'p_change_requests',
+  DailyReport: 'p_daily_reports',
+  QualityNcr: 'p_quality_ncrs',
+  HseRecord: 'p_hse_records',
+  ProjectDocument: 'p_documents',
+  FundingRelease: 'p_project_funding',
+  StockMovement: 'p_stock_movements',
+  MaterialReturn: 'p_store_requests',
+  Appraisal: 'p_appraisals',
+  AttendanceRecord: 'p_attendance',
+};
 
 @Injectable()
 export class WorkflowEngineService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private permissions: PermissionsService,
+  ) {}
+
+  /**
+   * Refuses the approval if the acting user's configured permissions revoke
+   * Approve on the process this entity belongs to.
+   */
+  private async assertMayApprove(entityType: string, approverId: string) {
+    const processId = PROCESS_BY_ENTITY[String(entityType ?? '')];
+    if (!processId || !approverId) return;
+
+    const allowed = await this.permissions.can(approverId, processId, 'approve');
+    if (!allowed) {
+      throw new ForbiddenException(
+        `Your role does not permit "approve" on this process.`,
+      );
+    }
+  }
 
   /**
    * Create approval workflow instance
@@ -112,6 +173,11 @@ export class WorkflowEngineService {
       throw new BadRequestException('Approval request is not pending');
     }
 
+    await this.assertMayApprove(
+      approvalRequest.workflowInstance.entityType,
+      approverId,
+    );
+
     // Update approval request
     await this.prisma.approvalRequest.update({
       where: { id: approvalRequestId },
@@ -160,11 +226,18 @@ export class WorkflowEngineService {
   ) {
     const approvalRequest = await this.prisma.approvalRequest.findUnique({
       where: { id: approvalRequestId },
+      include: { workflowInstance: { select: { entityType: true } } },
     });
 
     if (!approvalRequest) {
       throw new NotFoundException(`Approval request ${approvalRequestId} not found`);
     }
+
+    // Rejecting is the same authority as approving.
+    await this.assertMayApprove(
+      approvalRequest.workflowInstance?.entityType ?? '',
+      approverId,
+    );
 
     // Update approval request
     const updated = await this.prisma.approvalRequest.update({

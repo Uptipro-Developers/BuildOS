@@ -35,7 +35,7 @@ export class WorkflowController {
       body.workflowId,
       body.entityType,
       body.entityId,
-      req.user.id,
+      (req.user.sub ?? req.user.id),
       body.context,
     );
     return { success: true, data: instance, message: 'Workflow instance created' };
@@ -57,7 +57,7 @@ export class WorkflowController {
     @Query('skip') skip?: string,
   ) {
     const result = await this.workflowEngine.getPendingApprovals(
-      req.user.id,
+      (req.user.sub ?? req.user.id),
       limit ? parseInt(limit) : 20,
       skip ? parseInt(skip) : 0,
     );
@@ -71,7 +71,7 @@ export class WorkflowController {
     @Request() req: any,
     @Body('comments') comments?: string,
   ) {
-    const result = await this.workflowEngine.approveNode(id, req.user.id, comments);
+    const result = await this.workflowEngine.approveNode(id, (req.user.sub ?? req.user.id), comments);
     return { success: true, data: result, message: 'Node approved' };
   }
 
@@ -82,7 +82,7 @@ export class WorkflowController {
     @Body('reason') reason: string,
     @Request() req: any,
   ) {
-    const result = await this.workflowEngine.rejectNode(id, req.user.id, reason);
+    const result = await this.workflowEngine.rejectNode(id, (req.user.sub ?? req.user.id), reason);
     return { success: true, data: result, message: 'Node rejected' };
   }
 
@@ -94,7 +94,7 @@ export class WorkflowController {
     @Body('delegateTo') delegateTo: string,
     @Request() req: any,
   ) {
-    const result = await this.workflowEngine.delegateApproval(id, delegateTo, req.user.id);
+    const result = await this.workflowEngine.delegateApproval(id, delegateTo, (req.user.sub ?? req.user.id));
     return { success: true, data: result, message: 'Approval delegated' };
   }
 
