@@ -1,5 +1,16 @@
 import type { RedisOptions } from 'ioredis';
 
+/**
+ * Resolve hostnames over both IPv4 and IPv6 (`dns.lookup` family 0).
+ *
+ * Railway's private network publishes `*.railway.internal` as AAAA records only,
+ * and ioredis defaults to an IPv4-only lookup — so `redis.railway.internal` fails
+ * with ENOTFOUND while `postgres.railway.internal` connects fine, because
+ * Prisma's query engine resolves dual-stack already. That asymmetry is what makes
+ * this look like a Redis outage rather than a DNS default.
+ */
+const DNS_FAMILY_DUAL_STACK = 0;
+
 export interface RedisConnectionConfig {
     enabled: boolean;
     url?: string;
@@ -53,7 +64,7 @@ export function isRedisEnabled(): boolean {
  */
 export function buildRedisOptions(overrides: RedisOptions = {}): RedisOptions {
     const cfg = getRedisConfig();
-    const base: RedisOptions = {};
+    const base: RedisOptions = { family: DNS_FAMILY_DUAL_STACK };
 
     if (cfg.host) {
         base.host = cfg.host;
@@ -78,6 +89,7 @@ export function getRedisConnectionOptions(overrides: RedisOptions = {}): RedisOp
         const options: RedisOptions = {
             host: parsed.hostname,
             port: Number(parsed.port) || 6379,
+            family: DNS_FAMILY_DUAL_STACK,
         };
         if (parsed.username) options.username = decodeURIComponent(parsed.username);
         if (parsed.password) options.password = decodeURIComponent(parsed.password);
