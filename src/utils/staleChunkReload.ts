@@ -25,7 +25,20 @@
  * schema rejects a "//" comment key.
  */
 
-const RELOAD_FLAG = "buildos_stale_chunk_reloaded";
+const RELOAD_STAMP = "buildos_stale_chunk_reload_at";
+
+/**
+ * How long after a recovery reload to refuse another one.
+ *
+ * The guard cannot simply be "reload at most once per tab": a tab can outlive
+ * several deploys and should recover from each. It also cannot be cleared on
+ * `load`, which is what an earlier version did — the failure this module exists
+ * for happens on a lazy route *after* load, so clearing it there meant a
+ * genuinely broken deploy (a chunk that 404s no matter how often we refetch)
+ * reloaded forever. A cooldown gets both: repeat failures inside the window
+ * surface as errors, and a deploy an hour later still recovers.
+ */
+const RELOAD_COOLDOWN_MS = 30_000;
 
 /**
  * Whether a rejection looks like a chunk that no longer exists.
@@ -65,12 +78,12 @@ function isStaleChunkError(reason: unknown): boolean {
 
 function reloadOnce() {
   try {
-    if (sessionStorage.getItem(RELOAD_FLAG)) return false;
-    sessionStorage.setItem(RELOAD_FLAG, "1");
+    const last = Number(sessionStorage.getItem(RELOAD_STAMP)) || 0;
+    if (last && Date.now() - last < RELOAD_COOLDOWN_MS) return false;
+    sessionStorage.setItem(RELOAD_STAMP, String(Date.now()));
   } catch {
-    // Private mode with storage disabled — reloading once is still better than
-    // leaving the user on a dead route, and without storage there is no loop
-    // guard, so bail out rather than risk one.
+    // Private mode with storage disabled. Without storage there is no loop
+    // guard at all, so bail out rather than risk an infinite refresh.
     return false;
   }
 
@@ -78,8 +91,39 @@ function reloadOnce() {
   return true;
 }
 
+/**
+ * Wraps a dynamic import so a stale chunk triggers the reload.
+ *
+ * This is the only interception point that actually works for a lazy route, and
+ * the window listeners below cannot replace it:
+ *
+ *   - `React.lazy` attaches its own rejection handler to the promise this factory
+ *     returns, so the rejection is *handled* and `unhandledrejection` never
+ *     fires. React re-throws during render instead, which React Router catches
+ *     and renders as "Unexpected Application Error! Importing a module script
+ *     failed" — the error screen this module was supposed to prevent.
+ *   - A failed `import()` is not an `HTMLScriptElement` load, so it fires no
+ *     window `error` event either.
+ *
+ * On a match the returned promise is left permanently pending. The reload is
+ * already navigating, and staying suspended keeps the user on RootLayout's
+ * Suspense fallback rather than flashing an error boundary for the frame or two
+ * before the page goes away. Anything that is not a stale chunk rethrows and
+ * reaches the error boundary as normal.
+ */
+export function guardLazyImport<T>(factory: () => Promise<T>): () => Promise<T> {
+  return () =>
+    factory().catch((error) => {
+      if (isStaleChunkError(error) && reloadOnce()) {
+        return new Promise<T>(() => {});
+      }
+      throw error;
+    });
+}
+
 export function installStaleChunkReload() {
-  // A failed lazy route rejects a promise that nothing awaits.
+  // Covers the entry chunk failing before any of the app runs — a lazy route
+  // rejection is handled by guardLazyImport above, not here.
   window.addEventListener("unhandledrejection", (event) => {
     if (isStaleChunkError(event.reason)) {
       event.preventDefault();
@@ -100,14 +144,4 @@ export function installStaleChunkReload() {
     },
     true,
   );
-
-  // Once the app is running on the current build, clear the guard so a later
-  // deploy in the same tab can recover too.
-  window.addEventListener("load", () => {
-    try {
-      sessionStorage.removeItem(RELOAD_FLAG);
-    } catch {
-      // Nothing to clear.
-    }
-  });
 }
