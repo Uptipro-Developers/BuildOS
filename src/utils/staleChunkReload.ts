@@ -16,19 +16,39 @@
 
 const RELOAD_FLAG = "buildos_stale_chunk_reloaded";
 
-/** Whether a rejection looks like a chunk that no longer exists. */
+/**
+ * Whether a rejection looks like a chunk that no longer exists.
+ *
+ * Browsers word this failure very differently, and each engine has more than one
+ * message depending on whether the fetch failed outright or returned the wrong
+ * content type. The first version of this list missed
+ * "'text/html' is not a valid JavaScript MIME type" — the exact message the app
+ * threw in production — so the patterns below are deliberately broad, and the
+ * MIME-type family is matched generically rather than per-engine.
+ *
+ * A false positive costs one page reload, guarded against looping; a false
+ * negative leaves the user stranded on an error screen. Erring wide is right.
+ */
 function isStaleChunkError(reason: unknown): boolean {
   const message =
     reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason ?? "");
 
   return (
-    /Failed to fetch dynamically imported module/i.test(message) ||
-    /error loading dynamically imported module/i.test(message) ||
+    // Fetch failed or the module could not be evaluated.
+    /dynamically imported module/i.test(message) ||
     /Importing a module script failed/i.test(message) ||
-    // Safari's wording when the response is not JavaScript, which is what a
-    // catch-all SPA rewrite produces when it answers with index.html.
-    /Unexpected token '<'/i.test(message) ||
-    /expected a JavaScript(-or-Wasm)? module/i.test(message)
+    /Failed to load module script/i.test(message) ||
+    /error loading dynamically imported module/i.test(message) ||
+    // The response arrived but was not JavaScript — what an SPA catch-all
+    // rewrite produces when it answers a missing chunk with index.html.
+    // Chrome: "Failed to load module script: Expected a JavaScript module script
+    // but the server responded with a MIME type of \"text/html\"."
+    // Safari: "'text/html' is not a valid JavaScript MIME type."
+    /is not a valid JavaScript MIME type/i.test(message) ||
+    /MIME type of "?text\/html/i.test(message) ||
+    /expected a JavaScript(-or-Wasm)? module/i.test(message) ||
+    // Parsing index.html as a module.
+    /Unexpected token '<'/i.test(message)
   );
 }
 

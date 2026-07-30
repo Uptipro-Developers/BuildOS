@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//": "The SPA catch-all deliberately excludes /assets via a negative lookahead. Client-side routing needs the catch-all, but it was also swallowing missing build assets: a tab left open across a deploy requests its old hashed chunk names, and answering those with index.html made the browser report \"'text/html' is not a valid JavaScript MIME type\" — it asked for a module and got HTML. Excluding /assets keeps a missing chunk a real 404, which is honest and is what the reload-on-stale-chunk handler in src/utils/staleChunkReload.ts detects. Note that a self-rewrite (/assets/(.*) -> /assets/$1) does NOT work for this: it is a no-op and the catch-all still applies.",
   "installCommand": "pnpm install --no-frozen-lockfile",
   "github": {
     "silent": true
@@ -8,10 +9,6 @@
     "fra1"
   ],
   "rewrites": [
-    {
-      "source": "/assets/(.*)",
-      "destination": "/assets/$1"
-    },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]
 }
