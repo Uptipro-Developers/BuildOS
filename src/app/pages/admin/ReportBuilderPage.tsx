@@ -1954,12 +1954,18 @@ export function ReportBuilderPage() {
                         <table className="w-full">
                           <thead className="sticky top-0 bg-gray-50 border-b border-gray-100">
                             <tr>
-                              {source.fields.map((f) => (
+                              {/* displayColumns, not source.fields: the query
+                                  returns only the selected fields, so iterating
+                                  every field the source has rendered a header for
+                                  each unselected column with a permanently blank
+                                  cell under it. The CSV export beside this table
+                                  already used displayColumns. */}
+                              {displayColumns.map((col) => (
                                 <th
-                                  key={f.key}
+                                  key={col.key}
                                   className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide whitespace-nowrap"
                                 >
-                                  {f.label}
+                                  {col.displayLabel}
                                 </th>
                               ))}
                             </tr>
@@ -1967,12 +1973,12 @@ export function ReportBuilderPage() {
                           <tbody className="divide-y divide-gray-50">
                             {previewData.map((row, i) => (
                               <tr key={i} className="hover:bg-gray-50/60">
-                                {source.fields.map((f) => (
+                                {displayColumns.map((col) => (
                                   <td
-                                    key={f.key}
+                                    key={col.key}
                                     className="px-4 py-2.5 text-sm text-gray-700 whitespace-nowrap font-mono"
                                   >
-                                    {String(row[f.key] ?? "")}
+                                    {String(row[col.key] ?? "")}
                                   </td>
                                 ))}
                               </tr>
