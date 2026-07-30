@@ -1094,17 +1094,22 @@ export function ProjectConfigurationPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* The "Requires Approval" tag is driven solely by whether
-                          an approval workflow has been configured for the
-                          process in the Process Workflows tab. Processes without
-                          a workflow are not marked as requiring approval. */}
+                      {/* This tag reports whether an approval workflow has been
+                          CONFIGURED for the process in the Process Workflows tab —
+                          it never said anything about whether the process needs
+                          one. It used to read "Requires Approval" / "No approval
+                          required", which claimed the opposite of what it checks:
+                          an unconfigured process was labelled as needing no
+                          approval, when in fact its approval was simply not set up
+                          yet. */}
                       {workflows.some((w) => w.processId === proc.id) ? (
-                        <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">
-                          <CheckCircle2 className="w-3 h-3" /> Requires Approval
+                        <span className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                          <CheckCircle2 className="w-3 h-3" /> Approval Setup
+                          Completed
                         </span>
                       ) : (
-                        <span className="text-xs text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full">
-                          No approval required
+                        <span className="flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">
+                          <AlertCircle className="w-3 h-3" /> Approval Setup Pending
                         </span>
                       )}
                     </div>

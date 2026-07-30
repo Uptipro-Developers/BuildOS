@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
+import { Link } from "react-router";
 import {
-  Store,
-  FolderOpen,
   AlertTriangle,
-  Package,
+  ArrowRight,
   CheckCircle2,
   Clock,
   DollarSign,
+  FolderOpen,
+  Package,
+  Store,
 } from "lucide-react";
 import {
   getStores,
@@ -73,6 +75,9 @@ const STORE_COLORS = [
   "bg-orange-600",
   "bg-sky-600",
 ];
+
+/** The dashboard is a summary; the full register lives in Configuration. */
+const STORES_ON_DASHBOARD = 4;
 
 export function StorefrontDashboardPage() {
   const [stores, setStores] = useState<StoreDisplay[]>([]);
@@ -206,11 +211,25 @@ export function StorefrontDashboardPage() {
 
       {/* Stores */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">
-          Stores Overview
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-700">
+            Stores Overview
+          </h2>
+          {/* The dashboard shows the first four; the full list lives in
+              Configuration, so this is a summary rather than a register that grows
+              unbounded as stores are added. */}
+          {stores.length > STORES_ON_DASHBOARD && (
+            <Link
+              to="/apps/storefront/config?tab=stores"
+              className="flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline"
+            >
+              View all {stores.length} stores
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-4">
-          {stores.map((store) => (
+          {stores.slice(0, STORES_ON_DASHBOARD).map((store) => (
             <div
               key={store.name}
               className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4"

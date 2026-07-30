@@ -1033,14 +1033,28 @@ export class AdminExtrasService {
      * Maps an approval row `type` to the admin process-catalog id whose
      * configured ProcessWorkflow defines its approval flow.
      */
+    /**
+     * Maps an approval row's type onto the catalog process that governs it, so the
+     * workflow an admin configured for that process is the one applied.
+     *
+     * These previously pointed at `p_ess_leave_request`, `p_ess_expense_claim` and
+     * `p_ess_submit_request`. Those ids no longer exist — the catalog moved from
+     * action-grained to entity-grained processes — so every lookup silently returned
+     * null and no configured workflow was applied to anything. Material Requests and
+     * Purchase Orders were never mapped at all.
+     */
     private approvalProcessIdForType(type: string): string | null {
         switch (type) {
             case 'Leave Request':
-                return 'p_ess_leave_request';
+                return 'p_leave_requests';
             case 'Expense Claim':
-                return 'p_ess_expense_claim';
+                return 'p_expenses';
             case 'Purchase Request':
-                return 'p_ess_submit_request';
+                return 'p_purchase_requests';
+            case 'Material Request':
+                return 'p_material_requests';
+            case 'Purchase Order':
+                return 'p_purchase_orders';
             default:
                 return null;
         }
@@ -1077,7 +1091,18 @@ export class AdminExtrasService {
         return null;
     }
 
-    async findApprovals(module?: string) {
+    /**
+     * Approval rows across every module.
+     *
+     * `forUser` restricts the result to rows whose configured workflow names the
+     * caller as an approver, so a user selected in a process workflow sees exactly
+     * the items awaiting them rather than the whole company's queue. Matching is on
+     * name, email or role, because the workflow stores whatever the admin picked.
+     */
+    async findApprovals(
+        module?: string,
+        forUser?: { name?: string; email?: string; role?: string },
+    ) {
         const target = String(module || 'all').toLowerCase();
         const rows: any[] = [];
 
@@ -1177,6 +1202,7 @@ export class AdminExtrasService {
                 status: this.normalizeApprovalStatus(r.status),
                 urgency: String(r.priority).toLowerCase().includes('urgent') ? 'urgent' : 'normal',
                 description: r.purpose ?? r.notes ?? '',
+                approvalFlow: flowForType('Material Request'),
             })));
             rows.push(...purchaseRequests.map((r) => ({
                 id: r.id,
@@ -1203,6 +1229,7 @@ export class AdminExtrasService {
                 status: this.normalizeApprovalStatus(o.status),
                 urgency: 'normal',
                 description: `Expected ${o.expectedDate.toISOString().slice(0, 10)}`,
+                approvalFlow: flowForType('Purchase Order'),
             })));
         }
 
@@ -1216,7 +1243,36 @@ export class AdminExtrasService {
         // also inflated the dashboard's pending-approvals count. Invites are managed
         // on Admin → Users, which shows their real state and can resend them.
 
-        return rows.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const sorted = rows.sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+        );
+
+        if (!forUser) return sorted;
+
+        const identities = [forUser.name, forUser.email, forUser.role]
+            .map((v) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ''))
+            .filter(Boolean);
+        // No identity means match nothing, rather than accidentally returning
+        // everything to a caller we could not identify.
+        if (identities.length === 0) return [];
+
+        return sorted.filter((row: any) => {
+            const flow = row.approvalFlow;
+            // A process with no configured workflow has no named approver, so it
+            // cannot be "mine". It stays visible on the unfiltered admin queue.
+            if (!flow) return false;
+
+            const named = [
+                ...(Array.isArray(flow.approvers) ? flow.approvers : []),
+                ...(Array.isArray(flow.tierLevels)
+                    ? flow.tierLevels.map((t: any) => t?.approver)
+                    : []),
+            ]
+                .map((v) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ''))
+                .filter(Boolean);
+
+            return named.some((approver) => identities.includes(approver));
+        });
     }
 
     async referenceData() {

@@ -38,6 +38,7 @@ import {
 } from "../../api/admin-extras";
 import { getReferenceData } from "../../api/reference-data";
 import { useNumbering, type ModuleNumbering } from "../../stores/numberingStore";
+import { useSearchParams } from "react-router";
 
 // ─── Store Level Configuration ────────────────────────────────────────────────
 
@@ -1956,7 +1957,19 @@ function NumberingPanel() {
 
 // ─── Main Config Page ─────────────────────────────────────────────────────────
 export function StorefrontConfigPage() {
-  const [tab, setTab] = useState<"levels" | "stores" | "thresholds" | "units" | "categories" | "numbering">("levels");
+  // Honours ?tab= so other pages can deep-link to a specific panel — the
+  // dashboard's "View all stores" link needs to land on Stores, not Levels.
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState<
+    "levels" | "stores" | "thresholds" | "units" | "categories" | "numbering"
+  >(() =>
+    (
+      ["levels", "stores", "thresholds", "units", "categories", "numbering"] as const
+    ).includes(requestedTab as any)
+      ? (requestedTab as "stores")
+      : "levels",
+  );
 
   return (
     <div className="space-y-5">
