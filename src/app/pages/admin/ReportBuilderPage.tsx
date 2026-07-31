@@ -733,7 +733,10 @@ export function ReportBuilderPage() {
   }, [generatedSql]);
 
   const requestKey = JSON.stringify({
-    source: source.value,
+    // `sources` drives the run; `source` is kept so anything still reading the
+    // single-source field (saved schedules) sees something sensible.
+    sources: tplDataSources,
+    source: tplDataSources[0] ?? "",
     fields: selectedFields.map((f) => f.key),
     filters: filters
       .filter((f) => f.field)
