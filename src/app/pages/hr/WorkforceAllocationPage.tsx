@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { getWorkforceAllocations } from "../../api/workforce-allocation";
 import { Users, AlertTriangle, Plus, Search, X, Building2 } from "lucide-react";
 
@@ -66,7 +67,9 @@ export function WorkforceAllocationPage() {
         }
         setAllocs(Array.from(map.values()));
       })
-      .catch(() => {});
+      .catch(() =>
+      toast.error("Could not load workforce allocations."),
+    );
   }, []);
 
   const depts = [

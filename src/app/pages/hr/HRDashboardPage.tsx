@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { useNavigate } from "react-router";
 import {
   formatDateByGeneralSettings,
@@ -70,19 +71,36 @@ export function HRDashboardPage() {
     Array.isArray(value) ? (value as T[]) : [];
 
   useEffect(() => {
-    fetchEmployees()
-      .then((data) => setAllEmployees(toArray<any>(data)))
-      .catch(() => {});
-    fetchDepartments()
-      .then((data) => setAllDepartments(toArray<any>(data)))
-      .catch(() => {});
-    getAttendance(undefined, new Date().toISOString().slice(0, 10))
-      .then((data) => setTodayAttendance(toArray<any>(data)))
-      .catch(() => {});
-    getWorkforceAllocations()
-      .then((data) => setAllAllocs(toArray<any>(data)))
-      .catch(() => {});
-    getPayrollRuns()
+    // Each widget loads independently so one failure does not blank the whole
+    // dashboard, but a failure is reported rather than leaving a tile silently
+    // showing zero — which read as "no employees" rather than "not loaded".
+    const failed: string[] = [];
+    const note = (what: string) => () => {
+      failed.push(what);
+    };
+
+    void Promise.allSettled([
+      fetchEmployees()
+        .then((data) => setAllEmployees(toArray<any>(data)))
+        .catch(note("employees")),
+      fetchDepartments()
+        .then((data) => setAllDepartments(toArray<any>(data)))
+        .catch(note("departments")),
+      getAttendance(undefined, new Date().toISOString().slice(0, 10))
+        .then((data) => setTodayAttendance(toArray<any>(data)))
+        .catch(note("attendance")),
+      getWorkforceAllocations()
+        .then((data) => setAllAllocs(toArray<any>(data)))
+        .catch(note("workforce allocations")),
+      loadPayroll().catch(note("payroll")),
+    ]).then(() => {
+      if (failed.length > 0) {
+        toast.error(`Could not load ${failed.join(", ")}.`);
+      }
+    });
+
+    function loadPayroll() {
+      return getPayrollRuns()
       .then((runs) => {
         const safeRuns = toArray<any>(runs);
         const latest = safeRuns[0];
@@ -110,8 +128,8 @@ export function HRDashboardPage() {
           ]);
           setNetPayroll(gross - deductions);
         });
-      })
-      .catch(() => {});
+      });
+    }
   }, []);
 
   const totalCount = allEmployees.length;

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { exportCSV } from "../../utils/exportCSV";
 import {
   getMaterialRequests,
   updateMaterialRequest,
@@ -185,7 +186,7 @@ export function IncomingRequestsPage() {
     setSelected(null);
   }
 
-  function exportCSV() {
+  function handleExportCSV() {
     const rows = [
       [
         "Request ID",
@@ -212,11 +213,11 @@ export function IncomingRequestsPage() {
         r.status,
       ]),
     ];
-    const csv = rows.map((row) => row.join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = "data:text/csv," + encodeURIComponent(csv);
-    a.download = "incoming_requests.csv";
-    a.click();
+    // Hands off to the shared helper: the previous inline version built a
+    // detached `data:text/csv` anchor, which Firefox and Safari ignore, declared
+    // no charset (mangling ₦ and accents) and had no escaping, so any cell
+    // containing a comma silently shifted every later column.
+    exportCSV("incoming-requests", rows[0] as string[], rows.slice(1));
   }
 
   const pendingCount = requests.filter((r) => r.status === "Pending").length;
@@ -236,7 +237,7 @@ export function IncomingRequestsPage() {
           </p>
         </div>
         <button
-          onClick={exportCSV}
+          onClick={handleExportCSV}
           className="flex items-center gap-2 border border-gray-200 bg-white text-gray-700 text-sm px-3 py-2 rounded-xl hover:bg-gray-50"
         >
           <Download className="w-4 h-4" /> Export

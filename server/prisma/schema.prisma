@@ -278,6 +278,12 @@ model Employee {
   state            String?
   zipCode          String?
 
+  /// Captured by the Add/Edit Employee form in the design. These had no columns,
+  /// so the values were collected and silently dropped on save.
+  maritalStatus String?
+  nationality   String?
+  orgUnit       String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -71,7 +71,9 @@ export function OrgStructurePage() {
   const [units, setUnits] = useState<ApiOrgUnit[]>([]);
 
   function loadUnits() {
-    fetchOrgUnits().then(setUnits).catch(console.error);
+    fetchOrgUnits().then(setUnits).catch(() =>
+      toast.error("Could not load the organisation structure."),
+    );
   }
   useEffect(() => { loadUnits(); }, []);
 

@@ -104,6 +104,9 @@ export function toEmployeeCreatePayload(form: any) {
         state: form.state || undefined,
         zipCode: form.zipCode || undefined,
         gradeLevel: form.grade || form.gradeLevel || undefined,
+        maritalStatus: form.maritalStatus || undefined,
+        nationality: form.nationality || undefined,
+        orgUnit: form.orgUnit || form.orgLevel || undefined,
     };
 }
 
@@ -140,6 +143,11 @@ export function toEmployeeUpdatePayload(draft: any) {
         pensionId: rest.pensionId ?? rsaNumber ?? pfa ?? undefined,
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[employmentType] ?? employmentType,
         dateHired: dateHiredISO && String(dateHiredISO).trim() ? dateHiredISO : undefined,
+        // These now have columns of their own, so an edit persists instead of
+        // being discarded as display-only.
+        maritalStatus: maritalStatus || undefined,
+        nationality: nationality || undefined,
+        orgUnit: rest.orgUnit ?? orgLevel ?? undefined,
     };
 }
 

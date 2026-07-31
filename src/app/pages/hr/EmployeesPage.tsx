@@ -7,6 +7,7 @@ import {
   toEmployeeCreatePayload,
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
+import { fetchOrgUnits } from "../../api/org-units";
 import { useNumbering } from "../../stores/numberingStore";
 import { useClickOutside } from "../../utils/useClickOutside";
 import {
@@ -112,6 +113,12 @@ interface AddEmpForm {
   city: string;
   state: string;
   zipCode: string;
+  // Present in the design's Add/Edit Employee form but previously not captured.
+  employmentDate: string;
+  maritalStatus: string;
+  orgUnit: string;
+  nationality: string;
+  rsaNumber: string;
 }
 
 interface EmployeeRow {
@@ -157,6 +164,11 @@ const emptyEmpForm: AddEmpForm = {
   city: "",
   state: "",
   zipCode: "",
+  employmentDate: "",
+  maritalStatus: "",
+  orgUnit: "",
+  nationality: "",
+  rsaNumber: "",
 };
 
 function FormField({
@@ -261,12 +273,14 @@ function AddEmployeeModal({
   onClose,
   departments,
   activeEmployees,
+  orgUnits,
   saving,
 }: {
   onSave: (f: AddEmpForm) => void;
   onClose: () => void;
   departments: { id: string; name: string }[];
   activeEmployees: { id: string; firstName: string; lastName: string }[];
+  orgUnits: string[];
   saving: boolean;
 }) {
   const [form, setForm] = useState<AddEmpForm>({ ...emptyEmpForm });
@@ -363,6 +377,24 @@ function AddEmployeeModal({
                   <option value="Other">Other</option>
                 </select>
               </FormField>
+              <FormField label="Employment Date">
+                <input type="date" value={form.employmentDate} onChange={(e) => set("employmentDate", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="Marital Status">
+                <select value={form.maritalStatus} onChange={(e) => set("maritalStatus", e.target.value)} className={`${inputClass} bg-white`}>
+                  <option value="">Select…</option>
+                  <option value="Single">Single</option>
+                  <option value="Married">Married</option>
+                  <option value="Divorced">Divorced</option>
+                  <option value="Widowed">Widowed</option>
+                </select>
+              </FormField>
+              <FormField label="Org Unit">
+                <select value={form.orgUnit} onChange={(e) => set("orgUnit", e.target.value)} className={`${inputClass} bg-white`}>
+                  <option value="">Select org unit…</option>
+                  {orgUnits.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </FormField>
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Employment Type</label>
                 <div className="flex gap-3">
@@ -398,6 +430,9 @@ function AddEmployeeModal({
               <FormField label="Zip Code">
                 <input value={form.zipCode} onChange={(e) => set("zipCode", e.target.value)} className={inputClass} />
               </FormField>
+              <FormField label="Nationality">
+                <input value={form.nationality} onChange={(e) => set("nationality", e.target.value)} className={inputClass} />
+              </FormField>
               <FormField label="Next of Kin Contact" required error={errors.emergencyContact}>
                 <input value={form.emergencyContact} onChange={(e) => set("emergencyContact", e.target.value)} className={cls("emergencyContact")} />
               </FormField>
@@ -428,8 +463,11 @@ function AddEmployeeModal({
               <FormField label="Tax ID">
                 <input value={form.taxId} onChange={(e) => set("taxId", e.target.value)} className={inputClass} />
               </FormField>
-              <FormField label="PFA / Pension ID">
+              <FormField label="PFA (Pension Fund Administrator)">
                 <input value={form.pensionId} onChange={(e) => set("pensionId", e.target.value)} className={inputClass} />
+              </FormField>
+              <FormField label="RSA Number">
+                <input value={form.rsaNumber} onChange={(e) => set("rsaNumber", e.target.value)} className={inputClass} />
               </FormField>
             </div>
           </div>
@@ -461,7 +499,21 @@ export function EmployeesPage() {
   const [departments, setDepartments] = useState<
     { id: string; name: string }[]
   >([]);
+  /** Org units for the form's Org Unit select, from the HR org structure. */
+  const [orgUnits, setOrgUnits] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchOrgUnits()
+      .then((units) =>
+        setOrgUnits(
+          (Array.isArray(units) ? units : [])
+            .map((u: any) => String(u?.name ?? "").trim())
+            .filter(Boolean),
+        ),
+      )
+      .catch(() => setOrgUnits([]));
+  }, []);
 
   function loadEmployees() {
     return fetchEmployees().then((data) =>
@@ -884,6 +936,7 @@ export function EmployeesPage() {
           onClose={() => setShowAddModal(false)}
           departments={departments}
           activeEmployees={empList.filter((e) => e.status === "active")}
+          orgUnits={orgUnits}
           saving={creatingEmployee}
         />
       )}

@@ -69,7 +69,9 @@ export function HRRolesPage() {
           })),
         ),
       )
-      .catch(() => {});
+      .catch(() =>
+      toast.error("Could not load job roles."),
+    );
   }
 
   useEffect(() => {

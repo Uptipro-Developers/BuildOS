@@ -96,7 +96,9 @@ export function AttendanceLogsPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch(() =>
+      toast.error("Could not load attendance logs."),
+    );
   }, []);
 
   const depts = [

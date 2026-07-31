@@ -99,7 +99,9 @@ export function PayrollProcessingPage() {
           })),
         );
       })
-      .catch(() => {});
+      .catch(() =>
+      toast.error("Could not load the payroll run."),
+    );
   }, []);
   const [, setShowPreview] = useState(false);
 

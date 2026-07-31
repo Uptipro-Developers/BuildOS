@@ -77,7 +77,9 @@ export function LeaveTypeSetupPage() {
   useEffect(() => {
     fetchLeaveTypes()
       .then((items) => setLeaveTypes(items.map(normalizeLeaveType)))
-      .catch(console.error);
+      .catch(() =>
+      toast.error("Could not load leave types."),
+    );
   }, []);
 
   async function save(e: React.FormEvent) {

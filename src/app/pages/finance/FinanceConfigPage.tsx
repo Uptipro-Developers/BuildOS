@@ -84,6 +84,17 @@ const DELETE_SUBJECTS: Record<ConfigDeleteTarget["kind"], string> = {
   numbering: "numbering configuration for",
 };
 
+const TABS = ["general", "accounts", "tax", "accruals", "numbering"] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_LABELS: Record<Tab, string> = {
+  general: "General",
+  accounts: "Accounts",
+  tax: "Tax",
+  accruals: "Accruals",
+  numbering: "Numbering",
+};
+
 const typeColors: Record<TaxType, string> = {
   VAT: "bg-blue-100 text-blue-700",
   WHT: "bg-purple-100 text-purple-700",
@@ -92,6 +103,9 @@ const typeColors: Record<TaxType, string> = {
 };
 
 export function FinanceConfigPage() {
+  /** Settings is a tabbed module in the prototype; this page was one long
+      scrolling column with every section stacked. */
+  const [tab, setTab] = useState<Tab>("general");
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [saved, setSaved] = useState(false);
@@ -523,6 +537,9 @@ export function FinanceConfigPage() {
             tax rules
           </p>
         </div>
+        {/* Only the General tab's fields go through this button; every other
+            tab persists on its own action. */}
+        {tab === "general" && (
         <button
           onClick={saveAll}
           disabled={savingAll}
@@ -542,6 +559,7 @@ export function FinanceConfigPage() {
             </>
           )}
         </button>
+        )}
       </div>
 
       {/* Info banner */}
@@ -553,7 +571,20 @@ export function FinanceConfigPage() {
         </p>
       </div>
 
+      <div className="flex gap-1 border-b border-gray-200">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === t ? "border-emerald-600 text-emerald-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+          >
+            {TAB_LABELS[t]}
+          </button>
+        ))}
+      </div>
+
       {/* General Setup */}
+      {tab === "general" && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <Settings2 className="w-4 h-4 text-gray-400" />
@@ -608,8 +639,10 @@ export function FinanceConfigPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Bank Accounts */}
+      {tab === "accounts" && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -671,8 +704,10 @@ export function FinanceConfigPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Payment Methods */}
+      {tab === "general" && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <CreditCard className="w-4 h-4 text-gray-400" />
@@ -701,8 +736,10 @@ export function FinanceConfigPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Tax Setup */}
+      {tab === "tax" && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -756,8 +793,10 @@ export function FinanceConfigPage() {
           headerExtra={<button onClick={handleTaxExport} className="flex items-center gap-2 px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"><Download className="w-3.5 h-3.5" /> Export</button>}
         />
       </div>
+      )}
 
       {/* Accrual Types */}
+      {tab === "accruals" && (
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -775,8 +814,10 @@ export function FinanceConfigPage() {
           headerExtra={<button onClick={handleAccrualTypeExport} className="flex items-center gap-2 px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"><Download className="w-3.5 h-3.5" /> Export</button>}
         />
       </div>
+      )}
 
       {/* Module Numbering System */}
+      {tab === "numbering" && (
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <Hash className="w-4 h-4 text-gray-400" />
@@ -880,6 +921,7 @@ export function FinanceConfigPage() {
             )}
           </div>
         </div>
+      )}
 
       {/* Bank Account Modal */}
       {showBankModal && (

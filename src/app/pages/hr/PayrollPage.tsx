@@ -98,7 +98,9 @@ export function PayrollPage() {
           })),
         ),
       )
-      .catch(() => {});
+      .catch(() =>
+      toast.error("Could not load payroll data."),
+    );
   }, []);
 
   function handleSort(k: SortKey) {

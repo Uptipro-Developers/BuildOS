@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { exportCSV, type CsvCell } from "../../utils/exportCSV";
 import {
   TrendingDown,
   ArrowLeftRight,
@@ -214,15 +215,18 @@ export function StorefrontReportsPage() {
       .catch(() => setReturnData([]));
   }, []);
 
-  function exportCSV(data: Record<string, unknown>[], filename: string) {
+  function handleExportCSV(data: Record<string, unknown>[], filename: string) {
     if (data.length === 0) return;
     const headers = Object.keys(data[0]);
-    const rows = [headers, ...data.map((row) => headers.map((h) => row[h]))];
-    const csv = rows.map((r) => r.join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = "data:text/csv," + encodeURIComponent(csv);
-    a.download = filename;
-    a.click();
+    // Hands off to the shared helper: the previous inline version built a
+    // detached `data:text/csv` anchor, which Firefox and Safari ignore, declared
+    // no charset (mangling ₦ and accents) and had no escaping, so any cell
+    // containing a comma silently shifted every later column.
+    exportCSV(
+      filename.replace(/\.csv$/, ""),
+      headers,
+      data.map((row) => headers.map((h) => row[h] as CsvCell)),
+    );
   }
 
   return (
@@ -264,7 +268,7 @@ export function StorefrontReportsPage() {
             </h2>
             <button
               onClick={() =>
-                exportCSV(
+                handleExportCSV(
                   stockData as unknown as Record<string, unknown>[],
                   "stock_levels.csv",
                 )
@@ -371,7 +375,7 @@ export function StorefrontReportsPage() {
             </h2>
             <button
               onClick={() =>
-                exportCSV(
+                handleExportCSV(
                   movementData as unknown as Record<string, unknown>[],
                   "movement_report.csv",
                 )
@@ -450,7 +454,7 @@ export function StorefrontReportsPage() {
             </h2>
             <button
               onClick={() =>
-                exportCSV(
+                handleExportCSV(
                   transferData as unknown as Record<string, unknown>[],
                   "transfer_report.csv",
                 )
@@ -560,7 +564,7 @@ export function StorefrontReportsPage() {
             </h2>
             <button
               onClick={() =>
-                exportCSV(
+                handleExportCSV(
                   returnData as unknown as Record<string, unknown>[],
                   "return_report.csv",
                 )

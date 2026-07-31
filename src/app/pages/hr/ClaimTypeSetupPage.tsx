@@ -19,7 +19,9 @@ export function ClaimTypeSetupPage() {
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
 
   useEffect(() => {
-    fetchClaimTypes().then(setClaimTypes).catch(console.error);
+    fetchClaimTypes().then(setClaimTypes).catch(() =>
+      toast.error("Could not load claim types."),
+    );
   }, []);
 
   async function save(e: React.FormEvent) {

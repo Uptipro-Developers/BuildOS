@@ -54,7 +54,9 @@ export function LeaveRequestsPage() {
     fetchLeaveRequests().then(setRequests);
     fetchLeaveTypes()
       .then((types) => setLeaveTypes(["All", ...types.map((t) => t.name)]))
-      .catch(console.error);
+      .catch(() =>
+      toast.error("Could not load leave types."),
+    );
   }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | "All">("All");

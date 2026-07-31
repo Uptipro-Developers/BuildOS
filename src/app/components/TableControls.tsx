@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Columns, Check, FileSpreadsheet } from "lucide-react";
+import { exportCSV, type CsvCell } from "../utils/exportCSV";
 
 export interface ColumnDef {
   key: string;
@@ -76,18 +77,21 @@ export function TableControls({ columns, onColumnsChange, onExportCSV, title }: 
   );
 }
 
+/**
+ * Delegates to the shared exporter.
+ *
+ * The previous inline version clicked an anchor that was never added to the
+ * document — Firefox and Safari ignore that, so the download simply did not
+ * happen — and revoked the object URL synchronously, which can cancel a
+ * download already in flight in Chrome. It also quoted every cell, so numbers
+ * and dates arrived in Excel as text that could not be summed or sorted.
+ */
 export function exportToCSV(data: Record<string, any>[], filename: string) {
   if (data.length === 0) return;
   const headers = Object.keys(data[0]);
-  const csvRows = [
-    headers.map(h => `"${h}"`).join(","),
-    ...data.map(row => headers.map(h => `"${String(row[h] ?? "").replace(/"/g, '""')}"`).join(",")),
-  ];
-  const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${filename}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  exportCSV(
+    filename,
+    headers,
+    data.map((row) => headers.map((h) => row[h] as CsvCell)),
+  );
 }

@@ -123,7 +123,9 @@ export function PayrollPeriodPage() {
               })),
             ),
           )
-          .catch(console.error);
+          .catch(() =>
+      toast.error("Could not load payroll periods."),
+    );
         setShowAdd(false);
         setNewName("");
         setNewStart("");
