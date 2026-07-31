@@ -492,6 +492,49 @@ export function EmailConfigPage() {
                   value={form.body}
                   onChange={(e) => setForm({ ...form, body: e.target.value })}
                 />
+                {/* Link & button inserters. The body is plain text that the
+                    server escapes before sending, so these two forms are the
+                    only way to produce a real anchor in the delivered email. */}
+                <div className="mt-2">
+                  <p className="text-xs text-gray-400 mb-1.5">
+                    Links &amp; buttons — click to insert, then edit the label:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          body: `${p.body}[Link text]({{app_url}})`,
+                        }))
+                      }
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 transition-colors"
+                    >
+                      Insert link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          body: `${p.body}[[Button text]]({{app_url}})`,
+                        }))
+                      }
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 transition-colors"
+                    >
+                      Insert button
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-gray-400">
+                    <span className="font-mono">[text](url)</span> becomes a link,{" "}
+                    <span className="font-mono">[[text]](url)</span> a button. Use a
+                    URL variable such as{" "}
+                    <span className="font-mono">{"{{app_url}}"}</span> rather than a
+                    hardcoded domain. A template that supplies its own button
+                    replaces the built-in one for that email.
+                  </p>
+                </div>
+
                 {/* Variable chips */}
                 <div className="mt-2">
                   <p className="text-xs text-gray-400 mb-1.5">

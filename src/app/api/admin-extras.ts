@@ -549,7 +549,14 @@ export const getReportSources = () =>
     apiFetch<{ success: boolean; data: ReportSourceDef[] }>('/reports/sources').then((r) => r.data);
 
 export const runReport = (body: {
-    source: string;
+    /** Single-source form. Prefer `sources`; kept for existing callers. */
+    source?: string;
+    /**
+     * Multi-source form. With more than one source, field/filter/sort keys are
+     * namespaced `<source>:<fieldKey>` so a column name shared by two tables
+     * stays unambiguous, and rows carry a `__source` column.
+     */
+    sources?: string[];
     fields?: string[];
     filters?: Array<{ field: string; operator: string; value?: string; valueTo?: string }>;
     sort?: Array<{ field: string; direction?: 'asc' | 'desc' }>;

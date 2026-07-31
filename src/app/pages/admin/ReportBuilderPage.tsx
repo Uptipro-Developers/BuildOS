@@ -511,7 +511,13 @@ export function ReportBuilderPage() {
   const [tplName, setTplName] = useState("");
   const [tplDescription, setTplDescription] = useState("");
   const [tplApp, setTplApp] = useState("construction");
-  const [tplDataSource, setTplDataSource] = useState("projects");
+  /**
+   * The selected data sources. A report can now draw on several tables at once,
+   * so this is a list rather than a single value; `dataSource` on a saved
+   * template stays a comma-joined string for backward compatibility with
+   * templates and schedules written before this.
+   */
+  const [tplDataSources, setTplDataSources] = useState<string[]>(["projects"]);
   const [tplReportType, setTplReportType] = useState<ReportType>("summary");
   const [tplDocumentType, setTplDocumentType] =
     useState<DocumentType>("Construction");
@@ -528,6 +534,8 @@ export function ReportBuilderPage() {
   >("fields");
   const [showConfigPanel, setShowConfigPanel] = useState(true);
   const [deployedNotice, setDeployedNotice] = useState<string | null>(null);
+  /** Template currently being deployed from the library, if any. */
+  const [deployingId, setDeployingId] = useState<string | null>(null);
   const dragIdx = useRef<number | null>(null);
 
   // ── Live data sources ──
@@ -547,13 +555,15 @@ export function ReportBuilderPage() {
   // regardless of application, so the Application select had no effect at all.
   const appSources = liveSources.filter((s) => s.app === tplApp);
 
-  // Keep the selected source valid for the chosen application.
+  // Keep the selection valid for the chosen application: drop sources that do
+  // not belong to it, and fall back to its first source if that empties the list.
   useEffect(() => {
     if (liveSources.length === 0) return;
-    if (appSources.some((s) => s.value === tplDataSource)) return;
+    const allowed = appSources.map((s) => s.value);
+    const kept = tplDataSources.filter((v) => allowed.includes(v));
+    if (kept.length === tplDataSources.length && kept.length > 0) return;
 
-    const next = appSources[0]?.value ?? "";
-    setTplDataSource(next);
+    setTplDataSources(kept.length > 0 ? kept : allowed.slice(0, 1));
     setSelectedFields([]);
     setFilters([]);
     setSortRules([]);
@@ -562,30 +572,62 @@ export function ReportBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tplApp, liveSources]);
 
-  const liveSource =
-    liveSources.find((s) => s.value === tplDataSource) ?? appSources[0];
+  /** The registry entries for every selected source, in selection order. */
+  const selectedSources = tplDataSources
+    .map((value) => liveSources.find((s) => s.value === value))
+    .filter((s): s is ReportSourceDef => Boolean(s));
+
+  const isMultiSource = selectedSources.length > 1;
+
+  /**
+   * Adds or removes a source. Field, filter and sort selections are cleared
+   * because their keys are namespaced by source once more than one is picked —
+   * a stale key would silently match nothing.
+   */
+  const toggleDataSource = (value: string) => {
+    setTplDataSources((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    );
+    setSelectedFields([]);
+    setFilters([]);
+    setSortRules([]);
+    setHasRun(false);
+  };
+
+  /**
+   * Field keys are namespaced `<source>:<key>` whenever more than one source is
+   * selected, so a column name several tables share (id, name, status) stays
+   * unambiguous. With a single source the plain key is kept, which is what
+   * already-saved templates and schedules carry.
+   */
+  const fieldKeyFor = (sourceValue: string, key: string) =>
+    isMultiSource ? `${sourceValue}:${key}` : key;
 
   const baseSource =
-    DATA_SOURCES.find((s) => s.value === (liveSource?.value ?? tplDataSource)) ??
+    DATA_SOURCES.find((s) => s.value === selectedSources[0]?.value) ??
     DATA_SOURCES[0];
 
-  // Field definitions always come from the backend registry; DATA_SOURCES only
-  // supplies presentation metadata (module colour) for sources it happens to know.
-  const source = liveSource
-    ? {
-        ...baseSource,
-        value: liveSource.value,
-        label: liveSource.label,
-        module: liveSource.module,
-        appKey: liveSource.app,
-        fields: liveSource.fields.map((f) => ({
-          key: f.key,
-          label: f.label,
-          type: f.type as (typeof baseSource.fields)[number]["type"],
-          queryable: f.queryable,
-        })),
-      }
-    : baseSource;
+  // The union of every selected source's fields. Definitions always come from
+  // the backend registry; DATA_SOURCES only supplies presentation metadata
+  // (module colour) for sources it happens to know.
+  const source =
+    selectedSources.length > 0
+      ? {
+          ...baseSource,
+          value: selectedSources.map((s) => s.value).join(","),
+          label: selectedSources.map((s) => s.label).join(" + "),
+          module: selectedSources[0].module,
+          appKey: selectedSources[0].app,
+          fields: selectedSources.flatMap((s) =>
+            s.fields.map((f) => ({
+              key: fieldKeyFor(s.value, f.key),
+              label: isMultiSource ? `${s.label} — ${f.label}` : f.label,
+              type: f.type as (typeof baseSource.fields)[number]["type"],
+              queryable: f.queryable,
+            })),
+          ),
+        }
+      : baseSource;
 
   // ── Report execution ──
   // The preview used to be derived from an empty array that nothing populated, so
@@ -757,7 +799,7 @@ export function ReportBuilderPage() {
     setTplName("");
     setTplDescription("");
     setTplApp("construction");
-    setTplDataSource("projects");
+    setTplDataSources(["projects"]);
     setTplReportType("summary");
     setTplDocumentType("Construction");
     setBuilderMode("visual");
@@ -778,7 +820,14 @@ export function ReportBuilderPage() {
     setTplName(tpl.name);
     setTplDescription(tpl.description);
     setTplApp(tpl.application);
-    setTplDataSource(tpl.dataSource);
+    // Saved before multi-source, `dataSource` is a single value; since then it
+    // is a comma-joined list.
+    setTplDataSources(
+      String(tpl.dataSource ?? "")
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean),
+    );
     setTplReportType(tpl.reportType);
     setTplDocumentType(tpl.documentType);
     setBuilderMode(tpl.builderType);
@@ -874,7 +923,9 @@ export function ReportBuilderPage() {
     application: tplApp,
     reportType: tplReportType,
     documentType: tplDocumentType,
-    dataSource: tplDataSource,
+    // Comma-joined so a template stays readable to anything still expecting the
+    // single-source string (saved schedules, the scheduler's source resolution).
+    dataSource: tplDataSources.join(","),
     builderType: builderMode,
     status,
     createdBy: "Admin User",
@@ -946,6 +997,36 @@ export function ReportBuilderPage() {
           console.error(err);
           toast.error("Failed to deploy template");
         });
+    }
+  };
+
+  /**
+   * Deploys a template straight from the library card.
+   *
+   * This used to flip `status` in local React state only — nothing was ever
+   * written back — so the card showed "Deployed" until the next reload and then
+   * silently reverted to Draft.
+   */
+  const deployFromLibrary = async (tpl: ReportTemplate) => {
+    if (deployingId) return;
+    setDeployingId(tpl.id);
+    try {
+      const saved = await updateReportTemplate<ReportTemplate>(tpl.id, {
+        ...tpl,
+        status: "deployed",
+        lastUpdated: "Just now",
+      });
+      setTemplates((prev) => prev.map((t) => (t.id === tpl.id ? saved : t)));
+      setDeployedNotice(tpl.name);
+      setTimeout(() => setDeployedNotice(null), 3500);
+      toast.success("Template deployed");
+    } catch (err) {
+      console.error(err);
+      toast.error(
+        err instanceof Error ? err.message : "Failed to deploy template",
+      );
+    } finally {
+      setDeployingId(null);
     }
   };
 
@@ -1236,39 +1317,67 @@ export function ReportBuilderPage() {
               </div>
             </div>
 
-            {/* Data source */}
+            {/* Data sources — a checkbox list, so a report can draw on several
+                tables at once and the Fields tab offers the union of whatever is
+                ticked here. */}
             <div className="px-4 py-3 border-b border-gray-100">
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                Data Source
-              </label>
-              <select
-                value={tplDataSource}
-                onChange={(e) => {
-                  setTplDataSource(e.target.value);
-                  setSelectedFields([]);
-                  setFilters([]);
-                  setSortRules([]);
-                  setHasRun(false);
-                }}
-                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                {appSources.length === 0 && (
-                  <option value="">
-                    {liveSources.length === 0
-                      ? "Loading data sources…"
-                      : "No data sources for this application"}
-                  </option>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Data Sources
+                </label>
+                {tplDataSources.length > 0 && (
+                  <span className="text-[11px] text-gray-400">
+                    {tplDataSources.length} selected
+                  </span>
                 )}
-                {appSources.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.module} — {s.label}
-                  </option>
-                ))}
-              </select>
-              {liveSources.length > 0 && appSources.length === 0 && (
-                <p className="mt-1.5 text-[11px] text-amber-600">
+              </div>
+
+              {liveSources.length === 0 ? (
+                <p className="text-xs text-gray-400">Loading data sources…</p>
+              ) : appSources.length === 0 ? (
+                <p className="text-[11px] text-amber-600">
                   This application has no reportable data sources yet. Pick another
                   application to build a report.
+                </p>
+              ) : (
+                <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-50">
+                  {appSources.map((s) => {
+                    const checked = tplDataSources.includes(s.value);
+                    return (
+                      <label
+                        key={s.value}
+                        className="flex items-start gap-2 px-2.5 py-2 text-sm cursor-pointer hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleDataSource(s.value)}
+                          className="mt-0.5 rounded accent-indigo-600 w-3.5 h-3.5"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-gray-800 truncate">
+                            {s.label}
+                          </span>
+                          <span className="block text-[11px] text-gray-400">
+                            {s.module} · {s.fields.length} fields
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              {tplDataSources.length === 0 && appSources.length > 0 && (
+                <p className="mt-1.5 text-[11px] text-amber-600">
+                  Select at least one data source.
+                </p>
+              )}
+              {isMultiSource && (
+                <p className="mt-1.5 text-[11px] text-gray-500">
+                  Rows from each table are listed together with a Source column.
+                  They are not joined — there is no defined key to join these
+                  tables on.
                 </p>
               )}
             </div>
@@ -2305,22 +2414,12 @@ export function ReportBuilderPage() {
                     )}
                     {tpl.status === "draft" && (
                       <button
-                        onClick={() => {
-                          const updated = {
-                            ...tpl,
-                            status: "deployed" as ReportStatus,
-                            lastUpdated: "Just now",
-                          };
-                          setTemplates((prev) =>
-                            prev.map((t) => (t.id === tpl.id ? updated : t)),
-                          );
-                          setDeployedNotice(tpl.name);
-                          setTimeout(() => setDeployedNotice(null), 3500);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors"
+                        onClick={() => deployFromLibrary(tpl)}
+                        disabled={deployingId === tpl.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         <Rocket className="w-3 h-3" />
-                        Deploy
+                        {deployingId === tpl.id ? "Deploying…" : "Deploy"}
                       </button>
                     )}
                     {tpl.status === "archived" && (

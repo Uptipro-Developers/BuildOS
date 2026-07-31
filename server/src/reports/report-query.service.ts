@@ -504,11 +504,31 @@ export type FilterOperator =
     | 'is_empty';
 
 export interface ReportRunRequest {
-    source: string;
+    /** Single-source form, kept for existing callers (schedules, saved templates). */
+    source?: string;
+    /**
+     * Multi-source form. When more than one source is given, field/filter/sort
+     * keys are namespaced `<source>:<fieldKey>` so a column name shared by two
+     * tables (id, name, status) stays unambiguous.
+     */
+    sources?: string[];
     fields?: string[];
     filters?: Array<{ field: string; operator: FilterOperator; value?: string; valueTo?: string }>;
     sort?: Array<{ field: string; direction?: 'asc' | 'desc' }>;
     limit?: number;
+}
+
+/** Separates the source from the field in a namespaced multi-source key. */
+const SOURCE_KEY_SEPARATOR = ':';
+
+export function namespacedFieldKey(sourceValue: string, fieldKey: string): string {
+    return `${sourceValue}${SOURCE_KEY_SEPARATOR}${fieldKey}`;
+}
+
+function splitNamespacedKey(key: string): { source: string; field: string } | null {
+    const cut = String(key ?? '').indexOf(SOURCE_KEY_SEPARATOR);
+    if (cut <= 0) return null;
+    return { source: key.slice(0, cut), field: key.slice(cut + 1) };
 }
 
 const MAX_ROWS = 1000;
@@ -615,9 +635,114 @@ export class ReportQueryService {
         return clauses.length > 0 ? { AND: clauses } : {};
     }
 
+    /**
+     * Runs a report over one or more sources.
+     *
+     * Multiple sources are combined by stacking their rows, not by joining them:
+     * the registry describes each source as a standalone model and carries no
+     * relation graph, so there is no defined key to join two arbitrary tables on.
+     * Each result row therefore carries its own source's columns and nulls for
+     * the others, with a leading `__source` column saying which table it came
+     * from. Selecting one source behaves exactly as before.
+     */
     async run(request: ReportRunRequest) {
-        const source = this.sourceOrThrow(String(request?.source ?? ''));
+        const requested = Array.isArray(request.sources) ? request.sources.filter(Boolean) : [];
+        const values = requested.length > 0 ? requested : [String(request?.source ?? '')];
+        const sources = Array.from(new Set(values)).map((v) => this.sourceOrThrow(v));
 
+        if (sources.length === 1) {
+            return this.runSingle(sources[0], {
+                fields: this.stripNamespace(request.fields, sources[0].value),
+                filters: (request.filters ?? []).map((f) => ({
+                    ...f,
+                    field: this.stripKey(f.field, sources[0].value),
+                })),
+                sort: (request.sort ?? []).map((s) => ({
+                    ...s,
+                    field: this.stripKey(s.field, sources[0].value),
+                })),
+                limit: request.limit,
+            });
+        }
+
+        // Split the row budget across the selected sources so one large table
+        // cannot crowd the others out of the result entirely.
+        const budget = Math.min(Math.max(Number(request.limit) || 100, 1), MAX_ROWS);
+        const perSource = Math.max(Math.floor(budget / sources.length), 1);
+
+        const results = await Promise.all(
+            sources.map((source) =>
+                this.runSingle(source, {
+                    fields: this.stripNamespace(request.fields, source.value),
+                    filters: (request.filters ?? [])
+                        .filter((f) => splitNamespacedKey(f.field)?.source === source.value)
+                        .map((f) => ({ ...f, field: this.stripKey(f.field, source.value) })),
+                    sort: (request.sort ?? [])
+                        .filter((s) => splitNamespacedKey(s.field)?.source === source.value)
+                        .map((s) => ({ ...s, field: this.stripKey(s.field, source.value) })),
+                    limit: perSource,
+                }).then((result) => ({ source, result })),
+            ),
+        );
+
+        const columns: Array<{ key: string; label: string; type: string }> = [
+            { key: '__source', label: 'Source', type: 'text' },
+        ];
+        for (const { source, result } of results) {
+            for (const column of result.columns) {
+                columns.push({
+                    key: namespacedFieldKey(source.value, column.key),
+                    label: `${source.label} — ${column.label}`,
+                    type: column.type,
+                });
+            }
+        }
+
+        const rows: Record<string, unknown>[] = [];
+        for (const { source, result } of results) {
+            for (const row of result.rows) {
+                // Every column exists on every row so the table and the CSV line
+                // up; the ones belonging to other sources are simply null.
+                const merged: Record<string, unknown> = Object.fromEntries(
+                    columns.map((c) => [c.key, null]),
+                );
+                merged.__source = source.label;
+                for (const [key, value] of Object.entries(row)) {
+                    merged[namespacedFieldKey(source.value, key)] = value;
+                }
+                rows.push(merged);
+            }
+        }
+
+        const total = results.reduce((sum, r) => sum + r.result.total, 0);
+        return {
+            source: sources.map((s) => s.value).join(','),
+            sources: sources.map((s) => s.value),
+            columns,
+            rows,
+            rowCount: rows.length,
+            total,
+            truncated: total > rows.length,
+            generatedAt: new Date(),
+        };
+    }
+
+    /** Drops the `<source>:` prefix from keys belonging to `sourceValue`. */
+    private stripNamespace(keys: string[] | undefined, sourceValue: string): string[] {
+        return (Array.isArray(keys) ? keys : [])
+            .filter((key) => {
+                const split = splitNamespacedKey(key);
+                return !split || split.source === sourceValue;
+            })
+            .map((key) => this.stripKey(key, sourceValue));
+    }
+
+    private stripKey(key: string, sourceValue: string): string {
+        const split = splitNamespacedKey(key);
+        return split && split.source === sourceValue ? split.field : String(key ?? '');
+    }
+
+    private async runSingle(source: ReportSource, request: Omit<ReportRunRequest, 'source' | 'sources'>) {
         // Requested fields, filtered to the ones this source actually has. An
         // empty or unrecognised selection falls back to the whole field list so a
         // preview is never blank just because nothing was picked yet.
