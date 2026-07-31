@@ -10,6 +10,7 @@ import { AppCacheModule } from './cache/app-cache.module';
 import { EmailModule } from './email/email.module';
 import { QueueModule } from './queue/queue.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { NumberingModule } from './numbering/numbering.module';
 import { ProjectsModule } from './projects/projects.module';
 import { ProjectSetupModule } from './project-setup/project-setup.module';
 import { EmployeesModule } from './employees/employees.module';
@@ -84,6 +85,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         QueueModule,
         AuthModule,
         PrismaModule,
+        NumberingModule,
         AuditLogModule,
         NotificationsModule,
         WorkflowsModule,

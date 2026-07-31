@@ -25,6 +25,15 @@ export interface ApprovalItem {
     urgency: "normal" | "urgent";
     description: string;
     approvalFlow?: ApprovalFlow | null;
+    /**
+     * Whether the signed-in user may decide this item, per the Workflow Approval
+     * configuration. Stamped per row by the server, so a queue listing the whole
+     * company's items still shows approval controls only where they are allowed.
+     * Absent on an older API response, which is treated as not allowed.
+     */
+    canApprove?: boolean;
+    /** Whether the signed-in user raised this item; a requester never decides it. */
+    isRequester?: boolean;
 }
 
 /**

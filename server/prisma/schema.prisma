@@ -401,8 +401,8 @@ model Supplier {
   /// the ERP, "sabiquot" for portal self-registrations.
   source String @default("buildos")
 
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   materials      SupplierMaterial[]
   purchaseOrders PurchaseOrder[]
@@ -745,6 +745,10 @@ model MaterialRequest {
   requestedBy  String
   approvedBy   String?
   requestDate  DateTime  @default(now())
+  /// When the materials are needed, derived from the requester's "Needed In
+  /// (days)". Without a column the computed date existed only in the browser, so
+  /// the card showed a blank Due date as soon as the list reloaded.
+  neededBy     DateTime?
   approvedAt   DateTime?
   notes        String?
   createdAt    DateTime  @default(now())
@@ -2074,4 +2078,30 @@ model AccrualTypeConfig {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Per-module reference numbering (prefix, separator, zero padding, next value).
+///
+/// Numbering used to live only in a client-side React context, so an admin's
+/// changes and every number handed out were lost on reload and two users creating
+/// records at the same moment could produce the same reference. `nextNumber` is
+/// incremented with an atomic UPDATE here, which is what makes a reference unique.
+model NumberingConfig {
+  id     String @id @default(cuid())
+  /// Logical module key, e.g. "PurchaseOrder". Matches the client's module names.
+  module String @unique
+  /// Application whose Settings page configures this module.
+  app    String
+
+  prefix      String
+  separator   String @default("-")
+  padLength   Int    @default(3)
+  /// The value the NEXT allocation will use.
+  nextNumber  Int    @default(1)
+  description String @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([app])
 }

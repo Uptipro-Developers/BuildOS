@@ -3,9 +3,12 @@ import { ProcurementRequestsController } from './procurement-requests.controller
 import { ProcurementRequestsService } from './procurement-requests.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { AdminExtrasModule } from '../admin-extras/admin-extras.module';
 
 @Module({
-    imports: [PrismaModule, IntegrationsModule],
+    // AdminExtrasModule supplies assertMayApprove, which enforces the Workflow
+    // Approval configuration on purchase-request decisions.
+    imports: [PrismaModule, IntegrationsModule, AdminExtrasModule],
     controllers: [ProcurementRequestsController],
     providers: [ProcurementRequestsService],
 })

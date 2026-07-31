@@ -203,16 +203,16 @@ function NewPOModal({
     (s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.unitCost) || 0),
     0,
   );
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const valid =
     supplier &&
     items.every(
       (it) => it.material.trim() && it.qty.trim() && it.unitCost.trim(),
     );
 
-  function handleSave() {
+  async function handleSave() {
     if (!valid) return;
-    const nextId = getNextId("PurchaseOrder");
+    const nextId = await allocate("PurchaseOrder");
     onSave({
       id: nextId,
       prRef: prRef.trim() || "—",

@@ -274,7 +274,7 @@ function newCommLogRow(
 }
 
 export function DailyReportFormPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { name: currentUserName } = useAuthUser();
   const [staffList, setStaffList] = useState<string[]>([]);
   const { id: projectId, reportId } = useParams<{
@@ -555,7 +555,7 @@ export function DailyReportFormPage() {
     setScopeRows((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  function handleSave(status: "draft" | "submitted") {
+  async function handleSave(status: "draft" | "submitted") {
     setSaving(true);
     // If project has a main contractor, submitted reports need review
     const effectiveStatus =
@@ -565,7 +565,7 @@ export function DailyReportFormPage() {
         ? ("pending-review" as const)
         : status;
     const report: DailyReport = {
-      id: existingDraft?.id || getNextId("DailyReport"),
+      id: existingDraft?.id || await allocate("DailyReport"),
       projectId: projectId || "",
       reportDate,
       weather,

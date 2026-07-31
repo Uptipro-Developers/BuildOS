@@ -53,9 +53,11 @@ const sidebarSections = [
     label: "Inventory",
     items: [
       {
-        // Previously only reachable as the module's index route, which now
-        // lands on the dashboard like every other module.
-        label: "Inventory Overview",
+        // "All Materials", not "Inventory Overview": the prototype has no module
+        // by that name, and the page this points at is titled All Materials — the
+        // sidebar was the only place the other name existed. The href is
+        // deliberately unchanged so the Layer 2 permission id stays valid.
+        label: "All Materials",
         href: "/apps/procurement/inventory",
         end: true,
         icon: <Boxes className="w-4 h-4" />,
@@ -161,7 +163,9 @@ const sidebarSections = [
   {
     label: "Settings",
     items: [
-      { label: "Configuration", href: "/apps/procurement/config", end: true, icon: <Settings className="w-4 h-4" /> },
+      // "Settings", matching the prototype and how Construction and Storefront
+      // label the same thing. Href unchanged to keep the Layer 2 permission id.
+      { label: "Settings", href: "/apps/procurement/config", end: true, icon: <Settings className="w-4 h-4" /> },
     ],
   },
 ];

@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, BadRequestException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import * as fs from 'fs/promises';
@@ -1081,6 +1081,117 @@ export class AdminExtrasService {
         }
     }
 
+    /** Normalises a name/email/role for comparison against a configured approver. */
+    private normalizeIdentity(value: unknown): string {
+        return String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    }
+
+    /**
+     * The caller's comparable identities, resolved from the user record.
+     *
+     * The JWT carries only sub/email/role, while a workflow usually names its
+     * approver by display name — so the user row has to be read to match
+     * "Admin User" against the signed-in admin.
+     */
+    private async resolveIdentities(forUser: {
+        userId?: string;
+        name?: string;
+        email?: string;
+        role?: string;
+    }): Promise<string[]> {
+        let identity = forUser;
+        if (forUser.userId) {
+            const user = await this.prisma.user
+                .findUnique({
+                    where: { id: forUser.userId },
+                    select: { name: true, email: true, role: true },
+                })
+                .catch(() => null);
+            if (user) {
+                identity = {
+                    ...forUser,
+                    name: user.name ?? forUser.name,
+                    email: user.email ?? forUser.email,
+                    role: user.role ?? forUser.role,
+                };
+            }
+        }
+        return [identity.name, identity.email, identity.role]
+            .map((v) => this.normalizeIdentity(v))
+            .filter(Boolean);
+    }
+
+    /** Every approver named by a workflow, across single, group and tier shapes. */
+    private namedApprovers(workflow: any): string[] {
+        const flow = this.resolveApprovalFlow(workflow);
+        if (!flow) return [];
+        return [
+            ...(Array.isArray(flow.approvers) ? flow.approvers : []),
+            ...(Array.isArray(flow.tierLevels) ? flow.tierLevels.map((t: any) => t?.approver) : []),
+        ]
+            .map((v) => this.normalizeIdentity(v))
+            .filter(Boolean);
+    }
+
+    /**
+     * Process ids the caller is a configured approver for.
+     *
+     * One endpoint behind this means every Approve/Reject control in the UI asks
+     * the same question and gets an answer from the same matching rules that
+     * decide whose approval queue an item lands in — rather than each page
+     * inventing its own test, or falling back to "is this user an admin", which is
+     * not what the Workflow Approval configuration says.
+     *
+     * A process with no configured workflow yields no approvers, so nobody is
+     * offered an approval that the configuration never granted.
+     */
+    /**
+     * Throws unless the caller is a configured approver for `processId`.
+     *
+     * Hiding a button is a courtesy; this is the actual rule. Without it a request
+     * could still be approved by anyone who could reach the endpoint — including
+     * the person who raised it — regardless of what the Workflow Approval
+     * configuration says.
+     *
+     * A process with no configured workflow denies everyone, which is the safe
+     * reading: nothing has been delegated yet.
+     */
+    async assertMayApprove(
+        forUser: { userId?: string; name?: string; email?: string; role?: string },
+        processId: string,
+    ): Promise<void> {
+        const { processIds } = await this.findMyApprovalProcesses(forUser);
+        if (!processIds.includes(processId)) {
+            throw new ForbiddenException(
+                'You are not configured as an approver for this process.',
+            );
+        }
+    }
+
+    async findMyApprovalProcesses(forUser: {
+        userId?: string;
+        name?: string;
+        email?: string;
+        role?: string;
+    }): Promise<{ processIds: string[] }> {
+        const identities = await this.resolveIdentities(forUser);
+        if (identities.length === 0) return { processIds: [] };
+
+        const settings = await this.readAdminSettings();
+        const workflows = Array.isArray(settings.processWorkflows)
+            ? settings.processWorkflows
+            : [];
+
+        const processIds = workflows
+            .filter((w: any) =>
+                this.namedApprovers(w).some((approver) => identities.includes(approver)),
+            )
+            .map((w: any) => String(w?.processId ?? '').trim())
+            .filter(Boolean);
+
+        return { processIds: Array.from(new Set(processIds)) };
+    }
+
     /**
      * Resolves a configured ProcessWorkflow into a flat, UI-friendly approval
      * flow (ordered list of approver stages). Returns null when no workflow is
@@ -1123,6 +1234,7 @@ export class AdminExtrasService {
     async findApprovals(
         module?: string,
         forUser?: { userId?: string; name?: string; email?: string; role?: string },
+        options?: { onlyMine?: boolean },
     ) {
         const target = String(module || 'all').toLowerCase();
         const rows: any[] = [];
@@ -1273,48 +1385,54 @@ export class AdminExtrasService {
         // The JWT carries only sub/email/role — not the display name, which is what
         // a workflow usually names its approver by. Resolve the full identity from
         // the user record so "Admin User" in a config matches the signed-in admin.
-        let identity = forUser;
-        if (forUser.userId) {
-            const user = await this.prisma.user
-                .findUnique({
-                    where: { id: forUser.userId },
-                    select: { name: true, email: true, role: true },
-                })
-                .catch(() => null);
-            if (user) {
-                identity = {
-                    ...forUser,
-                    name: user.name ?? forUser.name,
-                    email: user.email ?? forUser.email,
-                    role: user.role ?? forUser.role,
-                };
-            }
+        const identities = await this.resolveIdentities(forUser);
+        // An unidentifiable caller approves nothing. The rows are still returned
+        // (a queue may legitimately be read-only), but every one is stamped
+        // unapprovable below, and `onlyMine` yields an empty list.
+        if (identities.length === 0) {
+            return options?.onlyMine
+                ? []
+                : sorted.map((row: any) => ({ ...row, canApprove: false, isRequester: false }));
         }
 
-        const identities = [identity.name, identity.email, identity.role]
-            .map((v) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ''))
-            .filter(Boolean);
-        // No identity means match nothing, rather than accidentally returning
-        // everything to a caller we could not identify.
-        if (identities.length === 0) return [];
-
-        return sorted.filter((row: any) => {
+        /**
+         * Whether the caller is named as an approver for this row's process.
+         *
+         * A process with no configured workflow has no named approver, so nobody may
+         * approve it — the Workflow Approval configuration is the only source of
+         * that right.
+         */
+        const mayApprove = (row: any) => {
             const flow = row.approvalFlow;
-            // A process with no configured workflow has no named approver, so it
-            // cannot be "mine". It stays visible on the unfiltered admin queue.
             if (!flow) return false;
-
             const named = [
                 ...(Array.isArray(flow.approvers) ? flow.approvers : []),
                 ...(Array.isArray(flow.tierLevels)
                     ? flow.tierLevels.map((t: any) => t?.approver)
                     : []),
             ]
-                .map((v) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ''))
+                .map((v) => this.normalizeIdentity(v))
                 .filter(Boolean);
-
             return named.some((approver) => identities.includes(approver));
+        };
+
+        // Stamp every row rather than only filtering, so a module queue that shows
+        // the whole company's list can still hide Approve/Reject per row. The
+        // module queues fetch unfiltered, and without this each one rendered
+        // approval buttons on every row for anyone who could open the page.
+        const stamped = sorted.map((row: any) => {
+            const requestedBy = this.normalizeIdentity(row.requestedBy);
+            const isRequester = Boolean(requestedBy) && identities.includes(requestedBy);
+            return {
+                ...row,
+                // A requester may never decide their own request, whatever the
+                // configuration says.
+                canApprove: mayApprove(row) && !isRequester,
+                isRequester,
+            };
         });
+
+        return options?.onlyMine ? stamped.filter((row: any) => mayApprove(row)) : stamped;
     }
 
     async referenceData() {
@@ -1427,12 +1545,31 @@ export class AdminExtrasService {
         }
     }
 
-    async updateApproval(id: string, data: { status?: string; notes?: string; reason?: string }) {
+    /**
+     * Applies an approve/reject decision to whichever record the id belongs to.
+     *
+     * `forUser` is checked against the Workflow Approval configuration for that
+     * record's process before the decision lands. The route's `@Roles('approver')`
+     * was not sufficient on its own: it let any approver-role holder decide items in
+     * modules the configuration never named them on. Notes-only edits are not
+     * decisions and stay unrestricted.
+     */
+    async updateApproval(
+        id: string,
+        data: { status?: string; notes?: string; reason?: string },
+        forUser?: { userId?: string; name?: string; email?: string; role?: string },
+    ) {
         const status = String(data?.status ?? '').toLowerCase();
-        
+        const decides = status === 'approved' || status === 'rejected';
+        /** Enforces the configuration for a decision on `processId`. */
+        const guard = async (processId: string) => {
+            if (decides && forUser) await this.assertMayApprove(forUser, processId);
+        };
+
         // Try to find and update in leave-requests
         const leaveReq = await this.prisma.leaveRequest.findUnique({ where: { id } }).catch(() => null);
         if (leaveReq) {
+            await guard('p_leave_requests');
             return this.prisma.leaveRequest.update({
                 where: { id },
                 data: {
@@ -1446,6 +1583,7 @@ export class AdminExtrasService {
         // Try to find and update in claims
         const claim = await this.prisma.claim.findUnique({ where: { id } }).catch(() => null);
         if (claim) {
+            await guard('p_claims');
             return this.prisma.claim.update({
                 where: { id },
                 data: {
@@ -1459,6 +1597,7 @@ export class AdminExtrasService {
         // Try to find and update in expenses
         const expense = await this.prisma.expense.findUnique({ where: { id } }).catch(() => null);
         if (expense) {
+            await guard('p_expenses');
             return this.prisma.expense.update({
                 where: { id },
                 data: {

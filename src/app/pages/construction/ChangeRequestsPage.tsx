@@ -68,7 +68,7 @@ const emptyForm = {
 };
 
 export function ChangeRequestsPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { id } = useParams();
   const project = id ? getProjectById(id) : undefined;
   const [search, setSearch] = useState("");
@@ -115,10 +115,10 @@ export function ChangeRequestsPage() {
     return `CR-${String(max + 1).padStart(4, "0")}`;
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!form.description.trim() || !id) return;
     const newCR: ChangeRequest = {
-      id: getNextId("ChangeRequest"),
+      id: await allocate("ChangeRequest"),
       projectId: id,
       crNumber: nextCrNumber(),
       dateRaised: form.dateRaised,

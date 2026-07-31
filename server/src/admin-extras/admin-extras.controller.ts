@@ -40,22 +40,60 @@ export class AdminExtrasController {
         @Query('mine') mine?: string,
     ) {
         const user = req?.user;
+        // The identity is passed whether or not `mine` is set: every row is stamped
+        // with whether this caller may approve it, which is what lets a module queue
+        // list the whole company's items while still showing approval controls only
+        // where the Workflow Approval configuration allows.
         return this.svc.findApprovals(
             module,
-            String(mine ?? '').toLowerCase() === 'true'
-                ? {
-                      userId: String(user?.sub ?? user?.id ?? ''),
-                      name: user?.name,
-                      email: user?.email,
-                      role: user?.role,
-                  }
-                : undefined,
+            {
+                userId: String(user?.sub ?? user?.id ?? ''),
+                name: user?.name,
+                email: user?.email,
+                role: user?.role,
+            },
+            { onlyMine: String(mine ?? '').toLowerCase() === 'true' },
         );
     }
 
+    /**
+     * The write path behind every approval queue.
+     *
+     * `@Roles` alone was not enough: it let anyone holding the `approver` role decide
+     * any item in any module, regardless of which processes the Workflow Approval
+     * configuration actually names them on. The service now checks the row's own
+     * process before applying an approve or reject.
+     */
     @Patch('approvals/:id')
     @Roles('admin', 'approver')
-    updateApproval(@Param('id') id: string, @Body() body: any) { return this.svc.updateApproval(id, body); }
+    updateApproval(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        const user = req?.user;
+        return this.svc.updateApproval(id, body, {
+            userId: String(user?.sub ?? user?.id ?? ''),
+            name: user?.name,
+            email: user?.email,
+            role: user?.role,
+        });
+    }
+
+    /**
+     * Process ids the caller may approve, per the Workflow Approval configuration.
+     *
+     * Deliberately open to any authenticated user: it reports only what the caller
+     * themselves may approve, and every Approve/Reject control in the UI needs it
+     * to decide whether to render. Gating it on `admin` would hide approval actions
+     * from exactly the non-admin approvers the configuration names.
+     */
+    @Get('my-approval-processes')
+    getMyApprovalProcesses(@Req() req: any) {
+        const user = req?.user;
+        return this.svc.findMyApprovalProcesses({
+            userId: String(user?.sub ?? user?.id ?? ''),
+            name: user?.name,
+            email: user?.email,
+            role: user?.role,
+        });
+    }
 
     @Get('reference-data')
     @Roles('admin')

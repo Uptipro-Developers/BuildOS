@@ -190,15 +190,15 @@ function RecordDeliveryModal({
     setItems((p) => p.filter((_, j) => j !== i));
   const updateItem = (i: number, k: keyof GRNItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const valid =
     poRef &&
     deliveryNote.trim() &&
     items.every((it) => it.material.trim() && it.received.trim());
 
-  function handleSave() {
+  async function handleSave() {
     if (!valid) return;
-    const nextId = getNextId("GoodsReceipt");
+    const nextId = await allocate("GoodsReceipt");
     const builtItems = items.map((it) => ({
       material: it.material,
       ordered: parseFloat(it.ordered) || 0,

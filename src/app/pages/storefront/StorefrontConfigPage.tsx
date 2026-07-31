@@ -1828,6 +1828,29 @@ function MaterialCategoriesPanel() {
 
 function NumberingPanel() {
   const { configs, updateConfig, addConfig, removeConfig } = useNumbering();
+  /**
+   * Numbering mutations persist to the server now, so they can fail. Without this
+   * a rejected promise from a click handler would surface only as an unhandled
+   * rejection in the console, leaving the row looking saved when it was not.
+   */
+  async function runNumbering(action: Promise<unknown>, success: string) {
+    try {
+      await action;
+      toast.success(success);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the numbering change.",
+      );
+    }
+  }
+
+  async function persistNumbering(
+    module: string,
+    updates: Parameters<typeof updateConfig>[1],
+  ) {
+    await runNumbering(updateConfig(module, updates), `Numbering for ${module} saved.`);
+  }
+
   const [editingNumbering, setEditingNumbering] = useState<string | null>(null);
   const [numberingForm, setNumberingForm] = useState<ModuleNumbering | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1842,7 +1865,7 @@ function NumberingPanel() {
 
   function saveNumbering() {
     if (numberingForm) {
-      updateConfig(numberingForm.module, numberingForm);
+      void persistNumbering(numberingForm.module, numberingForm);
       setEditingNumbering(null);
       setNumberingForm(null);
     }
@@ -1910,7 +1933,7 @@ function NumberingPanel() {
                   </div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => openNumberingEdit(cfg)} className="p-1.5 text-teal-600 hover:bg-teal-50 rounded-lg"><Edit className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => removeConfig(cfg.module)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Remove entry"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => void runNumbering(removeConfig(cfg.module), "Numbering entry removed.")} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Remove entry"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </>
               )}
@@ -1946,7 +1969,7 @@ function NumberingPanel() {
                       className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-teal-500" min={1} />
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => { addConfig(addForm); setAddForm({ module: "", prefix: "", separator: "-", padLength: 4, nextNumber: 1, description: "" }); setShowAddForm(false); }} className="px-3 py-1.5 text-xs bg-teal-700 text-white rounded-lg hover:bg-teal-800"><Save className="w-3 h-3 inline mr-1" />Save</button>
+                    <button onClick={() => { void runNumbering(addConfig(addForm), "Numbering entry added."); setAddForm({ module: "", prefix: "", separator: "-", padLength: 4, nextNumber: 1, description: "" }); setShowAddForm(false); }} className="px-3 py-1.5 text-xs bg-teal-700 text-white rounded-lg hover:bg-teal-800"><Save className="w-3 h-3 inline mr-1" />Save</button>
                     <button onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                   </div>
                 </div>

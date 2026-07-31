@@ -263,7 +263,7 @@ function Badge({ label, className }: { label: string; className: string }) {
 }
 
 export function HSEPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { id } = useParams();
   const project = id ? getProjectById(id) : undefined;
   const [activeTab, setActiveTab] = useState<HSETab>("toolbox");
@@ -400,11 +400,14 @@ export function HSEPage() {
       notes: "",
     });
   }
-  function addIncident() {
+  async function addIncident() {
+    // Allocated before the state updater: `setState(prev => ...)` takes a plain
+    // callback, so an await inside it is not allowed.
+    const incidentId = await allocate("Incident");
     setLocalIncidents((prev) => [
       ...prev,
       {
-        id: getNextId("Incident"),
+        id: incidentId,
         date: incForm.date || new Date().toISOString().split("T")[0],
         type: incForm.type as any,
         description: incForm.description,
@@ -496,7 +499,7 @@ export function HSEPage() {
       lessonsLearned: "",
     });
   }
-  function addCompetency() {
+  async function addCompetency() {
     const record = {
       projectId: id || "",
       staffMember: compForm.staffMember,
@@ -505,13 +508,16 @@ export function HSEPage() {
       expiryDate: compForm.expiryDate,
       status: compForm.status,
     };
+    // Allocated up front so the offline fallback below can use it without
+    // awaiting inside a .catch callback.
+    const fallbackId = await allocate("HSERecord");
     createHseRecord(record as any)
       .then((saved) => setLocalMatrix((prev) => [...prev, saved]))
       .catch(() =>
         setLocalMatrix((prev) => [
           ...prev,
           {
-            id: getNextId("HSERecord"),
+            id: fallbackId,
             ...record,
             status: compForm.status as any,
           },

@@ -49,6 +49,12 @@ interface ReportSchedule {
   module: ReportModule;
   frequency: Frequency;
   sendTime: string;
+  /**
+   * Anchor day: weekday 0–6 (Sunday–Saturday) for Weekly, day of month 1–31 for
+   * Monthly. Without it a weekly or monthly schedule fires on the first send time
+   * after its interval elapses, which drifts.
+   */
+  sendDay?: number;
   recipients: string;
   enabled: boolean;
   lastSent: string | null;
@@ -65,6 +71,17 @@ const MODULE_COLORS: Record<ReportModule, string> = {
   Storefront: "bg-orange-50 text-orange-700",
 };
 
+/** Index is the value stored in `sendDay`, matching JavaScript's getDay(). */
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
 const MODULE_OPTIONS: ReportModule[] = [
   "Finance",
   "HR",
@@ -79,6 +96,7 @@ const BLANK_FORM: Omit<ReportSchedule, "id" | "lastSent"> = {
   module: "Finance" as ReportModule,
   frequency: "Daily",
   sendTime: "08:00",
+  sendDay: 1,
   recipients: "",
   enabled: true,
 };
@@ -160,6 +178,7 @@ export function ReportAutomationPage() {
       module: schedule.module,
       frequency: schedule.frequency,
       sendTime: schedule.sendTime || BLANK_FORM.sendTime,
+      sendDay: schedule.sendDay ?? BLANK_FORM.sendDay,
       recipients: schedule.recipients,
       enabled: schedule.enabled,
     });
@@ -349,7 +368,13 @@ export function ReportAutomationPage() {
               </div>
               <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 flex-wrap">
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> {s.frequency} at {s.sendTime}
+                  <Clock className="w-3 h-3" /> {s.frequency}
+                  {s.frequency === "Weekly" && Number.isInteger(s.sendDay)
+                    ? ` on ${WEEKDAYS[(s.sendDay as number) % 7]}`
+                    : s.frequency === "Monthly" && Number.isInteger(s.sendDay)
+                      ? ` on day ${s.sendDay}`
+                      : ""}{" "}
+                  at {s.sendTime}
                 </span>
                 <span className="flex items-center gap-1">
                   <Mail className="w-3 h-3" /> {s.recipients}
@@ -523,8 +548,46 @@ export function ReportAutomationPage() {
                       setForm({ ...form, sendTime: e.target.value })
                     }
                   />
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    In the organisation's timezone.
+                  </p>
                 </div>
               </div>
+
+              {/* Which day the period lands on. Daily needs no anchor; without one
+                  a weekly or monthly schedule fires on the first send time after
+                  its interval elapses, which drifts away from the intended day. */}
+              {form.frequency !== "Daily" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    {form.frequency === "Weekly" ? "Day of week" : "Day of month"}
+                  </label>
+                  <select
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-500"
+                    value={form.sendDay ?? 1}
+                    onChange={(e) =>
+                      setForm({ ...form, sendDay: Number(e.target.value) })
+                    }
+                  >
+                    {form.frequency === "Weekly"
+                      ? WEEKDAYS.map((label, value) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))
+                      : Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                  </select>
+                  {form.frequency === "Monthly" && (form.sendDay ?? 1) > 28 && (
+                    <p className="text-[11px] text-amber-600 mt-1">
+                      Months shorter than this send on their last day instead.
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Recipients (comma-separated emails)

@@ -154,7 +154,10 @@ export function ProcurementDashboardPage() {
             <Clock className="w-3.5 h-3.5" /> Material Requests
           </button>
           <button
-            onClick={() => navigate("/apps/procurement")}
+            // Was "/apps/procurement", the module index — which renders this same
+            // dashboard, so the button appeared to do nothing at all. All Materials
+            // is the inventory route.
+            onClick={() => navigate("/apps/procurement/inventory")}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800"
           >
             <Package className="w-3.5 h-3.5" /> All Materials

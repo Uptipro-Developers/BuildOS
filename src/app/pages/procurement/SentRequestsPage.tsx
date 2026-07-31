@@ -184,15 +184,15 @@ function NewRFQModal({
   const updateItem = (i: number, k: keyof RFQItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
 
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const valid =
     vendor &&
     prRef.trim() &&
     items.every((it) => it.material.trim() && it.qty.trim());
 
-  function handleSave() {
+  async function handleSave() {
     if (!valid) return;
-    const nextId = getNextId("RFQ");
+    const nextId = await allocate("RFQ");
     onSave({
       id: nextId,
       prRef: prRef.trim(),

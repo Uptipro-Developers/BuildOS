@@ -849,7 +849,7 @@ function CategoryCard({
 export function PostingEnginePage() {
   const { setTransactions: setLedgerTransactions } = useFinance();
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const [categories, setCategories] = useState<ProcessCategory[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<{ code: string; name: string }[]>([]);
@@ -896,7 +896,7 @@ export function PostingEnginePage() {
     if (txn) logChange({ module: "Finance", action: "Rejected", entityType: "PostingEngineTxn", entityId: id, summary: `Posting Engine: "${txn.description}" rejected`, performedBy: "Sola Adeleke" });
     toast.success("Transaction rejected.");
   }
-  function postToLedger(id: string) {
+  async function postToLedger(id: string) {
     const txn = transactions.find(t => t.id === id);
     if (!txn) return;
     const cat = categories.find(c => c.id === txn.categoryId);
@@ -905,8 +905,9 @@ export function PostingEnginePage() {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, status: "posted", ledgerRef } : t));
     logChange({ module: "Finance", action: "Posted", entityType: "PostingEngineTxn", entityId: id, summary: `Posting Engine: "${txn.description}" → Ledger (${ledgerRef})`, performedBy: "Sola Adeleke" });
     // Create corresponding entry in the FinanceContext ledger
+    const ledgerTxnId = await allocate("Transaction");
     setLedgerTransactions(prev => [...prev, {
-      id: getNextId("Transaction"),
+      id: ledgerTxnId,
       type: "Journal" as const,
       description: `${cat.name}: ${txn.description}`,
       debitAccount: cat.debitAccount,

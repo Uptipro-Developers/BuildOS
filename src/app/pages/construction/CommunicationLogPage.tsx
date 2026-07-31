@@ -67,7 +67,7 @@ const emptyForm: Omit<CommunicationLogEntry, "id" | "createdAt" | "createdBy"> =
   };
 
 export function CommunicationLogPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { id: projectId } = useParams<{ id: string }>();
   const project = projectId ? getProjectById(projectId) : null;
   const [search, setSearch] = useState("");
@@ -108,10 +108,10 @@ export function CommunicationLogPage() {
     return base.sort((a, b) => b.date.localeCompare(a.date));
   }, [allComms, projectId, search, channelFilter]);
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!form.projectId || !form.subject) return;
     const newEntry: CommunicationLogEntry = {
-      id: getNextId("Communication"),
+      id: await allocate("Communication"),
       createdAt: new Date().toISOString(),
       createdBy: getAuthUserName() || "Current User",
       ...form,

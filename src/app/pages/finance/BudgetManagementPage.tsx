@@ -68,7 +68,7 @@ const emptyForm = {
 
 export function BudgetManagementPage() {
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const [budgets, setBudgets] = useState<BudgetLine[]>([]);
 
   function toBudgetLine(b: any): BudgetLine {
@@ -190,8 +190,8 @@ export function BudgetManagementPage() {
     toast.success("Budget deleted.");
   }
 
-  function cloneBudget(b: BudgetLine) {
-    const newId = getNextId("Budget");
+  async function cloneBudget(b: BudgetLine) {
+    const newId = await allocate("Budget");
     const clone: BudgetLine = { ...b, id: newId, name: `${b.name} (Copy)`, spent: 0, committed: 0, status: "Active" };
     setBudgets([...budgets, clone]);
     logChange({ module: "Finance", action: "Created", entityType: "Budget", entityId: newId, summary: `Budget ${clone.name} created (cloned from ${b.name})`, performedBy: "Current User" });

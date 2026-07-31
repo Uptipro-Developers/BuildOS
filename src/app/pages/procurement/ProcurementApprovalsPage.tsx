@@ -30,6 +30,12 @@ interface ProcApproval {
   status: ApprovalStatus;
   urgency: "normal" | "urgent";
   description: string;
+  /**
+   * Stamped by the server from the Workflow Approval configuration: whether the
+   * signed-in user may decide this item, and whether they raised it.
+   */
+  canApprove?: boolean;
+  isRequester?: boolean;
 }
 
 function fromApiApproval(r: ApprovalItem): ProcApproval {
@@ -46,6 +52,11 @@ function fromApiApproval(r: ApprovalItem): ProcApproval {
       : "pending") as ApprovalStatus,
     urgency: r.urgency === "urgent" ? "urgent" : "normal",
     description: r.description ?? "",
+    // Carried through explicitly: this mapper builds a new object, so anything not
+    // copied here is silently dropped — and a missing canApprove reads as "not
+    // allowed", which would hide the controls from a legitimate approver.
+    canApprove: r.canApprove ?? false,
+    isRequester: r.isRequester ?? false,
   };
 }
 
@@ -281,7 +292,19 @@ export function ProcurementApprovalsPage() {
                   <p className="text-sm text-gray-600 mt-3 mb-4">
                     {a.description}
                   </p>
-                  {isPending && (
+                  {/* Approval controls follow the Workflow Approval
+                      configuration: the server stamps each row with whether
+                      this user may decide it. Module queues list the whole
+                      company's items, so without this every row offered
+                      Approve and Reject to anyone who could open the page. */}
+                  {isPending && !a.canApprove && (
+                    <p className="px-0 pb-1 text-xs text-gray-400 italic">
+                      {a.isRequester
+                        ? "You raised this, so it must be approved by someone else."
+                        : "Only the approver configured for this process can decide it."}
+                    </p>
+                  )}
+                  {isPending && a.canApprove && (
                     <div className="flex items-center gap-3">
                       <button
                         onClick={(e) => {

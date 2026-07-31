@@ -224,7 +224,7 @@ function NCRModal({
   onClose: (ncr: QualityNCR | null) => void;
   projectId: string;
 }) {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const [form, setForm] = useState({
     description: "",
     taskId: "",
@@ -233,10 +233,10 @@ function NCRModal({
     responsiblePerson: "",
     targetCloseDate: "",
   });
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!form.description.trim()) return;
     const newNcr: QualityNCR = {
-      id: getNextId("NonConformance"),
+      id: await allocate("NonConformance"),
       projectId,
       ncrId: `NCR-${String(qualityNCRs.length + 23).padStart(4, "0")}`,
       date: new Date().toISOString().split("T")[0],

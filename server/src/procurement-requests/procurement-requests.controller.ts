@@ -1,13 +1,52 @@
 import {
     Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query,
+    Param, Body, Query, Req, ForbiddenException,
 } from '@nestjs/common';
 import { ServiceAuth } from '../auth/decorators';
 import { ProcurementRequestsService } from './procurement-requests.service';
+import { AdminExtrasService } from '../admin-extras/admin-extras.service';
 
 @Controller()
 export class ProcurementRequestsController {
-    constructor(private readonly svc: ProcurementRequestsService) { }
+    constructor(
+        private readonly svc: ProcurementRequestsService,
+        private readonly adminExtras: AdminExtrasService,
+    ) { }
+
+    /**
+     * Enforces the Workflow Approval configuration on a purchase-request decision.
+     *
+     * A signed-in caller must be a configured approver for Purchase Requests, and
+     * may not decide a request they raised. Skipped for the service-key path, which
+     * is the supplier portal mirroring a supplier's own accept/decline rather than
+     * an internal approval.
+     */
+    private async guardPRDecision(req: any, id: string, body: any) {
+        const status = String(body?.status ?? '').toLowerCase();
+        if (status !== 'approved' && status !== 'cancelled' && status !== 'rejected') return;
+
+        const user = req?.user;
+        if (!user?.sub && !user?.id) return;
+
+        const identity = {
+            userId: String(user?.sub ?? user?.id ?? ''),
+            name: user?.name,
+            email: user?.email,
+            role: user?.role,
+        };
+        await this.adminExtras.assertMayApprove(identity, 'p_purchase_requests');
+
+        const existing = await this.svc.findPR(id).catch(() => null);
+        const raisedBy = String((existing as any)?.requestedBy ?? '').trim().toLowerCase();
+        const mine = [identity.name, identity.email]
+            .map((v) => String(v ?? '').trim().toLowerCase())
+            .filter(Boolean);
+        if (raisedBy && mine.includes(raisedBy)) {
+            throw new ForbiddenException(
+                'You raised this request, so it must be approved by someone else.',
+            );
+        }
+    }
 
     // ── Purchase Requests ──
     @Get('purchase-requests')
@@ -17,12 +56,18 @@ export class ProcurementRequestsController {
     @Post('purchase-requests')
     createPR(@Body() body: any) { return this.svc.createPR(body); }
     @Put('purchase-requests/:id')
-    updatePR(@Param('id') id: string, @Body() body: any) { return this.svc.updatePR(id, body); }
+    async updatePR(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        await this.guardPRDecision(req, id, body);
+        return this.svc.updatePR(id, body);
+    }
     // Service-accessible: the SabiQuot supplier portal mirrors a supplier's
     // accept/decline back onto the originating purchase request.
     @Patch('purchase-requests/:id')
     @ServiceAuth()
-    patchPR(@Param('id') id: string, @Body() body: any) { return this.svc.updatePR(id, body); }
+    async patchPR(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        await this.guardPRDecision(req, id, body);
+        return this.svc.updatePR(id, body);
+    }
     @Delete('purchase-requests/:id')
     deletePR(@Param('id') id: string) { return this.svc.deletePR(id); }
 

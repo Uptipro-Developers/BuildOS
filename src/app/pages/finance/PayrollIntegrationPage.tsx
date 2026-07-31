@@ -84,7 +84,7 @@ const STATUS_FLOW: PayrollStatus[] = [
 
 export function PayrollIntegrationPage() {
   const { logChange } = useChangelog();
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const [payrolls, setPayrolls] = useState<PayrollRun[]>([]);
   const [activeRun, setActiveRun] = useState<PayrollRun | null>(null);
   const [employees, setEmployees] = useState<PayrollEmployee[]>([]);
@@ -187,10 +187,10 @@ export function PayrollIntegrationPage() {
     toast.success("Payroll run deleted.");
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     const now = new Date();
     const newRun: PayrollRun = {
-      id: getNextId("PayrollRun"),
+      id: await allocate("PayrollRun"),
       period: `${now.toLocaleString("default", { month: "long" })} ${now.getFullYear()}`,
       department: "All Departments",
       headcount: 0,

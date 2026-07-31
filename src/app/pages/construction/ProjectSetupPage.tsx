@@ -112,7 +112,7 @@ export function ProjectSetupPage() {
   const [clusters, setClusters] = useState<string[]>([]);
   const [equipmentInventory, setEquipmentInventory] = useState<any[]>([]);
 
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { contractors: individualContractors } = useResources();
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
@@ -166,11 +166,11 @@ export function ProjectSetupPage() {
     }>
   >([]);
 
-  const addStructureEntry = () => {
+  const addStructureEntry = async () => {
     const config = structureConfig;
     if (!config) return;
     const newEntry = {
-      id: getNextId("Structure"),
+      id: await allocate("Structure"),
       name: "",
       innerUnitCount: 1,
       attributes: {} as Record<string, string | number>,
@@ -947,18 +947,21 @@ export function ProjectSetupPage() {
     });
   }, [allVendors]);
 
-  const addVendor = () => {
+  const addVendor = async () => {
     if (selectedVendorIds.length === 0) return;
     const existingNames = new Set(projectVendors.map((v) => v.name));
-    const newV: Vendor[] = selectedVendorIds
+    // Promise.all with an async map: each row's reference is allocated on the
+    // server now, and a plain .map callback cannot await.
+    const newV: Vendor[] = await Promise.all(
+      selectedVendorIds
       .filter((id) => {
         const v = allVendors.find((x) => x.id === id);
         return v && !existingNames.has(v.name);
       })
-      .map((id) => {
+      .map(async (id) => {
         const v = allVendors.find((x) => x.id === id);
         return {
-          id: getNextId("Vendor"),
+          id: await allocate("Vendor"),
           projectId: projectId!,
           assignedWorkPackages: [],
           name: v?.name || "",
@@ -975,7 +978,8 @@ export function ProjectSetupPage() {
           subcontractorIds: v?.subcontractorIds || [],
           parentContractorId: v?.parentContractorId || undefined,
         };
-      });
+      }),
+    );
     setProjectVendors((prev) => [...prev, ...newV]);
     setSelectedVendorIds([]);
   };
@@ -1033,15 +1037,18 @@ export function ProjectSetupPage() {
   };
 
   // Staff helpers
-  const addStaff = () => {
+  const addStaff = async () => {
     if (selectedEmployeeIds.length === 0) return;
     const existingIds = new Set(projectStaff.map((s) => s.employeeId));
-    const newStaff: HumanResource[] = selectedEmployeeIds
+    // Promise.all with an async map: each row's reference is allocated on the
+    // server now, and a plain .map callback cannot await.
+    const newStaff: HumanResource[] = await Promise.all(
+      selectedEmployeeIds
       .filter((id) => !existingIds.has(id))
-      .map((id) => {
+      .map(async (id) => {
         const emp = hrEmployees.find((e) => e.id === id);
         return {
-          id: getNextId("Staff"),
+          id: await allocate("Staff"),
           projectId: projectId!,
           source: "employee" as const,
           name: `${emp?.firstName || ""} ${emp?.lastName || ""}`,
@@ -1053,25 +1060,29 @@ export function ProjectSetupPage() {
           blockAssignment: "",
           mandaysEstimate: 0,
         };
-      });
+      }),
+    );
     setProjectStaff((prev) => [...prev, ...newStaff]);
     setSelectedEmployeeIds([]);
   };
   const removeStaff = (id: string) =>
     setProjectStaff((prev) => prev.filter((s) => s.id !== id));
 
-  const addContractor = () => {
+  const addContractor = async () => {
     if (selectedContractorIds.length === 0) return;
     const existingNames = new Set(projectContractors.map((c) => c.name));
-    const newC: HumanResource[] = selectedContractorIds
+    // Promise.all with an async map: each row's reference is allocated on the
+    // server now, and a plain .map callback cannot await.
+    const newC: HumanResource[] = await Promise.all(
+      selectedContractorIds
       .filter((id) => {
         const c = individualContractors.find((x) => x.id === id);
         return c && !existingNames.has(c.name);
       })
-      .map((id) => {
+      .map(async (id) => {
         const c = individualContractors.find((x) => x.id === id);
         return {
-          id: getNextId("Contractor"),
+          id: await allocate("Contractor"),
           projectId: projectId!,
           source: "individual-contractor" as const,
           name: c?.name || "",
@@ -1085,7 +1096,8 @@ export function ProjectSetupPage() {
           assignedWorkPackages: [],
           blockAssignment: "",
         };
-      });
+      }),
+    );
     setProjectContractors((prev) => [...prev, ...newC]);
     setSelectedContractorIds([]);
   };
@@ -1093,12 +1105,15 @@ export function ProjectSetupPage() {
     setProjectContractors((prev) => prev.filter((c) => c.id !== id));
 
   // Material helpers
-  const addMaterial = () => {
+  const addMaterial = async () => {
     if (selectedMaterialIds.length === 0) return;
-    const newMats: MaterialResource[] = selectedMaterialIds.map((id) => {
+    // Promise.all with an async map: each row's reference is allocated on the
+    // server now, and a plain .map callback cannot await.
+    const newMats: MaterialResource[] = await Promise.all(
+      selectedMaterialIds.map(async (id) => {
       const inv = materialInventory.find((x) => x.id === id);
       return {
-        id: getNextId("Material"),
+        id: await allocate("Material"),
         projectId: projectId!,
         name: inv?.name || "Unknown",
         category: inv?.category || "",
@@ -1108,7 +1123,8 @@ export function ProjectSetupPage() {
         totalEstimatedCost: inv?.defaultUnitCost || 0,
         procurementSource: "internal" as const,
       };
-    });
+    }),
+    );
     setProjectMaterials((prev) => [...prev, ...newMats]);
     setSelectedMaterialIds([]);
   };
@@ -1116,14 +1132,16 @@ export function ProjectSetupPage() {
     setProjectMaterials((prev) => prev.filter((m) => m.id !== id));
 
   // Equipment helpers
-  const addEquipment = () => {
+  const addEquipment = async () => {
     // Add fleet equipment (multi-select)
     if (selectedFleetEquipmentIds.length > 0) {
-      const newEquips: EquipmentResource[] = selectedFleetEquipmentIds.map(
-        (id) => {
+      // Promise.all with an async map: each row's reference is allocated on the
+      // server now, and a plain .map callback cannot await.
+      const newEquips: EquipmentResource[] = await Promise.all(
+        selectedFleetEquipmentIds.map(async (id) => {
           const inv = equipmentInventory.find((e) => e.id === id);
           return {
-            id: getNextId("Equipment"),
+            id: await allocate("Equipment"),
             projectId: projectId!,
             name: inv?.name || "Unknown",
             category: inv?.category || "",
@@ -1136,7 +1154,7 @@ export function ProjectSetupPage() {
               | "Assigned"
               | "Under Maintenance",
           };
-        },
+        }),
       );
       setProjectEquipment((prev) => [...prev, ...newEquips]);
       setSelectedFleetEquipmentIds([]);
@@ -2035,10 +2053,13 @@ export function ProjectSetupPage() {
           <div className="flex items-center gap-2">
             {structureEntries.length > 0 && (
               <button
-                onClick={() => {
+                // `for..of`, not `forEach`: references come from the server now
+                // and an async callback handed to forEach is never awaited, so the
+                // tasks would be pushed before their ids resolved.
+                onClick={async () => {
                   const newTasks: Task[] = [];
                   let nextId = maxTaskId;
-                  structureEntries.forEach((se) => {
+                  for (const se of structureEntries) {
                     nextId++;
                     const s =
                       basicInfo.plannedStartDate ||
@@ -2049,7 +2070,7 @@ export function ProjectSetupPage() {
                         .toISOString()
                         .split("T")[0];
                     newTasks.push({
-                      id: getNextId("SiteTask"),
+                      id: await allocate("SiteTask"),
                       projectId: projectId!,
                       parentTaskId: null,
                       level: 1,
@@ -2076,7 +2097,7 @@ export function ProjectSetupPage() {
                       notes: "",
                       structureEntryId: se.id,
                     });
-                  });
+                  }
                   setProjectTasks((prev) => [...prev, ...newTasks]);
                   setExpanded((prev) => {
                     const next = new Set(prev);
@@ -3207,10 +3228,10 @@ export function ProjectSetupPage() {
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!contractorForm.name || !contractorForm.trade) return;
                       const newCon: HumanResource = {
-                        id: getNextId("Contractor"),
+                        id: await allocate("Contractor"),
                         projectId: projectId!,
                         source: "individual-contractor",
                         name: contractorForm.name,
@@ -4470,11 +4491,11 @@ export function ProjectSetupPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!equipmentForm.name || !equipmentForm.category) return;
                     const isRented = externalEquipType === "rented";
                     const newEquip: EquipmentResource = {
-                      id: getNextId("Equipment"),
+                      id: await allocate("Equipment"),
                       projectId: projectId!,
                       name: equipmentForm.name,
                       category: equipmentForm.category,

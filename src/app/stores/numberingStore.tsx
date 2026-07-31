@@ -1,7 +1,24 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from "react";
+import {
+  allocateNumber,
+  createNumberingConfig,
+  deleteNumberingConfig,
+  getNumberingConfigs,
+  resetNumberingConfig,
+  updateNumberingConfig,
+} from "../api/numbering";
 
 export interface ModuleNumbering {
   module: string;
+  /** Application whose Settings page configures this module. */
+  app?: string;
   prefix: string;
   separator: string;
   padLength: number;
@@ -11,11 +28,21 @@ export interface ModuleNumbering {
 
 interface NumberingContextValue {
   configs: ModuleNumbering[];
-  getNextId: (module: string) => string;
-  updateConfig: (module: string, updates: Partial<ModuleNumbering>) => void;
-  resetConfig: (module: string) => void;
-  addConfig: (cfg: ModuleNumbering) => void;
-  removeConfig: (module: string) => void;
+  loading: boolean;
+  /** Set when configs could not be loaded; the seeded defaults are used instead. */
+  error: string | null;
+  reload: () => Promise<void>;
+  /**
+   * Reserves the next reference on the server. Consuming — call it once, when a
+   * record is actually being created.
+   */
+  allocate: (module: string) => Promise<string>;
+  /** The next reference, without consuming it. Safe during render. */
+  peekNextId: (module: string) => string;
+  updateConfig: (module: string, updates: Partial<ModuleNumbering>) => Promise<void>;
+  resetConfig: (module: string) => Promise<void>;
+  addConfig: (cfg: ModuleNumbering) => Promise<void>;
+  removeConfig: (module: string) => Promise<void>;
 }
 
 const NumberingContext = createContext<NumberingContextValue | null>(null);
@@ -87,42 +114,120 @@ const DEFAULT_CONFIGS: ModuleNumbering[] = [
 ];
 
 export function NumberingProvider({ children }: { children: ReactNode }) {
+  // Seeded from DEFAULT_CONFIGS so the first render has formats to show; replaced
+  // by the server's stored configs as soon as they arrive. The server is seeded
+  // from this same list, so the two agree on a fresh install.
   const [configs, setConfigs] = useState<ModuleNumbering[]>(DEFAULT_CONFIGS);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const getNextId = useCallback((module: string) => {
-    let result = "";
-    setConfigs(prev => {
-      const idx = prev.findIndex(c => c.module === module);
-      if (idx < 0) return prev;
-      const cfg = prev[idx];
-      const padded = String(cfg.nextNumber).padStart(cfg.padLength, "0");
-      result = `${cfg.prefix}${cfg.separator}${padded}`;
-      const next = [...prev];
-      next[idx] = { ...cfg, nextNumber: cfg.nextNumber + 1 };
-      return next;
-    });
-    return result;
+  const reload = useCallback(async () => {
+    try {
+      const fetched = await getNumberingConfigs();
+      if (Array.isArray(fetched) && fetched.length > 0) {
+        setConfigs(fetched);
+        setError(null);
+      }
+    } catch (err) {
+      // Keep the defaults on screen rather than blanking every configuration
+      // page, but say so — an admin editing a stale format needs to know it did
+      // not come from the server.
+      setError(
+        err instanceof Error ? err.message : "Could not load numbering configuration.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const updateConfig = useCallback((module: string, updates: Partial<ModuleNumbering>) => {
-    setConfigs(prev => prev.map(c => c.module === module ? { ...c, ...updates } : c));
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const format = useCallback(
+    (cfg: ModuleNumbering, value: number) =>
+      `${cfg.prefix}${cfg.separator}${String(value).padStart(cfg.padLength, "0")}`,
+    [],
+  );
+
+  const peekNextId = useCallback(
+    (module: string) => {
+      const cfg = configs.find((c) => c.module === module);
+      return cfg ? format(cfg, cfg.nextNumber) : "";
+    },
+    [configs, format],
+  );
+
+  const allocate = useCallback(
+    async (module: string) => {
+      const { reference, value } = await allocateNumber(module);
+      // Keep the local view in step so a preview elsewhere on the page does not
+      // show a number that has just been handed out.
+      setConfigs((prev) =>
+        prev.map((c) =>
+          c.module === module ? { ...c, nextNumber: Math.max(c.nextNumber, value + 1) } : c,
+        ),
+      );
+      return reference;
+    },
+    [],
+  );
+
+  const updateConfig = useCallback(
+    async (module: string, updates: Partial<ModuleNumbering>) => {
+      const previous = configs;
+      setConfigs((prev) =>
+        prev.map((c) => (c.module === module ? { ...c, ...updates } : c)),
+      );
+      try {
+        const saved = await updateNumberingConfig(module, {
+          prefix: updates.prefix,
+          separator: updates.separator,
+          padLength: updates.padLength,
+          nextNumber: updates.nextNumber,
+          description: updates.description,
+        });
+        setConfigs((prev) => prev.map((c) => (c.module === module ? saved : c)));
+      } catch (err) {
+        setConfigs(previous);
+        throw err;
+      }
+    },
+    [configs],
+  );
+
+  const resetConfig = useCallback(async (module: string) => {
+    const saved = await resetNumberingConfig(module);
+    setConfigs((prev) => prev.map((c) => (c.module === module ? saved : c)));
   }, []);
 
-  const resetConfig = useCallback((module: string) => {
-    const def = DEFAULT_CONFIGS.find(c => c.module === module);
-    if (def) updateConfig(module, def);
-  }, [updateConfig]);
-
-  const addConfig = useCallback((cfg: ModuleNumbering) => {
-    setConfigs(prev => prev.some(c => c.module === cfg.module) ? prev : [...prev, cfg]);
+  const addConfig = useCallback(async (cfg: ModuleNumbering) => {
+    const saved = await createNumberingConfig({ app: "shared", ...cfg } as any);
+    setConfigs((prev) =>
+      prev.some((c) => c.module === saved.module) ? prev : [...prev, saved],
+    );
   }, []);
 
-  const removeConfig = useCallback((module: string) => {
-    setConfigs(prev => prev.filter(c => c.module !== module));
+  const removeConfig = useCallback(async (module: string) => {
+    await deleteNumberingConfig(module);
+    setConfigs((prev) => prev.filter((c) => c.module !== module));
   }, []);
 
   return (
-    <NumberingContext.Provider value={{ configs, getNextId, updateConfig, resetConfig, addConfig, removeConfig }}>
+    <NumberingContext.Provider
+      value={{
+        configs,
+        loading,
+        error,
+        reload,
+        allocate,
+        peekNextId,
+        updateConfig,
+        resetConfig,
+        addConfig,
+        removeConfig,
+      }}
+    >
       {children}
     </NumberingContext.Provider>
   );

@@ -1,12 +1,13 @@
-import {
-    Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { MaterialsService } from './materials.service';
+import { AdminExtrasService } from '../admin-extras/admin-extras.service';
 
 @Controller()
 export class MaterialsController {
-    constructor(private readonly svc: MaterialsService) { }
+    constructor(
+        private readonly svc: MaterialsService,
+        private readonly adminExtras: AdminExtrasService,
+    ) { }
 
     // ── Materials ──
     @Get('materials')
@@ -69,8 +70,41 @@ export class MaterialsController {
     getRequest(@Param('id') id: string) { return this.svc.findRequest(id); }
     @Post('material-requests')
     createRequest(@Body() body: any) { return this.svc.createRequest(body); }
+    /**
+     * Status changes to approved/rejected are checked against the Workflow Approval
+     * configuration, and a requester may not decide their own request.
+     *
+     * Hiding the buttons in the UI is not enough on its own — the endpoint was
+     * reachable by anyone who could see the request. Edits that do not change the
+     * decision (notes, an information request) stay open, since those are how a
+     * requester responds.
+     */
     @Patch('material-requests/:id')
-    updateRequest(@Param('id') id: string, @Body() body: any) { return this.svc.updateRequest(id, body); }
+    async updateRequest(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        const status = String(body?.status ?? '').toLowerCase();
+        if (status === 'approved' || status === 'rejected') {
+            const user = req?.user;
+            const identity = {
+                userId: String(user?.sub ?? user?.id ?? ''),
+                name: user?.name,
+                email: user?.email,
+                role: user?.role,
+            };
+            await this.adminExtras.assertMayApprove(identity, 'p_material_requests');
+
+            const existing = await this.svc.findRequest(id).catch(() => null);
+            const raisedBy = String(existing?.requestedBy ?? '').trim().toLowerCase();
+            const mine = [identity.name, identity.email]
+                .map((v) => String(v ?? '').trim().toLowerCase())
+                .filter(Boolean);
+            if (raisedBy && mine.includes(raisedBy)) {
+                throw new ForbiddenException(
+                    'You raised this request, so it must be approved by someone else.',
+                );
+            }
+        }
+        return this.svc.updateRequest(id, body);
+    }
 
     // ── Material Returns ──
     @Get('material-returns')

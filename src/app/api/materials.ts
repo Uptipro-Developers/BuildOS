@@ -34,6 +34,8 @@ export interface MaterialRequest {
     storeName: string; storeId: string; projectName?: string; projectId?: string;
     purpose?: string; priority?: string; status: string;
     requestedBy?: string; approvedBy?: string; requestDate: string;
+    /** When the materials are needed — shown as Due date. ISO string. */
+    neededBy?: string;
     approvedAt?: string; notes?: string;
 }
 export interface MaterialReturn {

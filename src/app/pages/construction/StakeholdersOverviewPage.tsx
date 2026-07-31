@@ -43,7 +43,7 @@ type SortField =
   | "impactLevel";
 
 export function StakeholdersOverviewPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [localStakeholders, setLocalStakeholders] = useState(stakeholders);
@@ -172,10 +172,10 @@ export function StakeholdersOverviewPage() {
     setTimeout(() => setToastMsg(null), 3000);
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     if (!form.name.trim()) return;
     const newStakeholder = {
-      id: getNextId("Stakeholder"),
+      id: await allocate("Stakeholder"),
       projectId: form.projectId,
       name: form.name.trim(),
       organization: form.organization.trim(),

@@ -52,7 +52,7 @@ const emptyForm: Omit<Disbursement, "id"> = {
 };
 
 export function DisbursementsPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { id: projectId } = useParams<{ id: string }>();
   const project = projectId ? getProjectById(projectId) : null;
   const [search, setSearch] = useState("");
@@ -93,10 +93,10 @@ export function DisbursementsPage() {
 
   const totalAmount = list.reduce((s, d) => s + d.amount, 0);
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!form.projectId || !form.amount) return;
     const newEntry: Disbursement = {
-      id: getNextId("Disbursement"),
+      id: await allocate("Disbursement"),
       ...form,
     };
     const { id: _omit, ...payload } = newEntry;

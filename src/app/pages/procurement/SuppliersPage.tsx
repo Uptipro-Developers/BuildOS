@@ -32,6 +32,8 @@ import {
 } from "../../utils/generalSettings";
 
 type SupplierCity = "Lagos" | "Abuja" | "Ibadan" | "Port Harcourt" | "Kano";
+import { getMaterialCategories } from "../../api/admin-extras";
+
 type Category = string;
 
 type Supplier = Awaited<ReturnType<typeof fetchSuppliers>>[number];
@@ -91,6 +93,28 @@ export function SuppliersPage() {
     "overview",
   );
   const [categoryFilter, setCategoryFilter] = useState("All");
+  /**
+   * Supplier categories, from the Storefront settings where an admin maintains
+   * them (Storefront → Settings → Material Categories).
+   *
+   * The Add Supplier form used a hardcoded list ("Concrete & Masonry", "Steel &
+   * Ironmongery", …) that existed only in this file, so a category an admin added
+   * could never be assigned to a supplier, and one they removed stayed on offer.
+   */
+  const [categoryOptions, setCategoryOptions] = useState<Category[]>([]);
+
+  useEffect(() => {
+    getMaterialCategories()
+      .then((data) =>
+        setCategoryOptions(
+          (data ?? []).map((c) => String(c.name).trim()).filter(Boolean),
+        ),
+      )
+      // A failed load leaves the picker empty rather than falling back to the old
+      // hardcoded names, which would silently reintroduce categories the
+      // configuration does not have.
+      .catch(() => setCategoryOptions([]));
+  }, []);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   const [editTarget, setEditTarget] = useState<Supplier | null>(null);
@@ -1030,17 +1054,7 @@ export function SuppliersPage() {
                   Categories
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      "Concrete & Masonry",
-                      "Steel & Ironmongery",
-                      "Electrical",
-                      "Plumbing & MEP",
-                      "Timber & Formwork",
-                      "Finishes",
-                      "Aggregates",
-                    ] as Category[]
-                  ).map((cat) => (
+                  {categoryOptions.map((cat) => (
                     <button
                       key={cat}
                       type="button"

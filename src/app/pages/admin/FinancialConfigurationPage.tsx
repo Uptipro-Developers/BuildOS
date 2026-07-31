@@ -90,6 +90,29 @@ const DEFAULT_PAYMENT_METHODS = [
 
 export function FinancialConfigurationPage() {
   const { configs, updateConfig, resetConfig, addConfig, removeConfig } = useNumbering();
+  /**
+   * Numbering mutations persist to the server now, so they can fail. Without this
+   * a rejected promise from a click handler would surface only as an unhandled
+   * rejection in the console, leaving the row looking saved when it was not.
+   */
+  async function runNumbering(action: Promise<unknown>, success: string) {
+    try {
+      await action;
+      toast.success(success);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the numbering change.",
+      );
+    }
+  }
+
+  async function persistNumbering(
+    module: string,
+    updates: Parameters<typeof updateConfig>[1],
+  ) {
+    await runNumbering(updateConfig(module, updates), `Numbering for ${module} saved.`);
+  }
+
 
   const [chartOfAccounts, setChartOfAccounts] = useState<any[]>(
     DEFAULT_CHART_OF_ACCOUNTS,
@@ -274,7 +297,7 @@ export function FinancialConfigurationPage() {
 
   function saveNumbering() {
     if (numberingForm) {
-      updateConfig(numberingForm.module, numberingForm);
+      void persistNumbering(numberingForm.module, numberingForm);
       setEditingNumbering(null);
       setNumberingForm(null);
     }
@@ -282,7 +305,7 @@ export function FinancialConfigurationPage() {
 
   function saveAddNumbering() {
     if (addForm.module.trim()) {
-      addConfig(addForm);
+      void runNumbering(addConfig(addForm), "Numbering entry added.");
       setShowAddForm(false);
       setAddForm(emptyForm);
     }
@@ -613,9 +636,9 @@ export function FinancialConfigurationPage() {
                     <div className="flex items-center gap-1">
                       <button onClick={() => openNumberingEdit(cfg)} className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg"><Edit className="w-3.5 h-3.5" /></button>
                       {!cfg.module.startsWith("Task") && !cfg.module.startsWith("MyTask") && !cfg.module.startsWith("Role") && (
-                        <button onClick={() => removeConfig(cfg.module)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg" title="Delete entry"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => void runNumbering(removeConfig(cfg.module), "Numbering entry removed.")} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg" title="Delete entry"><Trash2 className="w-3.5 h-3.5" /></button>
                       )}
-                      <button onClick={() => resetConfig(cfg.module)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Reset to default"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => void runNumbering(resetConfig(cfg.module), "Numbering format reset.")} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Reset to default"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   </>
                 )}

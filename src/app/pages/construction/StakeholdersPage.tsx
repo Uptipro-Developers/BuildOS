@@ -142,7 +142,7 @@ function HardHat({ className }: { className?: string }) {
 type SubTab = "register" | "comm-plan" | "engagement" | "visitor";
 
 export function StakeholdersPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { id } = useParams<{ id: string }>();
   const project = getProjectById(id ?? "");
   const [activeTab, setActiveTab] = useState<SubTab>("register");
@@ -260,10 +260,10 @@ export function StakeholdersPage() {
     },
   ];
 
-  function handleAddStakeholder() {
+  async function handleAddStakeholder() {
     if (!addForm.name || !addForm.organization) return;
     const newSh = {
-      id: getNextId("Stakeholder"),
+      id: await allocate("Stakeholder"),
       projectId: id ?? "",
       name: addForm.name,
       organization: addForm.organization,

@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import {
   getPurchaseRequests,
+  updatePurchaseRequest,
+  deletePurchaseRequest,
   PurchaseRequest as ApiPR,
 } from "../../api/procurement-requests";
 import {
@@ -12,8 +15,13 @@ import {
   Send,
   Download,
   Users,
+  Eye,
 } from "lucide-react";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
+import { useApprovalRights } from "../../utils/useApprovalRights";
+import { useAuthUser } from "../../utils/useAuthUser";
+import { toast } from "sonner";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
 import {
@@ -262,15 +270,15 @@ function NewPRModal({
     }
   }
 
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const valid =
     project &&
     mrRef.trim() &&
     items.every((it) => it.material.trim() && it.qty.trim());
 
-  function save() {
+  async function save() {
     if (!valid || !selectedSuppliers.length) return;
-    const id = getNextId("PurchaseRequest");
+    const id = await allocate("PurchaseRequest");
     const total = items.reduce(
       (s, it) =>
         s + parseFloat(it.qty) * parseFloat(it.estimatedUnitCost || "0"),
@@ -637,8 +645,37 @@ export function PurchaseRequestsPage() {
   const [activeTab, setActiveTab] = useState<PRStatus | "all">("all");
   const [showNewPR, setShowNewPR] = useState(false);
   const [sendFor, setSendFor] = useState<PurchaseRequest | null>(null);
+  const [viewPR, setViewPR] = useState<PurchaseRequest | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PurchaseRequest | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [advFilters, setAdvFilters] = useState<ActiveFilters>({});
   const [advSort, setAdvSort] = useState<SortConfig>(null);
+
+  const navigate = useNavigate();
+  const { canApprove } = useApprovalRights();
+  const authUser = useAuthUser();
+  /** Purchase Requests process id from the backend process catalog. */
+  const mayApprovePRs = canApprove("p_purchase_requests");
+
+  /** Deletes the request, then re-reads so the table reflects the database. */
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deletePurchaseRequest(deleteTarget.id);
+      setPrList((prev) => prev.filter((pr) => pr.id !== deleteTarget.id));
+      toast.success(`Purchase request ${deleteTarget.id} deleted.`);
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not delete the purchase request.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const filtered = applyFiltersAndSort(
     prList.filter((pr) => {
@@ -724,30 +761,57 @@ export function PurchaseRequestsPage() {
       label: "Actions",
       sortable: false,
       filterable: false,
+      /**
+       * Every row gets View and Delete; the rest depend on where the request is in
+       * its lifecycle.
+       *
+       * Previously the whole cell was status-conditional, so a draft, cancelled or
+       * po_created row rendered an empty Actions column — four of the seven statuses
+       * showed nothing at all. There was also no way to view or delete a request,
+       * and the PO button had an empty handler.
+       */
       render: (pr) => (
         <div className="flex items-center gap-1">
-          {pr.status === "pending_approval" && (
-            <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  rejectPR(pr.id);
-                }}
-                className="px-2 py-1 text-xs border border-red-200 text-red-700 rounded hover:bg-red-50"
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewPR(pr);
+            }}
+            title="View this request"
+            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+          {pr.status === "pending_approval" &&
+            (mayApprovePRs ? (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    rejectPR(pr.id);
+                  }}
+                  className="px-2 py-1 text-xs border border-red-200 text-red-700 rounded hover:bg-red-50"
+                >
+                  Reject
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    approvePR(pr.id);
+                  }}
+                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                >
+                  Approve
+                </button>
+              </>
+            ) : (
+              <span
+                className="px-2 py-1 text-xs text-gray-400 italic"
+                title="Only the approver configured for Purchase Requests can decide it."
               >
-                Reject
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  approvePR(pr.id);
-                }}
-                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-              >
-                Approve
-              </button>
-            </>
-          )}
+                Awaiting approver
+              </span>
+            ))}
           {pr.status === "approved" && (
             <button
               onClick={(e) => {
@@ -764,47 +828,78 @@ export function PurchaseRequestsPage() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                // Quotes are compared and turned into a PO on Received Quotes,
+                // which is where the supplier responses live.
+                navigate("/apps/procurement/received-quotes");
               }}
+              title="Raise a purchase order from the received quotes"
               className="px-2 py-1 text-xs bg-purple-700 text-white rounded hover:bg-purple-800 flex items-center gap-1"
             >
               <ShoppingCart className="w-3 h-3" /> PO
             </button>
           )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteTarget(pr);
+            }}
+            title="Delete this request"
+            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       ),
     },
   ];
 
-  function approvePR(id: string) {
+  /**
+   * Records a decision on a purchase request.
+   *
+   * Both handlers used to call `setPrList` only, so an approval or rejection lived
+   * in React state and was gone on the next refresh — the table said "Approved"
+   * while the database still said pending. The status is written first and the row
+   * is only updated once the server has accepted it; on failure the table is left
+   * untouched rather than showing a decision that did not persist.
+   */
+  async function decidePR(
+    id: string,
+    status: Extract<PRStatus, "approved" | "cancelled">,
+    action: string,
+  ) {
+    const previous = prList;
     setPrList((prev) =>
-      prev.map((pr) =>
-        pr.id === id ? { ...pr, status: "approved" as PRStatus } : pr,
-      ),
+      prev.map((pr) => (pr.id === id ? { ...pr, status } : pr)),
     );
-    logChange({
-      module: "procurement",
-      action: "approved",
-      entityType: "purchase_request",
-      entityId: id,
-      summary: `Approved PR ${id}`,
-      performedBy: "Amaka Osei",
-    });
+    try {
+      await updatePurchaseRequest(id, { status });
+      logChange({
+        module: "procurement",
+        action,
+        entityType: "purchase_request",
+        entityId: id,
+        summary: `${action === "approved" ? "Approved" : "Rejected"} PR ${id}`,
+        performedBy: authUser.name || "Unknown",
+      });
+      toast.success(
+        `Purchase request ${id} ${status === "approved" ? "approved" : "rejected"}.`,
+      );
+    } catch (err) {
+      setPrList(previous);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not record the decision. Please try again.",
+      );
+    }
+  }
+
+  function approvePR(id: string) {
+    void decidePR(id, "approved", "approved");
   }
 
   function rejectPR(id: string) {
-    setPrList((prev) =>
-      prev.map((pr) =>
-        pr.id === id ? { ...pr, status: "cancelled" as PRStatus } : pr,
-      ),
-    );
-    logChange({
-      module: "procurement",
-      action: "rejected",
-      entityType: "purchase_request",
-      entityId: id,
-      summary: `Rejected PR ${id}`,
-      performedBy: "Amaka Osei",
-    });
+    void decidePR(id, "cancelled", "rejected");
   }
 
   function sendToSuppliers(id: string) {
@@ -971,6 +1066,107 @@ export function PurchaseRequestsPage() {
           onSend={() => sendToSuppliers(sendFor.id)}
         />
       )}
+
+      {viewPR && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">
+                  {viewPR.id}
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {viewPR.project} · raised by {viewPR.raisedBy}
+                </p>
+              </div>
+              <button
+                onClick={() => setViewPR(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-xs text-gray-500">Material request</p>
+                  <p className="text-gray-900">{viewPR.materialRequestRef}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Procurement type</p>
+                  <p className="text-gray-900 uppercase">
+                    {viewPR.procurementType}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Raised</p>
+                  <p className="text-gray-900">{viewPR.raisedDate}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Required by</p>
+                  <p className="text-gray-900">{viewPR.requiredDate}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">
+                  Items ({viewPR.totalItems})
+                </p>
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">
+                          Material
+                        </th>
+                        <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">
+                          Qty
+                        </th>
+                        <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">
+                          Unit
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {viewPR.items.map((it, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-2 text-gray-700">
+                            {it.material}
+                          </td>
+                          <td className="px-3 py-2 text-gray-700">{it.qty}</td>
+                          <td className="px-3 py-2 text-gray-500">{it.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end px-6 py-4 border-t border-gray-100">
+              <button
+                onClick={() => setViewPR(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title="Delete purchase request"
+        description={
+          deleteTarget
+            ? `Delete ${deleteTarget.id} for ${deleteTarget.project}? This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

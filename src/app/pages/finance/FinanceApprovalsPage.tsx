@@ -26,6 +26,12 @@ interface FinApproval {
   status: ApprovalStatus;
   urgency: "normal" | "urgent";
   description: string;
+  /**
+   * Stamped by the server from the Workflow Approval configuration: whether the
+   * signed-in user may decide this item, and whether they raised it.
+   */
+  canApprove?: boolean;
+  isRequester?: boolean;
 }
 
 const statusConfig: Record<
@@ -268,7 +274,19 @@ export function FinanceApprovalsPage() {
                   <p className="text-sm text-gray-600 mt-3 mb-4">
                     {a.description}
                   </p>
-                  {isPending && (
+                  {/* Approval controls follow the Workflow Approval
+                      configuration: the server stamps each row with whether
+                      this user may decide it. Module queues list the whole
+                      company's items, so without this every row offered
+                      Approve and Reject to anyone who could open the page. */}
+                  {isPending && !a.canApprove && (
+                    <p className="px-0 pb-1 text-xs text-gray-400 italic">
+                      {a.isRequester
+                        ? "You raised this, so it must be approved by someone else."
+                        : "Only the approver configured for this process can decide it."}
+                    </p>
+                  )}
+                  {isPending && a.canApprove && (
                     <div className="flex items-center gap-3">
                       <button
                         onClick={(e) => {

@@ -100,7 +100,7 @@ function NewPostingModal({
   onClose: () => void;
   onSave: (p: ScheduledPosting) => void;
 }) {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const today = formatDateByGeneralSettings(new Date());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -122,10 +122,10 @@ function NewPostingModal({
     debitAccount !== creditAccount &&
     (scheduleType !== "scheduled" || scheduledDate);
 
-  function save() {
+  async function save() {
     if (!valid) return;
     onSave({
-      id: getNextId("ScheduledPosting"),
+      id: await allocate("ScheduledPosting"),
       description: description.trim(),
       amount: parseFloat(amount),
       debitAccount,

@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useApprovalRights } from "../../utils/useApprovalRights";
+import { useAuthUser } from "../../utils/useAuthUser";
 import {
   getMaterialRequests,
   createMaterialRequest,
@@ -53,7 +55,10 @@ type LocalMR = {
   status: ReqStatus;
   priority: "urgent" | "high" | "normal";
   submittedDate: string;
+  /** Display string, formatted to the org's date settings. */
   neededBy: string;
+  /** The same date as ISO, which is what gets persisted. */
+  neededByIso?: string;
   totalItems: number;
   justification: string;
   /** Fulfilling store — required by the backend MaterialRequest model. */
@@ -95,7 +100,9 @@ function fromApiMR(r: ApiMR): LocalMR {
     submittedDate: r.requestDate
       ? formatDateByGeneralSettings(r.requestDate)
       : "",
-    neededBy: "",
+    // Rendered from the stored column. This was hardcoded to "" because the
+    // field did not exist server-side, so the Due date went blank on reload.
+    neededBy: r.neededBy ? formatDateByGeneralSettings(r.neededBy) : "",
     totalItems: 1,
     justification: r.purpose ?? r.notes ?? "",
     items: [
@@ -248,9 +255,32 @@ function NewMRModal({
     d2.setDate(d2.getDate() + n);
     return fmtDate(d2);
   };
+  /**
+   * The same date as an ISO string, for storing.
+   * `addDays` returns a display string formatted to the org's date settings, which
+   * is not parseable back into a date — so the value that goes to the server has
+   * to be computed separately.
+   */
+  const addDaysIso = (n: number) => {
+    const d2 = new Date(today);
+    d2.setDate(d2.getDate() + n);
+    d2.setHours(0, 0, 0, 0);
+    return d2.toISOString();
+  };
 
   const [projects, setProjects] = useState<string[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
+  /**
+   * The material catalogue, for the Materials Requested picker.
+   *
+   * This was a free-text input, so a requester could type a material that does not
+   * exist — or a spelling of one that does — and nothing downstream could match it
+   * to stock. Choosing from the catalogue also fills the unit, which the requester
+   * previously had to guess.
+   */
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
   // MaterialRequest.storeName is required by the backend, so the fulfilling
   // store has to be captured here rather than defaulted server-side.
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
@@ -276,6 +306,11 @@ function NewMRModal({
         setDepartments(departmentNames);
         setProject((prev) => prev || projectNames[0] || "");
         setDepartment((prev) => prev || departmentNames[0] || "");
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
+        );
       })
       .catch(() => {});
     getStores()
@@ -296,7 +331,7 @@ function NewMRModal({
     setItems((p) => p.filter((_, j) => j !== i));
   const updateItem = (i: number, k: keyof MRItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const valid =
     project &&
     storeId &&
@@ -306,7 +341,7 @@ function NewMRModal({
   async function handleSave() {
     if (!valid || submitting) return;
     setSubmitting(true);
-    const nextId = getNextId("MaterialRequest");
+    const nextId = await allocate("MaterialRequest");
     try {
       await onSave({
         id: nextId,
@@ -321,6 +356,7 @@ function NewMRModal({
         priority,
         submittedDate: fmtDate(today),
         neededBy: addDays(parseInt(neededDays) || 5),
+        neededByIso: addDaysIso(parseInt(neededDays) || 5),
         totalItems: items.length,
         justification: justification.trim(),
         items: items.map((it) => ({
@@ -423,7 +459,7 @@ function NewMRModal({
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <p className="text-xs text-gray-400 mt-0.5">
-                Needed by: {addDays(parseInt(neededDays) || 5)}
+                Due date: {addDays(parseInt(neededDays) || 5)}
               </p>
             </div>
           </div>
@@ -457,12 +493,29 @@ function NewMRModal({
                   key={i}
                   className="grid grid-cols-[1fr_60px_80px_60px_1fr_28px] gap-1.5 items-center"
                 >
-                  <input
+                  <select
                     value={item.material}
-                    onChange={(e) => updateItem(i, "material", e.target.value)}
-                    placeholder="Material name"
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      updateItem(i, "material", name);
+                      // Adopt the catalogue's unit for the chosen material, so the
+                      // request is raised in the unit the material is stocked in.
+                      const chosen = materialOptions.find((m) => m.name === name);
+                      if (chosen?.unit) updateItem(i, "unit", chosen.unit);
+                    }}
+                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      {materialOptions.length === 0
+                        ? "No materials in the catalogue"
+                        : "Select material…"}
+                    </option>
+                    {materialOptions.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="number"
                     value={item.qty}
@@ -587,6 +640,80 @@ function RejectMRModal({
   );
 }
 
+/**
+ * Sends the requester a question without deciding the request.
+ *
+ * The "Request More Info" button had no handler at all. The request deliberately
+ * stays pending — asking for detail is not an approval or a rejection — and the
+ * question is appended to the request's notes so it travels with the record
+ * rather than living only in the approver's head.
+ */
+function MoreInfoMRModal({
+  req,
+  onClose,
+  onDone,
+}: {
+  req: LocalMR;
+  onClose: () => void;
+  onDone: (question: string) => void;
+}) {
+  const [question, setQuestion] = useState("");
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-900">
+            Request More Information
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm">
+            <span className="font-medium text-blue-800">{req.id}</span> ·{" "}
+            <span className="text-blue-700">{req.project}</span>
+            <p className="text-xs text-blue-700/80 mt-1">
+              Raised by {req.requestedBy}. The request stays pending.
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              What do you need to know?{" "}
+              <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              rows={4}
+              placeholder="e.g. Confirm the required grade and whether site delivery is needed…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => question.trim() && onDone(question.trim())}
+            disabled={!question.trim()}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Send Request
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RaisePRModal({
   req,
   onClose,
@@ -599,7 +726,7 @@ function RaisePRModal({
   const [procType, setProcType] = useState<"direct" | "rfq">("direct");
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
 
   useEffect(() => {
     getReferenceData()
@@ -621,9 +748,9 @@ function RaisePRModal({
     }
   }
 
-  function submit() {
+  async function submit() {
     if (!selected.length) return;
-    const prId = getNextId("PurchaseRequest");
+    const prId = await allocate("PurchaseRequest");
     onDone(prId, procType, selected);
     onClose();
   }
@@ -650,7 +777,7 @@ function RaisePRModal({
               <span className="font-semibold text-blue-800">{req.id}</span>
               <span className="text-blue-600 ml-2">· {req.project}</span>
               <p className="text-xs text-blue-500 mt-0.5">
-                {req.totalItems} item{req.totalItems > 1 ? "s" : ""} · Needed by{" "}
+                {req.totalItems} item{req.totalItems > 1 ? "s" : ""} · Due date{" "}
                 {req.neededBy}
               </p>
             </div>
@@ -792,6 +919,26 @@ export function MaterialRequestsPage() {
   const [advSort, setAdvSort] = useState<SortConfig>(null);
   const [showNewMR, setShowNewMR] = useState(false);
   const [rejectReq, setRejectReq] = useState<LocalMR | null>(null);
+  const [moreInfoReq, setMoreInfoReq] = useState<LocalMR | null>(null);
+
+  const { canApprove } = useApprovalRights();
+  const authUser = useAuthUser();
+  /** Material Requests process id from the backend process catalog. */
+  const mayApproveRequests = canApprove("p_material_requests");
+
+  /**
+   * Whether the signed-in user raised this request.
+   *
+   * `requestedBy` stores a display name, so match on name and fall back to email —
+   * the same shapes the workflow configuration is written in.
+   */
+  function isOwnRequest(req: LocalMR) {
+    const mine = [authUser.name, authUser.email]
+      .map((v) => String(v ?? "").trim().toLowerCase())
+      .filter(Boolean);
+    const raisedBy = String(req.requestedBy ?? "").trim().toLowerCase();
+    return Boolean(raisedBy) && mine.includes(raisedBy);
+  }
 
   function loadRequests() {
     return getMaterialRequests()
@@ -956,7 +1103,7 @@ export function MaterialRequestsPage() {
                     Submitted: {req.submittedDate}
                   </p>
                   <p className="text-xs font-medium text-gray-700 mt-0.5">
-                    Needed by: {req.neededBy}
+                    Due date: {req.neededBy}
                   </p>
                 </div>
                 {isExpanded ? (
@@ -1007,7 +1154,7 @@ export function MaterialRequestsPage() {
                           </div>
                           <div className="flex gap-4">
                             <span className="text-gray-500 w-24">
-                              Needed by
+                              Due date
                             </span>
                             <span className="font-medium text-gray-900">
                               {req.neededBy}
@@ -1071,25 +1218,39 @@ export function MaterialRequestsPage() {
                         </tbody>
                       </table>
                     </div>
-                    {req.status === "pending" && (
-                      <div className="flex gap-2 mt-4 justify-end">
-                        <button
-                          onClick={() => setRejectReq(req)}
-                          className="px-4 py-2 text-sm border border-red-200 text-red-700 rounded-md hover:bg-red-50"
-                        >
-                          Reject
-                        </button>
-                        <button className="px-4 py-2 text-sm border border-blue-200 text-blue-700 rounded-md hover:bg-blue-50">
-                          Request More Info
-                        </button>
-                        <button
-                          onClick={() => persistStatus(req, "approved")}
-                          className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700"
-                        >
-                          Approve Request
-                        </button>
-                      </div>
-                    )}
+                    {/* Approval controls appear only for a configured approver on
+                        this process, and never for the person who raised the
+                        request. Previously every viewer saw Approve and Reject, so
+                        a requester could approve their own request. */}
+                    {req.status === "pending" &&
+                      (mayApproveRequests && !isOwnRequest(req) ? (
+                        <div className="flex gap-2 mt-4 justify-end">
+                          <button
+                            onClick={() => setRejectReq(req)}
+                            className="px-4 py-2 text-sm border border-red-200 text-red-700 rounded-md hover:bg-red-50"
+                          >
+                            Reject
+                          </button>
+                          <button
+                            onClick={() => setMoreInfoReq(req)}
+                            className="px-4 py-2 text-sm border border-blue-200 text-blue-700 rounded-md hover:bg-blue-50"
+                          >
+                            Request More Info
+                          </button>
+                          <button
+                            onClick={() => persistStatus(req, "approved")}
+                            className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700"
+                          >
+                            Approve Request
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-xs text-gray-400 italic text-right">
+                          {isOwnRequest(req)
+                            ? "You raised this request, so it must be approved by someone else."
+                            : "Awaiting approval from the approver configured for Material Requests."}
+                        </p>
+                      ))}
                     {req.status === "approved" && (
                       <div className="flex gap-2 mt-4 justify-end">
                         <button
@@ -1142,6 +1303,7 @@ export function MaterialRequestsPage() {
                     status: "pending",
                     requestedBy: req.requestedBy,
                     requestDate: new Date().toISOString(),
+                    neededBy: req.neededByIso,
                     notes: item.notes || undefined,
                   }),
                 ),
@@ -1156,6 +1318,32 @@ export function MaterialRequestsPage() {
                 error instanceof Error
                   ? error.message
                   : "Failed to submit the material request.",
+              );
+            }
+          }}
+        />
+      )}
+      {moreInfoReq && (
+        <MoreInfoMRModal
+          req={moreInfoReq}
+          onClose={() => setMoreInfoReq(null)}
+          onDone={async (question) => {
+            const target = moreInfoReq;
+            setMoreInfoReq(null);
+            try {
+              const asked = `Info requested by ${authUser.name || "approver"}: ${question}`;
+              await Promise.all(
+                target.apiIds.map((id) =>
+                  updateMaterialRequest(id, { notes: asked }),
+                ),
+              );
+              await loadRequests();
+              toast.success(`Sent your question to ${target.requestedBy}.`);
+            } catch (error) {
+              toast.error(
+                error instanceof Error
+                  ? error.message
+                  : "Could not send the information request.",
               );
             }
           }}

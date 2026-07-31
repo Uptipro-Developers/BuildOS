@@ -225,7 +225,7 @@ function RecordDocModal({
   const updateItem = (i: number, k: keyof DocItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
 
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const totalAmount = items.reduce(
     (s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.unitPrice) || 0),
     0,
@@ -236,10 +236,9 @@ function RecordDocModal({
       (it) => it.material.trim() && it.qty.trim() && it.unitPrice.trim(),
     );
 
-  function handleSave() {
+  async function handleSave() {
     if (!valid) return;
-    const nextId =
-      docType === "quote" ? getNextId("Quote") : getNextId("PurchaseInvoice");
+    const nextId = await allocate(docType === "quote" ? "Quote" : "PurchaseInvoice");
     const selectedStore = stores.find((s) => s.name === destinationStore);
     onSave({
       id: nextId,
@@ -740,7 +739,7 @@ function CreatePOFromQuoteModal({
   onClose: () => void;
   onDone: (id: string) => void;
 }) {
-  const { getNextId } = useNumbering();
+  const { allocate, peekNextId } = useNumbering();
   const fmt = (n: number) => {
     const symbol = getCurrencySymbol();
     return n >= 1_000_000
@@ -797,10 +796,13 @@ function CreatePOFromQuoteModal({
   const [supplierContact, setSupplierContact] = useState(defaultContact);
   const [notes, setNotes] = useState("");
 
-  const nextPO = getNextId("PurchaseOrder");
+  // Preview only. This used to call getNextId during render, which consumed a
+  // sequence number on every re-render — typing in any field above burned PO
+  // numbers. The real reference is taken once, when the PO is confirmed.
+  const nextPO = peekNextId("PurchaseOrder");
 
-  function handleCreate() {
-    onDone(nextPO);
+  async function handleCreate() {
+    onDone(await allocate("PurchaseOrder"));
   }
 
   return (

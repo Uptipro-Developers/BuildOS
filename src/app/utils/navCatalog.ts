@@ -104,7 +104,7 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/procurement/dashboard", label: "Dashboard", section: "" },
     { id: "/apps/procurement/tasks", label: "Tasks", section: "Tasks" },
     { id: "/apps/procurement/my-tasks", label: "My Tasks", section: "Tasks" },
-    { id: "/apps/procurement/inventory", label: "Inventory Overview", section: "Inventory" },
+    { id: "/apps/procurement/inventory", label: "All Materials", section: "Inventory" },
     { id: "/apps/procurement/stock-movement", label: "Stock Movement", section: "Inventory" },
     { id: "/apps/procurement/material-requests", label: "Material Requests", section: "Requests" },
     { id: "/apps/procurement/purchase-requests", label: "Purchase Requests", section: "Requests" },
@@ -116,7 +116,7 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/procurement/supplier-compliance", label: "Supplier Compliance", section: "Suppliers" },
     { id: "/apps/procurement/approvals", label: "Approvals", section: "Management" },
     { id: "/apps/procurement/reports", label: "Reports", section: "Reports" },
-    { id: "/apps/procurement/config", label: "Configuration", section: "Settings" },
+    { id: "/apps/procurement/config", label: "Settings", section: "Settings" },
   ],
   storefront: [
     { id: "/apps/storefront/dashboard", label: "Dashboard", section: "" },

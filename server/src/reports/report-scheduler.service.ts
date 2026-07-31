@@ -25,6 +25,12 @@ interface ReportSchedule {
     module?: string;
     frequency: Frequency;
     sendTime?: string;
+    /**
+     * Anchor day. Weekday 0–6 (Sunday–Saturday) for Weekly; day of month 1–31 for
+     * Monthly and Quarterly. Undefined keeps the older behaviour of firing on the
+     * first send time after the interval elapses.
+     */
+    sendDay?: number;
     recipients: string;
     enabled: boolean;
     lastSent?: string | null;
@@ -126,6 +132,130 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    /**
+     * The offset of `timeZone` from UTC at a given instant, in milliseconds.
+     *
+     * Derived by formatting the instant in the zone and reading the result back as
+     * if it were UTC. This is the standard way to do zone maths without a date
+     * library, and it handles DST because the offset is resolved per instant.
+     */
+    private zoneOffsetMs(at: Date, timeZone: string): number {
+        try {
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone,
+                hour12: false,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+            })
+                .formatToParts(at)
+                .reduce<Record<string, string>>((acc, part) => {
+                    acc[part.type] = part.value;
+                    return acc;
+                }, {});
+            const asUtc = Date.UTC(
+                Number(parts.year),
+                Number(parts.month) - 1,
+                Number(parts.day),
+                Number(parts.hour) % 24,
+                Number(parts.minute),
+                Number(parts.second),
+            );
+            return asUtc - at.getTime();
+        } catch {
+            // An unknown zone name must not stop delivery; fall back to UTC.
+            return 0;
+        }
+    }
+
+    /** Calendar fields of `at` as seen in `timeZone`. */
+    private zonedFields(at: Date, timeZone: string) {
+        const shifted = new Date(at.getTime() + this.zoneOffsetMs(at, timeZone));
+        return {
+            year: shifted.getUTCFullYear(),
+            month: shifted.getUTCMonth() + 1,
+            day: shifted.getUTCDate(),
+            weekday: shifted.getUTCDay(),
+        };
+    }
+
+    /** The instant of a wall-clock date and time in `timeZone`. */
+    private zonedInstant(
+        year: number,
+        month: number,
+        day: number,
+        hours: number,
+        minutes: number,
+        timeZone: string,
+    ): Date {
+        const guess = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
+        // Correct by the offset that actually applies at that instant.
+        const offset = this.zoneOffsetMs(new Date(guess), timeZone);
+        return new Date(guess - offset);
+    }
+
+    /** Days in a month, so a day-of-month anchor past the end clamps to it. */
+    private daysInMonth(year: number, month: number): number {
+        return new Date(Date.UTC(year, month, 0)).getUTCDate();
+    }
+
+    /**
+     * The most recent moment this schedule was due, at or before `now`.
+     *
+     * Anchored to the organisation's timezone rather than the server's, so an 08:00
+     * daily report goes out at 08:00 in Lagos and not 08:00 UTC. Weekly anchors on
+     * `sendDay` as a weekday; Monthly and Quarterly anchor on it as a day of month,
+     * clamped to the month's length so 31 still fires in February.
+     */
+    private mostRecentSlot(
+        schedule: ReportSchedule,
+        now: Date,
+        time: { hours: number; minutes: number },
+        timeZone: string,
+    ): Date {
+        const today = this.zonedFields(now, timeZone);
+        const at = (y: number, m: number, d: number) =>
+            this.zonedInstant(y, m, d, time.hours, time.minutes, timeZone);
+
+        if (schedule.frequency === 'Weekly' && Number.isInteger(schedule.sendDay)) {
+            const target = ((schedule.sendDay as number) % 7 + 7) % 7;
+            // How many days back the target weekday last occurred.
+            let back = (today.weekday - target + 7) % 7;
+            let slot = at(today.year, today.month, today.day - back);
+            if (slot.getTime() > now.getTime()) {
+                back += 7;
+                slot = at(today.year, today.month, today.day - back);
+            }
+            return slot;
+        }
+
+        if (
+            (schedule.frequency === 'Monthly' || schedule.frequency === 'Quarterly') &&
+            Number.isInteger(schedule.sendDay)
+        ) {
+            const wanted = Math.min(Math.max(schedule.sendDay as number, 1), 31);
+            const thisMonth = at(
+                today.year,
+                today.month,
+                Math.min(wanted, this.daysInMonth(today.year, today.month)),
+            );
+            if (thisMonth.getTime() <= now.getTime()) return thisMonth;
+            // Not reached yet this month — the previous month's occurrence stands.
+            const prevMonth = today.month === 1 ? 12 : today.month - 1;
+            const prevYear = today.month === 1 ? today.year - 1 : today.year;
+            return at(prevYear, prevMonth, Math.min(wanted, this.daysInMonth(prevYear, prevMonth)));
+        }
+
+        // Daily, or a longer frequency with no anchor: the most recent send time.
+        const todaySlot = at(today.year, today.month, today.day);
+        return todaySlot.getTime() <= now.getTime()
+            ? todaySlot
+            : at(today.year, today.month, today.day - 1);
+    }
+
     /** Parses "HH:MM" into hours and minutes, or null if unusable. */
     private parseSendTime(value?: string): { hours: number; minutes: number } | null {
         const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? '').trim());
@@ -139,23 +269,18 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
     /**
      * Whether a schedule is due.
      *
-     * `sendTime` used to be ignored entirely: due-ness was purely "has one
-     * interval elapsed since lastSent", so a Daily 08:00 report went out at
-     * whatever time of day the tick happened to land on — and after a manual
-     * "Send now" it drifted to that moment instead. The configured time was
-     * decorative.
+     * `sendTime` used to be ignored entirely: due-ness was purely "has one interval
+     * elapsed since lastSent", so a Daily 08:00 report went out at whatever time of
+     * day the tick landed on — and after a manual "Send now" it drifted to that
+     * moment instead. The configured time was decorative.
      *
-     * Now the day's send time is the anchor. A schedule is due when the most
-     * recent occurrence of `sendTime` is newer than its last send, which makes a
-     * missed window catch up on the following tick rather than being skipped.
-     *
-     * KNOWN LIMITATION: `sendTime` is interpreted in the server's timezone (UTC on
-     * Railway), not the organisation's configured timezone, so 08:00 fires at
-     * 08:00 UTC. Weekly/Monthly/Quarterly have no weekday or day-of-month field to
-     * anchor to, so they additionally require the full interval to have elapsed
-     * and land on the first send time after it.
+     * Now the schedule's own send moment is the anchor, resolved in the
+     * organisation's timezone (Admin → General Settings) rather than the server's,
+     * which on Railway is UTC. A schedule is due when its most recent send moment is
+     * newer than its last send, so a window missed by a restart or a slow deploy
+     * catches up on the following tick rather than being skipped.
      */
-    private isDue(schedule: ReportSchedule, now: Date): boolean {
+    private isDue(schedule: ReportSchedule, now: Date, timeZone: string): boolean {
         if (!schedule.enabled) return false;
         if (!schedule.recipients?.trim()) return false;
 
@@ -167,20 +292,22 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
 
         // Hourly has no meaningful time of day, and a schedule saved without a
         // usable sendTime keeps the old elapsed-interval behaviour rather than
-        // never firing.
+        // never firing at all.
         if (!time || schedule.frequency === 'Hourly') {
             return !last || now.getTime() - last.getTime() >= interval;
         }
 
-        // The most recent occurrence of sendTime, which is always in the past.
-        const slot = new Date(now);
-        slot.setHours(time.hours, time.minutes, 0, 0);
-        if (slot.getTime() > now.getTime()) slot.setDate(slot.getDate() - 1);
+        const slot = this.mostRecentSlot(schedule, now, time, timeZone);
+        const anchored =
+            Number.isInteger(schedule.sendDay) &&
+            (schedule.frequency === 'Weekly' ||
+                schedule.frequency === 'Monthly' ||
+                schedule.frequency === 'Quarterly');
 
         if (!last) {
-            // First run waits for a send time that falls after the schedule was
-            // created, so creating a 08:00 daily at 10:00 delivers tomorrow at
-            // 08:00 rather than within five minutes of being saved.
+            // First run waits for a send moment that falls after the schedule was
+            // created, so creating an 08:00 daily at 10:00 delivers tomorrow at
+            // 08:00 rather than within minutes of being saved.
             const createdRaw = schedule.createdAt ? new Date(schedule.createdAt) : null;
             const created =
                 createdRaw && !Number.isNaN(createdRaw.getTime()) ? createdRaw : null;
@@ -190,9 +317,12 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
         // Nothing new has come around since the last send.
         if (last.getTime() >= slot.getTime()) return false;
 
-        // Daily is governed by the slot alone; longer frequencies also need their
-        // interval to have elapsed.
+        // Daily is governed by the slot alone, and so is an anchored Weekly or
+        // Monthly — the anchor only comes around once per period. Quarterly shares
+        // the monthly anchor, so it still needs the interval to tell one quarter from
+        // the following month. Unanchored longer frequencies keep the interval test.
         if (schedule.frequency === 'Daily') return true;
+        if (anchored && schedule.frequency !== 'Quarterly') return true;
         return now.getTime() - last.getTime() >= interval;
     }
 
@@ -262,7 +392,11 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
             if (schedules.length === 0) return;
 
             const now = new Date();
-            const due = schedules.filter((s) => this.isDue(s, now));
+            // The organisation's timezone lives in the same settings row, so this
+            // costs nothing extra to read.
+            const timeZone =
+                String(settings?.generalSettings?.timezone ?? '').trim() || 'UTC';
+            const due = schedules.filter((s) => this.isDue(s, now, timeZone));
             if (due.length === 0) return;
 
             let changed = false;

@@ -79,7 +79,7 @@ const emptyForm = {
 };
 
 export function IssuesPage() {
-  const { getNextId } = useNumbering();
+  const { allocate } = useNumbering();
   const { id } = useParams();
   const project = id ? getProjectById(id) : undefined;
   const [issues, setIssues] = useState<Issue[]>(() =>
@@ -156,7 +156,7 @@ export function IssuesPage() {
   async function handleLogIssue() {
     if (!form.title.trim()) return;
     const newIssue: Issue = {
-      id: getNextId("Issue"),
+      id: await allocate("Issue"),
       projectId: id!,
       issueNumber: `ISS-${String(issues.length + 1043).padStart(4, "0")}`,
       dateRaised: new Date().toISOString().slice(0, 10),
