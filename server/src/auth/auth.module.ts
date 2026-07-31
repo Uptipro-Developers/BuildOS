@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { ServiceKeyService } from './service-key.service';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
@@ -18,7 +19,9 @@ import { PrismaModule } from '../prisma/prisma.module';
         }),
     ],
     controllers: [AuthController],
-    providers: [AuthService],
-    exports: [AuthService, JwtModule],
+    providers: [AuthService, ServiceKeyService],
+    // ServiceKeyService is exported so the globally-registered JwtAuthGuard,
+    // whose APP_GUARD provider is resolved in AppModule's context, can inject it.
+    exports: [AuthService, ServiceKeyService, JwtModule],
 })
 export class AuthModule { }

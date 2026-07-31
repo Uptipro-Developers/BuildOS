@@ -1,11 +1,23 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import axios, { AxiosError } from 'axios';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
+import { WebhookDeliveryQueue } from './webhook-delivery.queue';
+
+/** Context passed by the BullMQ worker so terminal failure can be recorded once. */
+export interface DeliveryAttemptContext {
+  attempt: number;
+  isFinalAttempt: boolean;
+}
 
 @Injectable()
 export class WebhookService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(WebhookService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private deliveryQueue: WebhookDeliveryQueue,
+  ) {}
 
   /**
    * Register webhook endpoint
@@ -68,7 +80,11 @@ export class WebhookService {
   }
 
   /**
-   * Trigger webhook for event
+   * Trigger webhook for event.
+   *
+   * Deliveries are handed to the BullMQ queue so a transient failure retries
+   * with backoff instead of being dropped. When Redis is not configured the
+   * queue is absent and delivery happens inline, preserving prior behaviour.
    */
   async triggerWebhook(event: string, data: any) {
     const webhooks = await this.prisma.webhook.findMany({
@@ -79,37 +95,86 @@ export class WebhookService {
 
     for (const webhook of webhooks) {
       // Check if webhook should be triggered for this event
-      if (webhook.event === '*' || webhook.event === event) {
-        try {
-          await this.sendWebhookRequest(webhook, event, data);
-          triggeredWebhooks.push({
-            webhookId: webhook.id,
-            status: 'sent',
-          });
-        } catch (error: any) {
-          // Increment retry count
-          const retryCount = (webhook.retryCount || 0) + 1;
-          await this.prisma.webhook.update({
-            where: { id: webhook.id },
-            data: {
-              retryCount,
-              lastError: error.message,
-              // Disable after maxRetries failures
-              isActive: retryCount < webhook.maxRetries,
-            },
-          });
+      if (webhook.event !== '*' && webhook.event !== event) continue;
 
+      const attempts = Math.max(1, webhook.maxRetries || 1);
+      const { queued } = await this.deliveryQueue.enqueue(
+        { webhookId: webhook.id, event, data },
+        attempts,
+      );
 
-          triggeredWebhooks.push({
-            webhookId: webhook.id,
-            status: 'failed',
-            error: error.message,
-          });
-        }
+      if (queued) {
+        triggeredWebhooks.push({ webhookId: webhook.id, status: 'queued' });
+        continue;
+      }
+
+      // Inline fallback — single attempt, no retry available without a queue.
+      try {
+        await this.deliverWebhook(webhook.id, event, data, {
+          attempt: 1,
+          isFinalAttempt: true,
+        });
+        triggeredWebhooks.push({ webhookId: webhook.id, status: 'sent' });
+      } catch (error: any) {
+        triggeredWebhooks.push({
+          webhookId: webhook.id,
+          status: 'failed',
+          error: error.message,
+        });
       }
     }
 
     return triggeredWebhooks;
+  }
+
+  /**
+   * Deliver one webhook and record the outcome.
+   *
+   * Called by the BullMQ worker, and directly by triggerWebhook when no queue
+   * is available. Throws on failure so the worker can apply its retry policy;
+   * the webhook row is only marked failed/inactive on the final attempt, so a
+   * recoverable blip no longer deactivates an endpoint.
+   */
+  async deliverWebhook(
+    webhookId: string,
+    event: string,
+    data: unknown,
+    context: DeliveryAttemptContext,
+  ): Promise<void> {
+    const webhook = await this.prisma.webhook.findUnique({ where: { id: webhookId } });
+    if (!webhook) {
+      // The endpoint was deleted after the job was queued — nothing to do, and
+      // retrying cannot help.
+      this.logger.warn(`Webhook ${webhookId} no longer exists; dropping ${event} delivery`);
+      return;
+    }
+
+    try {
+      await this.sendWebhookRequest(webhook, event, data, context.attempt);
+
+      // Reset failure state on success.
+      if (webhook.retryCount > 0 || !webhook.isActive) {
+        await this.prisma.webhook.update({
+          where: { id: webhook.id },
+          data: { retryCount: 0, isActive: true, lastError: null },
+        });
+      }
+    } catch (error: any) {
+      if (context.isFinalAttempt) {
+        const retryCount = (webhook.retryCount || 0) + 1;
+        await this.prisma.webhook.update({
+          where: { id: webhook.id },
+          data: {
+            retryCount,
+            lastError: error.message,
+            // Only give up once this endpoint has exhausted its allowance
+            // across separate events, not within one event's retries.
+            isActive: retryCount < webhook.maxRetries,
+          },
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -136,9 +201,18 @@ export class WebhookService {
       throw new BadRequestException('Delivery not found');
     }
 
-    const payload = JSON.parse(delivery.payload as string);
+    const stored =
+      typeof delivery.payload === 'string'
+        ? JSON.parse(delivery.payload)
+        : (delivery.payload as any);
+
     try {
-      await this.sendWebhookRequest(delivery.webhook, delivery.event, payload);
+      await this.sendWebhookRequest(
+        delivery.webhook,
+        delivery.event,
+        stored?.data ?? stored,
+        delivery.attemptCount + 1,
+      );
 
       return this.prisma.webhookDelivery.update({
         where: { id: deliveryId },
@@ -217,14 +291,13 @@ export class WebhookService {
       throw new BadRequestException('Webhook not found');
     }
 
-    const testPayload = {
-      event: 'test',
-      timestamp: new Date(),
-      data: { message: 'This is a test webhook' },
-    };
-
     try {
-      await this.sendWebhookRequest(webhook, 'test', testPayload.data);
+      await this.sendWebhookRequest(
+        webhook,
+        'test',
+        { message: 'This is a test webhook' },
+        1,
+      );
       return { success: true, message: 'Webhook test successful' };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -233,23 +306,33 @@ export class WebhookService {
 
   // ── Helper Methods ──
 
-  private async sendWebhookRequest(webhook: any, event: string, data: any) {
+  private async sendWebhookRequest(
+    webhook: any,
+    event: string,
+    data: unknown,
+    attemptCount: number,
+  ) {
+    const timestamp = new Date().toISOString();
+    const payload = { event, timestamp, data };
+
+    // The signature must cover the exact bytes the receiver reads, so the body
+    // is serialised once here and posted as a pre-encoded string. Letting axios
+    // re-serialise an object could change key order or spacing and would make
+    // the signature unverifiable.
+    const body = JSON.stringify(payload);
+    const signature = this.signPayload(webhook.secret, timestamp, body);
+
     const headers = webhook.headers ? JSON.parse(webhook.headers as string) : {};
     headers['Content-Type'] = 'application/json';
     headers['X-Webhook-Event'] = event;
-    headers['X-Webhook-Secret'] = webhook.secret;
-    headers['X-Webhook-Timestamp'] = new Date().toISOString();
-
-    const payload = {
-      event,
-      timestamp: new Date(),
-      data,
-    };
+    headers['X-BuildOS-Timestamp'] = timestamp;
+    headers['X-BuildOS-Signature'] = `sha256=${signature}`;
 
     try {
-      const response = await axios.post(webhook.url, payload, {
+      const response = await axios.post(webhook.url, body, {
         headers,
         timeout: 10000, // 10 second timeout
+        transformRequest: [(value) => value],
       });
 
       // Log successful delivery
@@ -261,17 +344,9 @@ export class WebhookService {
           status: 'delivered',
           responseCode: response.status,
           responseBody: JSON.stringify(response.data),
-          attemptCount: 1,
+          attemptCount,
         },
       });
-
-      // Reset retry count on success
-      if (webhook.retryCount > 0) {
-        await this.prisma.webhook.update({
-          where: { id: webhook.id },
-          data: { retryCount: 0, isActive: true },
-        });
-      }
     } catch (error: any) {
       const axiosError = error as AxiosError;
 
@@ -284,7 +359,7 @@ export class WebhookService {
           status: 'failed',
           responseCode: axiosError.response?.status || 0,
           error: axiosError.message,
-          attemptCount: 1,
+          attemptCount,
         },
       });
 
@@ -292,9 +367,21 @@ export class WebhookService {
     }
   }
 
+  /**
+   * HMAC-SHA256 over `<timestamp>.<body>`.
+   *
+   * Binding the timestamp into the signed material lets the receiver reject
+   * replayed deliveries by age. This replaces sending the shared secret itself
+   * in an `X-Webhook-Secret` header, which both leaked the credential to every
+   * receiver on every request and proved nothing about the body's integrity.
+   */
+  private signPayload(secret: string, timestamp: string, body: string): string {
+    return createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+  }
+
   private generateSecret(): string {
-    return createHmac('sha256', 'webhook-secret-key')
-      .update(Math.random().toString())
-      .digest('hex');
+    // Previously derived from Math.random() keyed by a hardcoded constant, which
+    // is neither unpredictable nor secret. 32 CSPRNG bytes instead.
+    return randomBytes(32).toString('hex');
   }
 }

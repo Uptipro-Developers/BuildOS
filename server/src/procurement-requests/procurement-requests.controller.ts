@@ -2,6 +2,7 @@ import {
     Controller, Get, Post, Put, Patch, Delete,
     Param, Body, Query,
 } from '@nestjs/common';
+import { ServiceAuth } from '../auth/decorators';
 import { ProcurementRequestsService } from './procurement-requests.service';
 
 @Controller()
@@ -17,7 +18,10 @@ export class ProcurementRequestsController {
     createPR(@Body() body: any) { return this.svc.createPR(body); }
     @Put('purchase-requests/:id')
     updatePR(@Param('id') id: string, @Body() body: any) { return this.svc.updatePR(id, body); }
+    // Service-accessible: the SabiQuot supplier portal mirrors a supplier's
+    // accept/decline back onto the originating purchase request.
     @Patch('purchase-requests/:id')
+    @ServiceAuth()
     patchPR(@Param('id') id: string, @Body() body: any) { return this.svc.updatePR(id, body); }
     @Delete('purchase-requests/:id')
     deletePR(@Param('id') id: string) { return this.svc.deletePR(id); }
@@ -27,7 +31,10 @@ export class ProcurementRequestsController {
     getAllInvoices(@Query('status') status?: string) { return this.svc.findAllInvoices(status); }
     @Get('purchase-invoices/:id')
     getInvoice(@Param('id') id: string) { return this.svc.findInvoice(id); }
+    // Service-accessible: raised by the portal when a supplier's counter-offer
+    // is accepted.
     @Post('purchase-invoices')
+    @ServiceAuth()
     createInvoice(@Body() body: any) { return this.svc.createInvoice(body); }
     @Put('purchase-invoices/:id')
     updateInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
@@ -43,7 +50,10 @@ export class ProcurementRequestsController {
     getRFQ(@Param('id') id: string) { return this.svc.findRFQ(id); }
     @Post('sent-rfqs')
     createRFQ(@Body() body: any) { return this.svc.createRFQ(body); }
+    // Service-accessible: the portal mirrors RFQ status when a supplier
+    // acknowledges or declines.
     @Patch('sent-rfqs/:id')
+    @ServiceAuth()
     updateRFQ(@Param('id') id: string, @Body() body: any) { return this.svc.updateRFQ(id, body); }
     @Delete('sent-rfqs/:id')
     deleteRFQ(@Param('id') id: string) { return this.svc.deleteRFQ(id); }

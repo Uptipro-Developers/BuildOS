@@ -10,6 +10,7 @@ import { Request } from 'express';
 import { verify, type JwtPayload } from 'jsonwebtoken';
 import { RedisService } from '../redis/redis.service';
 import { RedisKeys } from '../redis/redis.constants';
+import { ServiceKeyService } from './service-key.service';
 
 interface AuthTokenPayload extends JwtPayload {
     sub?: string;
@@ -30,16 +31,26 @@ interface AuthTokenPayload extends JwtPayload {
  *  - Missing/invalid token on a protected route  → 401 (lets the client refresh)
  *  - Authenticated but lacking role/permission    → 403
  *  - Token issued before a revocation marker      → 401 (Redis-backed, optional)
+ *
+ * Routes marked `@ServiceAuth()` additionally accept a machine credential in
+ * `X-Api-Key`. That check lives here rather than in a separate route-level
+ * guard because this guard is registered globally (APP_GUARD) and therefore
+ * runs first — a route-scoped guard would never see the request.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
     constructor(
         private readonly reflector: Reflector,
         private readonly redis: RedisService,
+        private readonly serviceKeys: ServiceKeyService,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const isPublic = this.reflector.getAllAndOverride<boolean>('isPublic', [
+            context.getHandler(),
+            context.getClass(),
+        ]);
+        const isServiceAuth = this.reflector.getAllAndOverride<boolean>('isServiceAuth', [
             context.getHandler(),
             context.getClass(),
         ]);
@@ -54,8 +65,24 @@ export class JwtAuthGuard implements CanActivate {
             return true;
         }
 
+        // Machine callers on a @ServiceAuth() route authenticate with a key and
+        // bypass the role/permission/app decorators, which describe human
+        // authorisation. A user JWT on the same route still gets the full
+        // checks below, so the UI keeps working unchanged.
+        if (isServiceAuth && !payload) {
+            const record = await this.serviceKeys.verify(this.extractServiceKey(request));
+            if (record) {
+                (request as any).serviceClient = { id: record.id, name: record.name };
+                return true;
+            }
+        }
+
         if (!payload || !payload.sub) {
-            throw new UnauthorizedException('Authentication required');
+            throw new UnauthorizedException(
+                isServiceAuth
+                    ? 'Authentication required: supply a bearer token or a valid X-Api-Key'
+                    : 'Authentication required',
+            );
         }
 
         await this.assertNotRevoked(payload);
@@ -81,6 +108,27 @@ export class JwtAuthGuard implements CanActivate {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * Pull the service credential off the request. `X-Api-Key` is canonical;
+     * `Authorization: ApiKey <key>` is accepted for clients that can only set
+     * an Authorization header.
+     */
+    private extractServiceKey(request: Request): string | null {
+        const header = request.headers['x-api-key'];
+        const fromHeader = Array.isArray(header) ? header[0] : header;
+        if (fromHeader && String(fromHeader).trim()) {
+            return String(fromHeader).trim();
+        }
+
+        const authHeader = request.headers.authorization;
+        if (authHeader?.startsWith('ApiKey ')) {
+            const value = authHeader.slice(7).trim();
+            if (value) return value;
+        }
+
+        return null;
     }
 
     private async assertNotRevoked(payload: AuthTokenPayload): Promise<void> {

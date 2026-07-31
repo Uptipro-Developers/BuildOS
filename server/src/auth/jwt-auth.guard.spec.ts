@@ -6,6 +6,7 @@ const SECRET = 'test-secret';
 
 interface MockMeta {
     isPublic?: boolean;
+    isServiceAuth?: boolean;
     roles?: string[];
     permissions?: string[];
     requiredApps?: string[];
@@ -37,6 +38,22 @@ function makeRedis(overrides: Partial<{ isEnabled: boolean; revokedAt: string | 
     } as unknown as ConstructorParameters<typeof JwtAuthGuard>[1];
 }
 
+/**
+ * Stub ServiceKeyService. `validKey` is the only credential that resolves;
+ * anything else (including undefined) is rejected, mirroring the real
+ * fail-closed behaviour.
+ */
+function makeServiceKeys(validKey?: string) {
+    return {
+        verify: jest.fn(async (presented?: string | null) =>
+            validKey && presented === validKey
+                ? { id: 'key-1', name: 'SabiQuot' }
+                : null,
+        ),
+        invalidate: jest.fn(),
+    } as unknown as ConstructorParameters<typeof JwtAuthGuard>[2];
+}
+
 function token(payload: Record<string, unknown>): string {
     return sign(payload, SECRET);
 }
@@ -47,25 +64,25 @@ describe('JwtAuthGuard', () => {
     });
 
     it('allows public routes with no token', async () => {
-        const guard = new JwtAuthGuard(makeReflector({ isPublic: true }), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector({ isPublic: true }), makeRedis(), makeServiceKeys());
         const { context } = makeContext({ isPublic: true });
         await expect(guard.canActivate(context)).resolves.toBe(true);
     });
 
     it('rejects protected routes with no token (401)', async () => {
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys());
         const { context } = makeContext({});
         await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
     it('rejects protected routes with an invalid token (401)', async () => {
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys());
         const { context } = makeContext({}, { authorization: 'Bearer not-a-real-token' });
         await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
     it('allows a valid token when no roles are required and sets request.user', async () => {
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys());
         const { context, request } = makeContext(
             {},
             { authorization: `Bearer ${token({ sub: 'u1', email: 'a@b.c', role: 'staff' })}` },
@@ -76,7 +93,7 @@ describe('JwtAuthGuard', () => {
 
     it('enforces required roles (403 when missing)', async () => {
         const meta = { roles: ['admin'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys());
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
         });
@@ -85,7 +102,7 @@ describe('JwtAuthGuard', () => {
 
     it('allows when the user has the required role (case-insensitive)', async () => {
         const meta = { roles: ['Admin'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys());
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'admin' })}`,
         });
@@ -96,6 +113,7 @@ describe('JwtAuthGuard', () => {
         const guard = new JwtAuthGuard(
             makeReflector({}),
             makeRedis({ isEnabled: true, revokedAt: '9999999999' }),
+            makeServiceKeys(),
         );
         const { context } = makeContext({}, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
@@ -107,6 +125,7 @@ describe('JwtAuthGuard', () => {
         const guard = new JwtAuthGuard(
             makeReflector({}),
             makeRedis({ isEnabled: true, revokedAt: '1' }),
+            makeServiceKeys(),
         );
         const { context } = makeContext({}, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
@@ -116,7 +135,7 @@ describe('JwtAuthGuard', () => {
 
     it('allows when the user has a required app', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys());
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff', assignedApps: ['hr', 'ess'] })}`,
         });
@@ -125,7 +144,7 @@ describe('JwtAuthGuard', () => {
 
     it('denies when the user lacks the required app (403)', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys());
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff', assignedApps: ['construction'] })}`,
         });
@@ -134,7 +153,7 @@ describe('JwtAuthGuard', () => {
 
     it('lets admins bypass app restrictions', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys());
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'admin', assignedApps: [] })}`,
         });
@@ -143,10 +162,93 @@ describe('JwtAuthGuard', () => {
 
     it('allows legacy tokens without an assignedApps claim (backward compat)', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis());
+        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys());
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
         });
         await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    describe('service auth (@ServiceAuth)', () => {
+        it('allows a valid X-Api-Key and records the service client', async () => {
+            const meta = { isServiceAuth: true };
+            const guard = new JwtAuthGuard(
+                makeReflector(meta),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context, request } = makeContext(meta, { 'x-api-key': 'sk_live_good' });
+            await expect(guard.canActivate(context)).resolves.toBe(true);
+            expect((request as { serviceClient?: { name: string } }).serviceClient?.name).toBe(
+                'SabiQuot',
+            );
+        });
+
+        it('accepts the key via "Authorization: ApiKey <key>"', async () => {
+            const meta = { isServiceAuth: true };
+            const guard = new JwtAuthGuard(
+                makeReflector(meta),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context } = makeContext(meta, { authorization: 'ApiKey sk_live_good' });
+            await expect(guard.canActivate(context)).resolves.toBe(true);
+        });
+
+        it('rejects an unknown key (401)', async () => {
+            const meta = { isServiceAuth: true };
+            const guard = new JwtAuthGuard(
+                makeReflector(meta),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context } = makeContext(meta, { 'x-api-key': 'sk_live_wrong' });
+            await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+        });
+
+        it('rejects a service route with no credential at all (401)', async () => {
+            const meta = { isServiceAuth: true };
+            const guard = new JwtAuthGuard(
+                makeReflector(meta),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context } = makeContext(meta);
+            await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+        });
+
+        it('does not let a service key satisfy a route that is not @ServiceAuth (401)', async () => {
+            const guard = new JwtAuthGuard(
+                makeReflector({}),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context } = makeContext({}, { 'x-api-key': 'sk_live_good' });
+            await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+        });
+
+        it('still enforces roles for a user JWT on a service route (403)', async () => {
+            const meta = { isServiceAuth: true, roles: ['admin'] };
+            const guard = new JwtAuthGuard(
+                makeReflector(meta),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context } = makeContext(meta, {
+                authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
+            });
+            await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+        });
+
+        it('lets a service key bypass role requirements', async () => {
+            const meta = { isServiceAuth: true, roles: ['admin'] };
+            const guard = new JwtAuthGuard(
+                makeReflector(meta),
+                makeRedis(),
+                makeServiceKeys('sk_live_good'),
+            );
+            const { context } = makeContext(meta, { 'x-api-key': 'sk_live_good' });
+            await expect(guard.canActivate(context)).resolves.toBe(true);
+        });
     });
 });

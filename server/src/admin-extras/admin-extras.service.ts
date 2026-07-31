@@ -6,6 +6,12 @@ import * as path from 'path';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailQueueService } from '../queue/mail-queue.service';
+import {
+    ServiceKeyService,
+    generateServiceKey,
+    hashServiceKey,
+    serviceKeyPreview,
+} from '../auth/service-key.service';
 import type { EmailPayload } from '../email/email.service';
 import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 
@@ -79,6 +85,7 @@ export class AdminExtrasService {
     constructor(
         private prisma: PrismaService,
         private mailQueue: MailQueueService,
+        private serviceKeys: ServiceKeyService,
     ) { }
 
     private settingsFilePath = path.join(process.cwd(), 'data', 'admin-settings.json');
@@ -2426,29 +2433,66 @@ export class AdminExtrasService {
     }
 
     // ── API Keys ──
+    //
+    // These keys authenticate external systems (see ServiceKeyService and the
+    // @ServiceAuth() decorator). They are therefore real credentials and are
+    // stored hashed: the plaintext is returned exactly once, at creation.
+    // Rows written before this change still carry a plaintext `key`; they keep
+    // working (ServiceKeyService hashes on read) but are reported as legacy so
+    // an admin knows to rotate them.
+
     async findApiKeys() {
         const settings = await this.readAdminSettings();
-        return settings.apiKeys;
+        return settings.apiKeys.map((item: any) => this.presentApiKey(item));
     }
+
     async createApiKey(data: any) {
         const settings = await this.readAdminSettings();
+
+        // An explicitly supplied key is still accepted (it is how an operator
+        // imports an existing credential) but is never persisted in the clear.
+        const plaintext = String(data?.key ?? '').trim() || generateServiceKey();
+
         const created = {
             id: `key-${Date.now()}`,
             name: String(data?.name ?? '').trim() || 'New API Key',
-            key: data?.key || `sk_live_${crypto.randomBytes(18).toString('hex')}`,
+            keyHash: hashServiceKey(plaintext),
+            keyPrefix: plaintext.startsWith('sk_live_') ? 'sk_live' : plaintext.slice(0, 7),
+            keyLast4: plaintext.slice(-4),
             status: 'active',
             created: new Date().toISOString(),
             lastUsed: null,
         };
+
         settings.apiKeys.unshift(created);
         await this.writeAdminSettings(settings);
-        return created;
+        this.serviceKeys.invalidate();
+
+        // `key` is present on this response only. Subsequent reads cannot
+        // reproduce it, so the UI must surface it to the admin now.
+        return { ...this.presentApiKey(created), key: plaintext, plaintextShownOnce: true };
     }
+
     async deleteApiKey(id: string) {
         const settings = await this.readAdminSettings();
         settings.apiKeys = settings.apiKeys.filter((item: any) => item.id !== id);
         await this.writeAdminSettings(settings);
+        this.serviceKeys.invalidate();
         return { id, deleted: true };
+    }
+
+    /** Strip the secret material from a stored key record before returning it. */
+    private presentApiKey(record: any) {
+        const isLegacyPlaintext = Boolean(record?.key) && !record?.keyHash;
+        return {
+            id: record?.id,
+            name: record?.name,
+            keyPreview: serviceKeyPreview(record ?? {}),
+            status: record?.status ?? 'active',
+            created: record?.created ?? null,
+            lastUsed: record?.lastUsed ?? null,
+            isLegacyPlaintext,
+        };
     }
 
     // ── Webhooks ──

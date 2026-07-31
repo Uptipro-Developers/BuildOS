@@ -390,6 +390,17 @@ model Supplier {
   lastOrder          DateTime?
   status             String    @default("active")
   notes              String?
+
+  /// Identity bridge to the SabiQuot supplier portal. Holds the SabiQuot
+  /// `profiles.id` (a uuid) for suppliers that exist on both sides, so an RFQ
+  /// can be routed to the right portal account and a portal signup can be
+  /// reconciled against an existing supplier instead of duplicating it.
+  sabiquotProfileId String? @unique
+
+  /// Where this supplier record originated: "buildos" for records created in
+  /// the ERP, "sabiquot" for portal self-registrations.
+  source String @default("buildos")
+
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

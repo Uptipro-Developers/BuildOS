@@ -1,4 +1,4 @@
-import { Plus, Copy, Eye, EyeOff, Trash2, Key, Webhook, X } from "lucide-react";
+import { Plus, Copy, Trash2, Key, Webhook, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { apiFetch } from "../../api/client";
@@ -8,11 +8,17 @@ import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 type ApiKey = {
   id: string;
   name: string;
-  key: string;
+  /** Non-secret fragment, e.g. "sk_live_…3f9c". The full key is never re-served. */
+  keyPreview: string;
   created?: string;
   lastUsed?: string;
   status?: string;
+  /** Created before keys were hashed at rest; should be rotated. */
+  isLegacyPlaintext?: boolean;
 };
+
+/** A freshly created key, held only in memory so the admin can copy it once. */
+type NewApiKey = { name: string; key: string };
 
 type WebhookConfig = {
   id: string;
@@ -27,7 +33,7 @@ export function IntegrationsPage() {
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [showKey, setShowKey] = useState<Record<string, boolean>>({});
+  const [newKey, setNewKey] = useState<NewApiKey | null>(null);
 
   // Modal state
   const [keyModalOpen, setKeyModalOpen] = useState(false);
@@ -60,17 +66,9 @@ export function IntegrationsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const toggleKeyVisibility = (id: string) => {
-    setShowKey((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success("Copied to clipboard");
-  };
-
-  const maskKey = (key: string) => {
-    return key.slice(0, 7) + "..." + key.slice(-4);
   };
 
   const openKeyModal = () => {
@@ -85,14 +83,17 @@ export function IntegrationsPage() {
       return;
     }
     setSaving(true);
-    apiFetch<ApiKey>("/admin/api-keys", {
+    apiFetch<ApiKey & { key: string }>("/admin/api-keys", {
       method: "POST",
       body: JSON.stringify({ name }),
     })
-      .then((created) => {
-        setApiKeys((prev) => [created, ...prev]);
+      .then(({ key, ...record }) => {
+        setApiKeys((prev) => [record, ...prev]);
         setKeyModalOpen(false);
-        toast.success("API key generated");
+        // Keys are hashed at rest, so this is the only moment the plaintext
+        // exists outside the caller. Surface it until the admin dismisses it.
+        setNewKey({ name: record.name, key });
+        toast.success("API key generated — copy it now");
       })
       .catch((err) => {
         console.error(err);
@@ -228,27 +229,21 @@ export function IntegrationsPage() {
 
                   <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-md">
                     <code className="flex-1 text-sm font-mono text-gray-900">
-                      {showKey[apiKey.id] ? apiKey.key : maskKey(apiKey.key)}
+                      {apiKey.keyPreview}
                     </code>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => toggleKeyVisibility(apiKey.id)}
-                        className="p-1 text-gray-600 hover:text-gray-900 transition-colors"
-                      >
-                        {showKey[apiKey.id] ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => copyToClipboard(apiKey.key)}
-                        className="p-1 text-gray-600 hover:text-gray-900 transition-colors"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {/* No reveal or copy control: the key is stored hashed, so
+                        the full value cannot be shown again after creation. */}
+                    <span className="text-xs text-gray-500">
+                      Shown once at creation
+                    </span>
                   </div>
+
+                  {apiKey.isLegacyPlaintext && (
+                    <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      Stored in plain text by an older version. It still works —
+                      delete and regenerate it to store only a hash.
+                    </p>
+                  )}
 
                   <div className="flex items-center gap-6 mt-3 text-xs text-gray-500">
                     <span>Created: {fmtDate(apiKey.created)}</span>
@@ -379,6 +374,53 @@ export function IntegrationsPage() {
           ))}
         </div>
       </div>
+
+      {/* Newly created key — the only time the plaintext is available */}
+      {newKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Copy your API key
+              </h3>
+              <button
+                onClick={() => setNewKey(null)}
+                className="p-1 text-gray-500 hover:text-gray-900"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600">
+              This is the only time <span className="font-medium">{newKey.name}</span>{" "}
+              can be displayed. Only a hash is stored, so it cannot be recovered
+              later — if you lose it, delete the key and generate a new one.
+            </p>
+
+            <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 p-3 rounded-md">
+              <code className="flex-1 text-sm font-mono text-gray-900 break-all">
+                {newKey.key}
+              </code>
+              <button
+                onClick={() => copyToClipboard(newKey.key)}
+                className="p-1 text-gray-600 hover:text-gray-900 transition-colors shrink-0"
+                aria-label="Copy API key"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setNewKey(null)}
+                className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800"
+              >
+                I've copied it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Generate API Key Modal */}
       {keyModalOpen && (

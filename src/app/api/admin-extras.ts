@@ -370,10 +370,19 @@ export const deleteEmailConfig = (id: string) =>
 export interface ApiKeyRecord {
     id: string;
     name: string;
-    key: string;
+    /** Non-secret fragment, e.g. "sk_live_…3f9c". Keys are stored hashed. */
+    keyPreview: string;
     status?: string;
     created?: string;
     lastUsed?: string | null;
+    /** Created before keys were hashed at rest; should be rotated. */
+    isLegacyPlaintext?: boolean;
+}
+
+/** createApiKey response — `key` is the plaintext, returned only on creation. */
+export interface ApiKeyCreated extends ApiKeyRecord {
+    key: string;
+    plaintextShownOnce: true;
 }
 export interface WebhookRecord {
     id: string;
@@ -384,7 +393,7 @@ export interface WebhookRecord {
 }
 export const getApiKeys = () => apiFetch<ApiKeyRecord[]>('/admin/api-keys');
 export const createApiKey = (data: { name: string }) =>
-    apiFetch<ApiKeyRecord>('/admin/api-keys', { method: 'POST', body: JSON.stringify(data) });
+    apiFetch<ApiKeyCreated>('/admin/api-keys', { method: 'POST', body: JSON.stringify(data) });
 export const deleteApiKey = (id: string) =>
     apiFetch<{ id: string; deleted: boolean }>(`/admin/api-keys/${id}`, { method: 'DELETE' });
 export const getWebhooks = () => apiFetch<WebhookRecord[]>('/admin/webhooks');
