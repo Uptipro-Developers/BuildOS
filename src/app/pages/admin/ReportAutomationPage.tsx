@@ -1,5 +1,13 @@
 import { useState, useEffect } from "react";
-import { Plus, Clock, Mail, BarChart3, Trash2, Send } from "lucide-react";
+import {
+  Plus,
+  Clock,
+  Mail,
+  BarChart3,
+  Trash2,
+  Send,
+  Pencil,
+} from "lucide-react";
 import { apiFetch } from "../../api/client";
 import { getReportTemplates } from "../../api/admin-extras";
 import { toast } from "sonner";
@@ -57,6 +65,15 @@ const MODULE_COLORS: Record<ReportModule, string> = {
   Storefront: "bg-orange-50 text-orange-700",
 };
 
+const MODULE_OPTIONS: ReportModule[] = [
+  "Finance",
+  "HR",
+  "Procurement",
+  "Projects",
+  "ESS",
+  "Storefront",
+];
+
 const BLANK_FORM: Omit<ReportSchedule, "id" | "lastSent"> = {
   name: "",
   module: "Finance" as ReportModule,
@@ -104,6 +121,50 @@ export function ReportAutomationPage() {
   const [deleteTarget, setDeleteTarget] = useState<ReportSchedule | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** Schedule being edited; null means the modal is creating a new one. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  /**
+   * Deployed templates for the module currently chosen on the form.
+   *
+   * Module is the primary selector: picking HR narrows Report Name to HR's
+   * deployed templates. It used to work the other way round — you picked a report
+   * from every module at once and the module field was then overwritten to match
+   * — which made the module dropdown look editable while it was really a readout.
+   */
+  const reportsForModule = availableReports.filter(
+    (r) => r.module === form.module,
+  );
+
+  /** Modules that actually have a deployed template to schedule. */
+  const modulesWithReports = MODULE_OPTIONS.filter((m) =>
+    availableReports.some((r) => r.module === m),
+  );
+
+  function openCreate() {
+    const firstModule = modulesWithReports[0] ?? BLANK_FORM.module;
+    const firstReport = availableReports.find((r) => r.module === firstModule);
+    setEditingId(null);
+    setForm({
+      ...BLANK_FORM,
+      module: firstModule,
+      name: firstReport?.name ?? "",
+    });
+    setShowModal(true);
+  }
+
+  function openEdit(schedule: ReportSchedule) {
+    setEditingId(schedule.id);
+    setForm({
+      name: schedule.name,
+      module: schedule.module,
+      frequency: schedule.frequency,
+      sendTime: schedule.sendTime || BLANK_FORM.sendTime,
+      recipients: schedule.recipients,
+      enabled: schedule.enabled,
+    });
+    setShowModal(true);
+  }
 
   // Every action here used to mutate local state only — schedules, toggles and
   // deletions all vanished on refresh because the page had no write endpoints to
@@ -156,21 +217,38 @@ export function ReportAutomationPage() {
     const chosen = availableReports.find((r) => r.name === form.name);
     setSaving(true);
     try {
-      const created = await apiFetch<ReportSchedule>("/admin/report-schedules", {
-        method: "POST",
-        body: JSON.stringify({
-          ...form,
-          // Bind to the deployed template so the scheduler knows what to run.
-          templateId: chosen?.id,
-          source: chosen?.dataSource,
-        }),
-      });
-      setSchedules((prev) => [...prev, created]);
+      const payload = {
+        ...form,
+        // Rebind to the deployed template on every save, so editing a schedule
+        // onto a different report repoints what the scheduler runs instead of
+        // leaving it on the old template.
+        templateId: chosen?.id,
+        source: chosen?.dataSource,
+      };
+
+      if (editingId) {
+        const updated = await apiFetch<ReportSchedule>(
+          `/admin/report-schedules/${editingId}`,
+          { method: "PATCH", body: JSON.stringify(payload) },
+        );
+        setSchedules((prev) =>
+          prev.map((s) => (s.id === editingId ? { ...s, ...updated } : s)),
+        );
+        toast.success(`"${form.name}" updated.`);
+      } else {
+        const created = await apiFetch<ReportSchedule>(
+          "/admin/report-schedules",
+          { method: "POST", body: JSON.stringify(payload) },
+        );
+        setSchedules((prev) => [...prev, created]);
+        toast.success(
+          `"${form.name}" scheduled ${form.frequency.toLowerCase()} to ${form.recipients}.`,
+        );
+      }
+
       setShowModal(false);
+      setEditingId(null);
       setForm({ ...BLANK_FORM });
-      toast.success(
-        `"${form.name}" scheduled ${form.frequency.toLowerCase()} to ${form.recipients}.`,
-      );
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to save the schedule.",
@@ -214,15 +292,7 @@ export function ReportAutomationPage() {
           </p>
         </div>
         <button
-          onClick={() => {
-            const first = availableReports[0];
-            setForm({
-              ...BLANK_FORM,
-              name: first?.name ?? "",
-              module: first?.module ?? BLANK_FORM.module,
-            });
-            setShowModal(true);
-          }}
+          onClick={openCreate}
           className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 text-white text-sm px-4 py-2 rounded-xl"
         >
           <Plus className="w-4 h-4" /> New Schedule
@@ -316,6 +386,13 @@ export function ReportAutomationPage() {
                 {busyId === s.id ? "Sending…" : "Send now"}
               </button>
               <button
+                onClick={() => openEdit(s)}
+                title="View and edit this schedule"
+                className="text-gray-400 hover:text-gray-700 p-1 rounded-lg hover:bg-gray-100"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
                 onClick={() => setDeleteTarget(s)}
                 className="text-gray-400 hover:text-red-500 p-1 rounded-lg hover:bg-red-50"
               >
@@ -332,10 +409,13 @@ export function ReportAutomationPage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center">
               <h2 className="text-base font-semibold text-gray-900">
-                New Report Schedule
+                {editingId ? "Edit Report Schedule" : "New Report Schedule"}
               </h2>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowModal(false);
+                  setEditingId(null);
+                }}
                 className="text-gray-400 hover:text-gray-600 text-lg leading-none"
               >
                 ✕
@@ -347,35 +427,32 @@ export function ReportAutomationPage() {
                   Report Name
                 </label>
                 <select
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-500"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-500 disabled:bg-gray-50 disabled:text-gray-400"
                   value={form.name}
-                  onChange={(e) => {
-                    const selected = availableReports.find(
-                      (r) => r.name === e.target.value,
-                    );
-                    setForm({
-                      ...form,
-                      name: e.target.value,
-                      module: selected?.module ?? form.module,
-                    });
-                  }}
-                  disabled={availableReports.length === 0}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  disabled={reportsForModule.length === 0}
                 >
-                  {availableReports.length === 0 ? (
-                    <option value="">No deployed reports available</option>
+                  {reportsForModule.length === 0 ? (
+                    <option value="">
+                      No deployed reports for {form.module}
+                    </option>
                   ) : (
                     <>
                       <option value="" disabled>
                         Select a report…
                       </option>
-                      {availableReports.map((r) => (
-                        <option key={r.name} value={r.name}>
+                      {reportsForModule.map((r) => (
+                        <option key={r.id} value={r.name}>
                           {r.name}
                         </option>
                       ))}
                     </>
                   )}
                 </select>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Deployed templates for {form.module}. Change the module to see
+                  others.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -385,25 +462,32 @@ export function ReportAutomationPage() {
                   <select
                     className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-500"
                     value={form.module}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const module = e.target.value as ReportModule;
+                      // Point Report Name at this module's first deployed
+                      // template. Keeping the old name would leave the form
+                      // showing a report that belongs to a different module.
+                      const first = availableReports.find(
+                        (r) => r.module === module,
+                      );
                       setForm({
                         ...form,
-                        module: e.target.value as ReportModule,
-                      })
-                    }
+                        module,
+                        name: first?.name ?? "",
+                      });
+                    }}
                   >
-                    {(
-                      [
-                        "Finance",
-                        "HR",
-                        "Procurement",
-                        "Projects",
-                        "ESS",
-                        "Storefront",
-                      ] as ReportModule[]
-                    ).map((m) => (
-                      <option key={m}>{m}</option>
-                    ))}
+                    {MODULE_OPTIONS.map((m) => {
+                      const count = availableReports.filter(
+                        (r) => r.module === m,
+                      ).length;
+                      return (
+                        <option key={m} value={m}>
+                          {m}
+                          {count === 0 ? " — no deployed reports" : ` (${count})`}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>
@@ -457,7 +541,10 @@ export function ReportAutomationPage() {
             </div>
             <div className="px-6 pb-5 flex justify-end gap-3">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowModal(false);
+                  setEditingId(null);
+                }}
                 className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
               >
                 Cancel
@@ -467,7 +554,13 @@ export function ReportAutomationPage() {
                 disabled={saving || !form.name.trim() || !form.recipients.trim()}
                 className="px-4 py-2 text-sm bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50"
               >
-                {saving ? "Creating…" : "Create Schedule"}
+                {saving
+                  ? editingId
+                    ? "Saving…"
+                    : "Creating…"
+                  : editingId
+                    ? "Save Changes"
+                    : "Create Schedule"}
               </button>
             </div>
           </div>

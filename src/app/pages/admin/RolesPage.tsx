@@ -4,6 +4,7 @@ import {
   getAppRoles,
   getUsers,
   getProcessCatalog,
+  getProcessWorkflows,
   createAppRole,
   updateAppRole,
   deleteAppRole,
@@ -470,11 +471,56 @@ export function RolesPage() {
       .finally(() => setProcessesLoading(false));
   }, []);
 
+  /**
+   * Processes that have an approval workflow configured, by process id.
+   *
+   * Granting "approve" on a process with no configured workflow produces a
+   * permission that can never fire: the workflow engine resolves a process's
+   * approvers from its configured workflow, so with none configured there is
+   * nothing to approve and the grant silently does nothing. The matrix used to
+   * offer the toggle regardless, which read as a working permission.
+   *
+   * On failure this stays empty, which disables the approve toggles rather than
+   * enabling them — a permission that cannot be honoured should not look
+   * grantable just because the lookup failed.
+   */
+  const [approvalConfiguredIds, setApprovalConfiguredIds] = useState<
+    Set<string>
+  >(new Set());
+
+  useEffect(() => {
+    getProcessWorkflows()
+      .then((items) =>
+        setApprovalConfiguredIds(
+          new Set(
+            (Array.isArray(items) ? items : [])
+              .map((w) => String(w?.processId ?? "").trim())
+              .filter(Boolean),
+          ),
+        ),
+      )
+      .catch(() => setApprovalConfiguredIds(new Set()));
+  }, []);
+
   const [showAddRole, setShowAddRole] = useState(false);
   const [expandedRoleId, setExpandedRoleId] = useState<string | null>(null);
   const [expandedRoleTab, setExpandedRoleTab] = useState<
     Record<string, "app" | "nav">
   >({});
+
+  /** The role whose Layer 1/2 configuration overlay is open, if any. */
+  const expandedRole = roles.find((r) => r.id === expandedRoleId) ?? null;
+
+  // Escape closes the configuration overlay — expected of anything covering the
+  // whole screen, and the only other way out is the header's X.
+  useEffect(() => {
+    if (!expandedRoleId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedRoleId(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expandedRoleId]);
 
   // Group shown processes by app
   const processesByApp = (
@@ -744,6 +790,12 @@ export function RolesPage() {
             {k.charAt(0).toUpperCase() + k.slice(1)}
           </span>
         ))}
+        <span className="flex items-center gap-1">
+          <span className="w-5 h-5 rounded bg-gray-50 border border-dashed border-gray-300 text-gray-300 text-xs font-bold flex items-center justify-center">
+            A
+          </span>
+          No approval workflow configured
+        </span>
         <span className="ml-2 text-gray-400">
           Click any cell to toggle permission
         </span>
@@ -909,6 +961,13 @@ export function RolesPage() {
                         const val = role.isSuper
                           ? true
                           : (role.permissions[proc.id]?.[k] ?? false);
+                        // Approval cannot be granted on a process with no
+                        // approval workflow configured — there would be no
+                        // approver chain for the permission to act through, so
+                        // the grant would look real and do nothing.
+                        const approvalUnavailable =
+                          k === "approve" && !approvalConfiguredIds.has(proc.id);
+                        const locked = role.isSuper || approvalUnavailable;
                         return (
                           <td
                             key={`${proc.id}_${k}`}
@@ -921,15 +980,21 @@ export function RolesPage() {
                           >
                             <button
                               onClick={() =>
-                                !role.isSuper && togglePerm(role.id, proc.id, k)
+                                !locked && togglePerm(role.id, proc.id, k)
                               }
-                              disabled={role.isSuper}
-                              title={`${k} — ${proc.label}`}
+                              disabled={locked}
+                              title={
+                                approvalUnavailable
+                                  ? `${proc.label} — no approval workflow configured. Set one up in Workflow Configuration before assigning approval.`
+                                  : `${k} — ${proc.label}`
+                              }
                               className={`w-6 h-6 rounded text-[10px] font-bold transition-colors mx-auto flex items-center justify-center ${
-                                val
-                                  ? "bg-indigo-600 text-white"
-                                  : "bg-gray-100 text-gray-300 hover:bg-gray-200"
-                              } ${role.isSuper ? "cursor-not-allowed" : "cursor-pointer"}`}
+                                approvalUnavailable
+                                  ? "bg-gray-50 text-gray-300 border border-dashed border-gray-300"
+                                  : val
+                                    ? "bg-indigo-600 text-white"
+                                    : "bg-gray-100 text-gray-300 hover:bg-gray-200"
+                              } ${locked ? "cursor-not-allowed" : "cursor-pointer"}`}
                             >
                               {PERM_SHORT[k]}
                             </button>
@@ -939,181 +1004,6 @@ export function RolesPage() {
                     )}
                   </tr>
 
-                  {/* Role configuration — rendered directly under its own role
-                      row so each role's Layer 1 and Layer 2 settings sit with the
-                      role they belong to. The inner panel is sticky at a fixed
-                      width so it neither stretches to the process matrix's width
-                      nor scrolls away when the matrix is scrolled sideways. */}
-                  {expandedRoleId === role.id && (
-                    <tr className="bg-indigo-50/20">
-                      <td
-                        colSpan={
-                          1 + processes.reduce((n, pr) => n + pr.actions.length, 0)
-                        }
-                        className="p-0"
-                      >
-                        <div className="sticky left-0 w-[min(920px,calc(100vw-6rem))] px-4 py-3">
-            <div
-              key={role.id}
-              className="bg-white rounded-xl border border-indigo-100 shadow-sm"
-            >
-              <div className="flex items-center justify-between px-5 py-3 border-b border-indigo-100 bg-indigo-50/40 rounded-t-xl">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Shield className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">
-                      {role.name}
-                    </p>
-                    {role.description && (
-                      <p className="text-xs text-gray-500 italic truncate">
-                        {role.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setExpandedRoleId(null)}
-                  className="p-1.5 rounded-lg hover:bg-white/70 text-gray-400 shrink-0"
-                  aria-label="Collapse role configuration"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-5 py-4">
-                {/* Layer tabs */}
-                <div className="flex flex-wrap items-center gap-1 mb-4 border-b border-indigo-100">
-                  {(["app", "nav"] as const).map((tabKey) => (
-                    <button
-                      key={tabKey}
-                      onClick={() =>
-                        setExpandedRoleTab((t) => ({
-                          ...t,
-                          [role.id]: tabKey,
-                        }))
-                      }
-                      className={`px-3 py-1.5 text-xs font-medium rounded-t border-b-2 -mb-px transition-colors ${
-                        (expandedRoleTab[role.id] ?? "app") === tabKey
-                          ? "border-indigo-600 text-indigo-700 bg-white"
-                          : "border-transparent text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {tabKey === "app"
-                        ? "Layer 1 — App Access"
-                        : "Layer 2 — Navigation"}
-                    </button>
-                  ))}
-                  <span className="px-3 py-1.5 text-xs text-gray-400 ml-auto italic">
-                    Layer 3 — Process Permissions set in this role's row above
-                  </span>
-                  <button
-                    onClick={() => void saveRolePermissions(role.id)}
-                    disabled={roleStatus[role.id] === "saving"}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {roleStatus[role.id] === "saving"
-                      ? "Saving…"
-                      : "Save Modifications"}
-                  </button>
-                </div>
-
-                {/* Layer 1: Application Access */}
-                {(expandedRoleTab[role.id] ?? "app") === "app" && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                    {(Object.keys(APP_LABELS) as AppKey[]).map((app) => {
-                      const granted = role.isSuper
-                        ? true
-                        : role.appAccess[app];
-                      return (
-                        <button
-                          key={app}
-                          onClick={() =>
-                            !role.isSuper && toggleAppAccess(role.id, app)
-                          }
-                          disabled={role.isSuper}
-                          className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 text-center transition-colors ${
-                            granted
-                              ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-                              : "border-gray-200 bg-white text-gray-400 hover:border-gray-300"
-                          } ${role.isSuper ? "cursor-not-allowed" : "cursor-pointer"}`}
-                        >
-                          <span
-                            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${APP_COLORS[app]}`}
-                          >
-                            {APP_LABELS[app]}
-                          </span>
-                          <span className="text-xs">
-                            {granted ? "✓ Access" : "No Access"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Layer 2: Navigation Access */}
-                {(expandedRoleTab[role.id] ?? "app") === "nav" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {(Object.keys(NAV_ITEMS) as AppKey[])
-                      .filter((app) => role.isSuper || role.appAccess[app])
-                      .map((app) => (
-                        <div key={app} className="space-y-1.5">
-                          <p
-                            className={`text-xs font-semibold px-2 py-0.5 rounded-full inline-block ${APP_COLORS[app]}`}
-                          >
-                            {APP_LABELS[app]}
-                          </p>
-                          <div className="space-y-1">
-                            {NAV_ITEMS[app].map((item) => {
-                              const granted = navGranted(role, app, item.id);
-                              return (
-                                <label
-                                  key={item.id}
-                                  className={`flex items-center gap-2 text-xs cursor-pointer ${role.isSuper ? "cursor-not-allowed" : ""}`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={granted}
-                                    onChange={() =>
-                                      !role.isSuper &&
-                                      toggleNavAccess(role.id, app, item.id)
-                                    }
-                                    disabled={role.isSuper}
-                                    className="rounded accent-indigo-600 w-3 h-3"
-                                  />
-                                  <span
-                                    className={
-                                      granted ? "text-gray-700" : "text-gray-400"
-                                    }
-                                  >
-                                    {item.label}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    {(Object.keys(NAV_ITEMS) as AppKey[]).filter(
-                      (app) => !role.isSuper && !role.appAccess[app],
-                    ).length > 0 && (
-                      <div className="col-span-full text-xs text-gray-400 italic">
-                        {(Object.keys(NAV_ITEMS) as AppKey[])
-                          .filter((app) => !role.isSuper && !role.appAccess[app])
-                          .map((a) => APP_LABELS[a])
-                          .join(", ")}{" "}
-                        app(s) not accessible — grant app access in Layer 1
-                        first.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
                 </Fragment>
               ))}
             </tbody>
@@ -1134,6 +1024,184 @@ export function RolesPage() {
           >
             Go to Process Configuration
           </button>
+        </div>
+      )}
+
+
+      {/* Role configuration — a full-screen overlay.
+          This used to render inline under the role's own row, sticky inside the
+          matrix's horizontal-scroll container and capped at
+          w-[min(920px,calc(100vw-6rem))]. That cap left the Layer 1 app tiles and
+          Layer 2 navigation lists badly cramped, and it existed only to stop the
+          panel stretching to the process matrix's full scroll width. Lifting it out
+          of the table removes that constraint entirely, so the panel is free to use
+          the whole viewport. */}
+      {expandedRole && (
+        <div
+          className="fixed inset-0 z-50 bg-gray-900/40 flex items-stretch justify-center sm:p-4"
+          onClick={() => setExpandedRoleId(null)}
+          role="presentation"
+        >
+          <div
+            className="bg-white w-full h-full sm:rounded-xl border border-indigo-100 shadow-xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Configure ${expandedRole.name}`}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-indigo-100 bg-indigo-50/40 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <Shield className="w-4 h-4 text-indigo-600 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">
+                    {expandedRole.name}
+                  </p>
+                  {expandedRole.description && (
+                    <p className="text-xs text-gray-500 italic truncate">
+                      {expandedRole.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setExpandedRoleId(null)}
+                className="p-1.5 rounded-lg hover:bg-white/70 text-gray-400 shrink-0"
+                aria-label="Close role configuration"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {/* Scrolls on its own so the header stays put in a tall config. */}
+            <div className="px-5 py-4 overflow-y-auto flex-1">
+              {/* Layer tabs */}
+              <div className="flex flex-wrap items-center gap-1 mb-4 border-b border-indigo-100">
+                {(["app", "nav"] as const).map((tabKey) => (
+                  <button
+                    key={tabKey}
+                    onClick={() =>
+                      setExpandedRoleTab((t) => ({
+                        ...t,
+                        [expandedRole.id]: tabKey,
+                      }))
+                    }
+                    className={`px-3 py-1.5 text-xs font-medium rounded-t border-b-2 -mb-px transition-colors ${
+                      (expandedRoleTab[expandedRole.id] ?? "app") === tabKey
+                        ? "border-indigo-600 text-indigo-700 bg-white"
+                        : "border-transparent text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    {tabKey === "app"
+                      ? "Layer 1 — App Access"
+                      : "Layer 2 — Navigation"}
+                  </button>
+                ))}
+                <span className="px-3 py-1.5 text-xs text-gray-400 ml-auto italic">
+                  Layer 3 — Process Permissions set in this role's row above
+                </span>
+                <button
+                  onClick={() => void saveRolePermissions(expandedRole.id)}
+                  disabled={roleStatus[expandedRole.id] === "saving"}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {roleStatus[expandedRole.id] === "saving"
+                    ? "Saving…"
+                    : "Save Modifications"}
+                </button>
+              </div>
+
+              {/* Layer 1: Application Access */}
+              {(expandedRoleTab[expandedRole.id] ?? "app") === "app" && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {(Object.keys(APP_LABELS) as AppKey[]).map((app) => {
+                    const granted = expandedRole.isSuper
+                      ? true
+                      : expandedRole.appAccess[app];
+                    return (
+                      <button
+                        key={app}
+                        onClick={() =>
+                          !expandedRole.isSuper && toggleAppAccess(expandedRole.id, app)
+                        }
+                        disabled={expandedRole.isSuper}
+                        className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 text-center transition-colors ${
+                          granted
+                            ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                            : "border-gray-200 bg-white text-gray-400 hover:border-gray-300"
+                        } ${expandedRole.isSuper ? "cursor-not-allowed" : "cursor-pointer"}`}
+                      >
+                        <span
+                          className={`text-xs font-semibold px-2 py-0.5 rounded-full ${APP_COLORS[app]}`}
+                        >
+                          {APP_LABELS[app]}
+                        </span>
+                        <span className="text-xs">
+                          {granted ? "✓ Access" : "No Access"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Layer 2: Navigation Access */}
+              {(expandedRoleTab[expandedRole.id] ?? "app") === "nav" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {(Object.keys(NAV_ITEMS) as AppKey[])
+                    .filter((app) => expandedRole.isSuper || expandedRole.appAccess[app])
+                    .map((app) => (
+                      <div key={app} className="space-y-1.5">
+                        <p
+                          className={`text-xs font-semibold px-2 py-0.5 rounded-full inline-block ${APP_COLORS[app]}`}
+                        >
+                          {APP_LABELS[app]}
+                        </p>
+                        <div className="space-y-1">
+                          {NAV_ITEMS[app].map((item) => {
+                            const granted = navGranted(expandedRole, app, item.id);
+                            return (
+                              <label
+                                key={item.id}
+                                className={`flex items-center gap-2 text-xs cursor-pointer ${expandedRole.isSuper ? "cursor-not-allowed" : ""}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={granted}
+                                  onChange={() =>
+                                    !expandedRole.isSuper &&
+                                    toggleNavAccess(expandedRole.id, app, item.id)
+                                  }
+                                  disabled={expandedRole.isSuper}
+                                  className="rounded accent-indigo-600 w-3 h-3"
+                                />
+                                <span
+                                  className={
+                                    granted ? "text-gray-700" : "text-gray-400"
+                                  }
+                                >
+                                  {item.label}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  {(Object.keys(NAV_ITEMS) as AppKey[]).filter(
+                    (app) => !expandedRole.isSuper && !expandedRole.appAccess[app],
+                  ).length > 0 && (
+                    <div className="col-span-full text-xs text-gray-400 italic">
+                      {(Object.keys(NAV_ITEMS) as AppKey[])
+                        .filter((app) => !expandedRole.isSuper && !expandedRole.appAccess[app])
+                        .map((a) => APP_LABELS[a])
+                        .join(", ")}{" "}
+                      app(s) not accessible — grant app access in Layer 1
+                      first.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

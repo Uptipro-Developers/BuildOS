@@ -9,6 +9,9 @@ const ADMIN_SETTINGS_KEY = 'admin-settings';
 /** How often due schedules are checked. */
 const TICK_MS = 5 * 60 * 1000;
 
+/** Grace period before the post-boot catch-up tick, so the DB pool is warm. */
+const STARTUP_DELAY_MS = 45 * 1000;
+
 type Frequency = 'Hourly' | 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly';
 
 interface ReportSchedule {
@@ -26,6 +29,8 @@ interface ReportSchedule {
     enabled: boolean;
     lastSent?: string | null;
     lastError?: string | null;
+    /** Stamped by createReportSchedule; anchors the very first send. */
+    createdAt?: string | null;
 }
 
 /**
@@ -48,6 +53,7 @@ interface ReportSchedule {
 export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(ReportSchedulerService.name);
     private timer: NodeJS.Timeout | null = null;
+    private startupTimer: NodeJS.Timeout | null = null;
     /** Guards against a slow tick overlapping the next one. */
     private running = false;
 
@@ -58,8 +64,17 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
     ) {}
 
     onModuleInit() {
-        // Deliberately not run at boot: a restart loop would otherwise resend
-        // every due report on each restart. The first tick is one interval away.
+        // A catch-up tick shortly after boot. This used to wait a full interval,
+        // on the reasoning that running at boot would make a restart loop resend
+        // every due report — but that is no longer possible: due-ness is anchored
+        // to the most recent `sendTime` slot and `lastSent` is stamped after every
+        // attempt, so a report whose slot has been served cannot be picked up
+        // again by a restart. Meanwhile the old behaviour meant a deploy could
+        // push delivery out by five minutes, and a service restarting more often
+        // than the interval never delivered at all.
+        this.startupTimer = setTimeout(() => void this.tick(), STARTUP_DELAY_MS);
+        this.startupTimer.unref?.();
+
         this.timer = setInterval(() => void this.tick(), TICK_MS);
         // Do not hold the process open on shutdown.
         this.timer.unref?.();
@@ -69,6 +84,7 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
     }
 
     onModuleDestroy() {
+        if (this.startupTimer) clearTimeout(this.startupTimer);
         if (this.timer) clearInterval(this.timer);
     }
 
@@ -110,41 +126,117 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    /** Parses "HH:MM" into hours and minutes, or null if unusable. */
+    private parseSendTime(value?: string): { hours: number; minutes: number } | null {
+        const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? '').trim());
+        if (!match) return null;
+        const hours = Number(match[1]);
+        const minutes = Number(match[2]);
+        if (hours > 23 || minutes > 59) return null;
+        return { hours, minutes };
+    }
+
     /**
      * Whether a schedule is due.
      *
-     * A schedule that has never run is due immediately, so enabling one delivers
-     * on the next tick rather than after a full period of silence.
+     * `sendTime` used to be ignored entirely: due-ness was purely "has one
+     * interval elapsed since lastSent", so a Daily 08:00 report went out at
+     * whatever time of day the tick happened to land on — and after a manual
+     * "Send now" it drifted to that moment instead. The configured time was
+     * decorative.
+     *
+     * Now the day's send time is the anchor. A schedule is due when the most
+     * recent occurrence of `sendTime` is newer than its last send, which makes a
+     * missed window catch up on the following tick rather than being skipped.
+     *
+     * KNOWN LIMITATION: `sendTime` is interpreted in the server's timezone (UTC on
+     * Railway), not the organisation's configured timezone, so 08:00 fires at
+     * 08:00 UTC. Weekly/Monthly/Quarterly have no weekday or day-of-month field to
+     * anchor to, so they additionally require the full interval to have elapsed
+     * and land on the first send time after it.
      */
     private isDue(schedule: ReportSchedule, now: Date): boolean {
         if (!schedule.enabled) return false;
         if (!schedule.recipients?.trim()) return false;
 
-        const last = schedule.lastSent ? new Date(schedule.lastSent) : null;
-        if (!last || Number.isNaN(last.getTime())) return true;
+        const parsedLast = schedule.lastSent ? new Date(schedule.lastSent) : null;
+        const last =
+            parsedLast && !Number.isNaN(parsedLast.getTime()) ? parsedLast : null;
+        const interval = this.intervalFor(schedule.frequency);
+        const time = this.parseSendTime(schedule.sendTime);
 
-        return now.getTime() - last.getTime() >= this.intervalFor(schedule.frequency);
+        // Hourly has no meaningful time of day, and a schedule saved without a
+        // usable sendTime keeps the old elapsed-interval behaviour rather than
+        // never firing.
+        if (!time || schedule.frequency === 'Hourly') {
+            return !last || now.getTime() - last.getTime() >= interval;
+        }
+
+        // The most recent occurrence of sendTime, which is always in the past.
+        const slot = new Date(now);
+        slot.setHours(time.hours, time.minutes, 0, 0);
+        if (slot.getTime() > now.getTime()) slot.setDate(slot.getDate() - 1);
+
+        if (!last) {
+            // First run waits for a send time that falls after the schedule was
+            // created, so creating a 08:00 daily at 10:00 delivers tomorrow at
+            // 08:00 rather than within five minutes of being saved.
+            const createdRaw = schedule.createdAt ? new Date(schedule.createdAt) : null;
+            const created =
+                createdRaw && !Number.isNaN(createdRaw.getTime()) ? createdRaw : null;
+            return !created || slot.getTime() >= created.getTime();
+        }
+
+        // Nothing new has come around since the last send.
+        if (last.getTime() >= slot.getTime()) return false;
+
+        // Daily is governed by the slot alone; longer frequencies also need their
+        // interval to have elapsed.
+        if (schedule.frequency === 'Daily') return true;
+        return now.getTime() - last.getTime() >= interval;
     }
 
-    /** Resolves which data source a schedule should run. */
+    /**
+     * Resolves which data source and columns a schedule should run.
+     *
+     * The template is consulted FIRST, because it is the only thing that carries
+     * the column selection the report was built with. This used to return early
+     * on `schedule.source` alone — and the UI always sends `source` while never
+     * sending `fields` — so the template branch was unreachable and every
+     * scheduled email attached the source's entire column list instead of the
+     * template's chosen columns. Recipients got the whole table.
+     *
+     * `schedule.source`/`schedule.fields` remain the fallback for a schedule whose
+     * template has since been deleted, so those keep working rather than silently
+     * stopping.
+     */
     private async resolveSource(schedule: ReportSchedule, settings: Record<string, any>) {
-        if (schedule.source) return { source: schedule.source, fields: schedule.fields };
-
         const templates = Array.isArray(settings.reportTemplates)
             ? settings.reportTemplates
             : [];
-        const template = templates.find((t: any) => t?.id === schedule.templateId);
-        if (!template) return null;
+        const template = schedule.templateId
+            ? templates.find((t: any) => t?.id === schedule.templateId)
+            : undefined;
 
-        // Only deployed templates are automated; a draft is still being built.
-        if (String(template.status ?? '').toLowerCase() !== 'deployed') return null;
+        if (template) {
+            // Only deployed templates are automated; a draft is still being built.
+            if (String(template.status ?? '').toLowerCase() !== 'deployed') return null;
 
-        return {
-            source: String(template.dataSource ?? ''),
-            fields: Array.isArray(template.selectedFields)
+            const fields = Array.isArray(template.selectedFields)
                 ? template.selectedFields.map((f: any) => String(f?.key ?? f)).filter(Boolean)
-                : undefined,
-        };
+                : [];
+
+            return {
+                source: String(template.dataSource ?? schedule.source ?? ''),
+                // An empty selection means the template never picked columns, so
+                // defer to the schedule's own list before letting the query fall
+                // back to every field.
+                fields: fields.length > 0 ? fields : schedule.fields,
+            };
+        }
+
+        if (schedule.source) return { source: schedule.source, fields: schedule.fields };
+        return null;
     }
 
     /** Renders rows as CSV for the email attachment. */

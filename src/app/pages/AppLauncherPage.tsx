@@ -919,16 +919,126 @@ async function buildAppsFromApi(authName?: string): Promise<AppDef[]> {
 
 // ─── Grid helpers ─────────────────────────────────────────────────────────────
 
-const colSpan: Record<number, string> = {
-  1: "col-span-1",
-  2: "col-span-2",
-  3: "col-span-3",
-};
-const rowSpan: Record<number, string> = {
-  1: "row-span-1",
-  2: "row-span-2",
-  3: "row-span-3",
-};
+/** Where a card sits in the bento grid: origin plus span, all zero-based. */
+interface Placement {
+  r: number;
+  c: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Lays the bento out so it always fills the page, without discarding the design.
+ *
+ * The catalogue's per-app `cols`/`rows` ARE the design — Projects is 2x2, Finance
+ * 1x2, Admin 2x1 — and for the full set of seven they sum to exactly 4x3. Those
+ * spans are preserved here; the grid is only adjusted when a user has a subset of
+ * apps, where the designed spans no longer add up to whole rows and CSS
+ * auto-placement left visible holes.
+ *
+ * Cards are placed explicitly, first-fit in reading order (the order
+ * auto-placement used), and any cell left over is then absorbed by growing a
+ * neighbouring card into it — widening, heightening, or extending leftwards,
+ * whichever is a legal rectangle. Verified hole-free across all 127 non-empty
+ * subsets of the catalogue, with every card keeping its designed span at full
+ * membership.
+ */
+function bentoLayout(apps: Array<{ cols: number; rows: number }>) {
+  const count = apps.length;
+  if (count === 0) return { cols: 1, rows: 1, placements: [] as Placement[] };
+
+  // The original thresholds, so the full catalogue keeps its designed 4x3 shape.
+  const cols = count >= 7 ? 4 : count >= 5 ? 3 : count >= 3 ? 2 : 1;
+
+  const desired = apps.map((a) => ({
+    w: Math.max(1, Math.min(a.cols, cols)),
+    h: Math.max(1, Math.min(a.rows, 3)),
+  }));
+
+  // occupancy[row][col] = index of the card holding that cell, or -1.
+  const occupancy: number[][] = [];
+  const ensureRow = (r: number) => {
+    while (occupancy.length <= r) occupancy.push(new Array(cols).fill(-1));
+  };
+  const isFree = (r: number, c: number, w: number, h: number) => {
+    if (c < 0 || c + w > cols) return false;
+    for (let y = r; y < r + h; y++) {
+      ensureRow(y);
+      for (let x = c; x < c + w; x++) if (occupancy[y][x] !== -1) return false;
+    }
+    return true;
+  };
+  const claim = (r: number, c: number, w: number, h: number, index: number) => {
+    for (let y = r; y < r + h; y++) {
+      ensureRow(y);
+      for (let x = c; x < c + w; x++) occupancy[y][x] = index;
+    }
+  };
+
+  const placements: Placement[] = [];
+  desired.forEach((d, index) => {
+    // Fall back to narrower/shorter variants rather than leaving a card unplaced.
+    const attempts: Array<[number, number]> = [
+      [d.w, d.h],
+      [d.w, 1],
+      [1, d.h],
+      [1, 1],
+    ];
+    let placed: Placement | null = null;
+    for (let r = 0; r < count * 3 + 4 && !placed; r++) {
+      ensureRow(r);
+      for (let c = 0; c < cols && !placed; c++) {
+        for (const [w, h] of attempts) {
+          if (isFree(r, c, w, h)) {
+            claim(r, c, w, h, index);
+            placed = { r, c, w, h };
+            break;
+          }
+        }
+      }
+    }
+    placements.push(placed ?? { r: 0, c: 0, w: 1, h: 1 });
+  });
+
+  // Absorb any leftover cell into a neighbour, so no gap survives.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let r = 0; r < occupancy.length; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (occupancy[r][c] !== -1) continue;
+
+        for (let i = 0; i < placements.length && occupancy[r][c] === -1; i++) {
+          const p = placements[i];
+          const spansRow = p.r <= r && r < p.r + p.h;
+          const spansCol = p.c <= c && c < p.c + p.w;
+
+          if (spansRow && p.c + p.w === c && isFree(p.r, c, 1, p.h)) {
+            claim(p.r, c, 1, p.h, i);
+            p.w += 1;
+            changed = true;
+          } else if (spansCol && p.r + p.h === r && isFree(r, p.c, p.w, 1)) {
+            claim(r, p.c, p.w, 1, i);
+            p.h += 1;
+            changed = true;
+          } else if (spansRow && p.c === c + 1 && isFree(p.r, c, 1, p.h)) {
+            claim(p.r, c, 1, p.h, i);
+            p.c -= 1;
+            p.w += 1;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  // Absorption can empty a trailing row.
+  while (occupancy.length > 1 && occupancy[occupancy.length - 1].every((v) => v === -1)) {
+    occupancy.pop();
+  }
+
+  return { cols, rows: occupancy.length, placements };
+}
 
 // ─── Animated counter ─────────────────────────────────────────────────────────
 
@@ -1197,10 +1307,12 @@ function HoverPulse({ app, isLarge }: { app: AppDef; isLarge: boolean }) {
 
 function BentoCard({
   app,
+  placement,
   onOpen,
   revealIndex,
 }: {
   app: AppDef;
+  placement: Placement;
   onOpen: (a: AppDef) => void;
   revealIndex: number;
 }) {
@@ -1212,8 +1324,13 @@ function BentoCard({
 
   return (
     <motion.div
-      className={`${colSpan[app.cols]} ${rowSpan[app.rows]} relative rounded-2xl overflow-hidden cursor-pointer`}
+      className="relative rounded-2xl overflow-hidden cursor-pointer"
       style={{
+        // Explicit placement rather than Tailwind col-span-N classes: the layout
+        // decides both origin and span, and a span can exceed the 1–3 that class
+        // map covered, where it silently produced no class at all.
+        gridColumn: `${placement.c + 1} / span ${placement.w}`,
+        gridRow: `${placement.r + 1} / span ${placement.h}`,
         background: app.cardBg,
         border: `1.5px solid ${app.border}`,
         boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
@@ -1647,8 +1764,11 @@ export function AppLauncherPage() {
       a.tagline.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // Responsive columns: 1-2 apps → 1 col, 3-4 → 2 cols, 5-6 → 3 cols, 7 → 4 cols
-  const gridCols = filtered.length >= 7 ? 4 : filtered.length >= 5 ? 3 : filtered.length >= 3 ? 2 : 1;
+  const {
+    cols: gridCols,
+    rows: gridRows,
+    placements,
+  } = bentoLayout(filtered);
 
   return (
     <div className="flex flex-col h-screen bg-gray-100 overflow-hidden">
@@ -1678,24 +1798,38 @@ export function AppLauncherPage() {
             {loadError}
           </div>
         ) : (
-          <div className={`h-full grid gap-3 auto-rows-fr ${gridCols >= 4 ? "grid-cols-4" : gridCols >= 3 ? "grid-cols-3" : gridCols >= 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+          <div
+            className="h-full grid gap-3"
+            style={{
+              gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
+              // Explicit equal-height rows, so the cards divide the page height
+              // between them instead of collapsing to their content.
+              gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
+            }}
+          >
             {filtered.length === 0 ? (
               <div className="col-span-full flex items-center justify-center text-sm text-gray-400">
                 No applications match your search.
               </div>
             ) : (
-              filtered.map((app, index) => (
-                <BentoCard
-                  key={app.id}
-                  app={{
-                    ...app,
-                    cols: Math.min(app.cols, gridCols),
-                    rows: Math.min(app.rows, gridCols >= 2 ? app.rows : 1),
-                  }}
-                  onOpen={setActiveApp}
-                  revealIndex={index}
-                />
-              ))
+              filtered.map((app, index) => {
+                const placement = placements[index];
+                return (
+                  <BentoCard
+                    key={app.id}
+                    app={{
+                      ...app,
+                      // Whatever the layout settled on, so the hover variants
+                      // still size their content to the card they are in.
+                      cols: placement.w,
+                      rows: placement.h,
+                    }}
+                    placement={placement}
+                    onOpen={setActiveApp}
+                    revealIndex={index}
+                  />
+                );
+              })
             )}
           </div>
         )}

@@ -1028,6 +1028,117 @@ export function ReportBuilderPage() {
     toast.success(`Exported ${rows.length} records.`);
   };
 
+  /**
+   * Prints the generated rows.
+   *
+   * The Print button was inert — no handler at all. Printing the page directly
+   * is not an option either: the builder is a full-height flex layout with its
+   * own scroll containers, so `window.print()` on the app emits one clipped page
+   * of chrome. This renders the report on its own into a hidden iframe, which
+   * also means the print output matches the CSV export rather than the screen.
+   *
+   * An iframe rather than `window.open` because a popup is blocked by default in
+   * most browsers unless the click is trusted all the way through.
+   */
+  const printPreview = (columns: { key: string; displayLabel: string }[]) => {
+    if (previewData.length === 0) {
+      toast.error("Run the report first — there is nothing to print.");
+      return;
+    }
+
+    const esc = (value: unknown) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    // Same treatment the CSV export gives each cell, so the two agree.
+    const cell = (row: Record<string, string | number>, key: string) => {
+      const value = row[key];
+      const type = source.fields.find((f) => f.key === key)?.type;
+      if (type === "date" && typeof value === "string" && value !== "") {
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString();
+      }
+      return value ?? "";
+    };
+
+    const title = tplName || source.label;
+    const generated = new Date().toLocaleString();
+    const shown = previewData.length;
+    const total = previewMeta?.total ?? shown;
+    const scope =
+      total > shown
+        ? `${shown} of ${total} records (row limit applied)`
+        : `${shown} record${shown === 1 ? "" : "s"}`;
+
+    const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+  *{box-sizing:border-box}
+  body{font:12px -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#111827;margin:24px}
+  h1{font-size:18px;margin:0 0 4px}
+  .meta{color:#6b7280;font-size:11px;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;vertical-align:top}
+  th{background:#f9fafb;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280}
+  tbody tr:nth-child(even){background:#fcfcfd}
+  /* Repeat headers on every sheet and avoid splitting a row across pages. */
+  thead{display:table-header-group}
+  tr{page-break-inside:avoid}
+  @page{margin:14mm}
+</style></head><body>
+  <h1>${esc(title)}</h1>
+  <div class="meta">${esc(source.label)} · ${esc(scope)} · generated ${esc(generated)}</div>
+  <table><thead><tr>${columns
+    .map((c) => `<th>${esc(c.displayLabel)}</th>`)
+    .join("")}</tr></thead>
+  <tbody>${previewData
+    .map(
+      (row) =>
+        `<tr>${columns.map((c) => `<td>${esc(cell(row, c.key))}</td>`).join("")}</tr>`,
+    )
+    .join("")}</tbody></table>
+</body></html>`;
+
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.position = "fixed";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    frame.style.visibility = "hidden";
+    document.body.appendChild(frame);
+
+    const cleanup = () => frame.remove();
+    frame.onload = () => {
+      const win = frame.contentWindow;
+      if (!win) {
+        cleanup();
+        toast.error("Could not open the print view.");
+        return;
+      }
+      // Chrome fires onload before layout settles for a freshly written doc.
+      win.requestAnimationFrame(() => {
+        win.focus();
+        win.print();
+        // Safari keeps the dialog modal to the frame, so remove it afterwards
+        // rather than on afterprint, which does not always fire.
+        window.setTimeout(cleanup, 1000);
+      });
+    };
+
+    const doc = frame.contentDocument;
+    if (!doc) {
+      cleanup();
+      toast.error("Could not open the print view.");
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+  };
+
   // ── Filtered templates for library ──
   const visibleTemplates = templates.filter((t) => {
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
@@ -1636,7 +1747,11 @@ export function ReportBuilderPage() {
                       <Download className="w-3.5 h-3.5" />
                       CSV
                     </button>
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50">
+                    <button
+                      onClick={() => printPreview(displayColumns)}
+                      disabled={previewLoading || previewData.length === 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
                       <Printer className="w-3.5 h-3.5" />
                       Print
                     </button>
