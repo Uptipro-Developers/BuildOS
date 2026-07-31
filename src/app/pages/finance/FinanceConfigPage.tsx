@@ -95,6 +95,8 @@ export function FinanceConfigPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [saved, setSaved] = useState(false);
+  /** Blocks a second submit while the config POST is in flight. */
+  const [savingAll, setSavingAll] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ConfigDeleteTarget | null>(null);
   const [deleting, setDeleting] = useState(false);
   const { configs, updateConfig, addConfig, removeConfig } = useNumbering();
@@ -183,6 +185,8 @@ export function FinanceConfigPage() {
     formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
 
   function saveAll() {
+    if (savingAll) return;
+    setSavingAll(true);
     apiFetch("/config", {
       method: "POST",
       body: JSON.stringify({
@@ -204,7 +208,8 @@ export function FinanceConfigPage() {
             : "Failed to save finance configuration.",
         );
         console.error(err);
-      });
+      })
+      .finally(() => setSavingAll(false));
   }
 
   function openNumberingEdit(cfg: ModuleNumbering) {
@@ -520,9 +525,14 @@ export function FinanceConfigPage() {
         </div>
         <button
           onClick={saveAll}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${saved ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
+          disabled={savingAll}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed ${saved ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
         >
-          {saved ? (
+          {savingAll ? (
+            <>
+              <Save className="w-4 h-4" /> Saving…
+            </>
+          ) : saved ? (
             <>
               <CheckCircle className="w-4 h-4" /> Saved!
             </>

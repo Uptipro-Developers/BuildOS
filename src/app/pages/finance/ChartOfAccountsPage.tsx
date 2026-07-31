@@ -77,6 +77,9 @@ export function ChartOfAccountsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<AccountType | "All">("All");
   const [showModal, setShowModal] = useState(false);
+  /** Disables the save button while a create/update is in flight, so a
+      double-click cannot post the same account twice. */
+  const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
@@ -104,8 +107,9 @@ export function ChartOfAccountsPage() {
     setShowModal(true);
   }
 
-  function saveAccount() {
-    if (!form.code.trim() || !form.name.trim()) return;
+  async function saveAccount() {
+    if (!form.code.trim() || !form.name.trim() || saving) return;
+    setSaving(true);
     const payload = {
       code: form.code,
       name: form.name,
@@ -113,8 +117,9 @@ export function ChartOfAccountsPage() {
       parentId: form.parentId || undefined,
       description: form.description,
     };
+    try {
     if (editId) {
-      updateChartAccount(editId, payload)
+      await updateChartAccount(editId, payload)
         .then(() => {
           logChange({ module: "Finance", action: "Updated", entityType: "Account", entityId: editId, summary: `Account ${form.code} ${form.name} updated`, performedBy: "Current User" });
           toast.success("Account updated.");
@@ -129,7 +134,7 @@ export function ChartOfAccountsPage() {
           );
         });
     } else {
-      createChartAccount(payload)
+      await createChartAccount(payload)
         .then((created: any) => {
           logChange({ module: "Finance", action: "Created", entityType: "Account", entityId: created?.id ?? form.code, summary: `Account ${form.code} ${form.name} created`, performedBy: "Current User" });
           toast.success("Account created.");
@@ -145,6 +150,9 @@ export function ChartOfAccountsPage() {
         });
     }
     setShowModal(false);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function confirmDelete() {
@@ -185,10 +193,19 @@ export function ChartOfAccountsPage() {
     { key: "code", label: "Code", render: a => <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{a.code}</span>, sortable: true, filterable: true },
     { key: "name", label: "Account Name", render: a => {
       const depth = getDepth(a.id);
+      // A ledger that has children is a parent (control) account and is marked
+      // as such. Indentation alone did not distinguish a parent from a
+      // top-level leaf, so parent ledgers were not identifiable in the table.
+      const isParent = accounts.some((c) => c.parentId === a.id);
       return (
         <div className="flex items-center" style={{ paddingLeft: `${depth * 16}px` }}>
           {depth > 0 && <ChevronRight className="w-3 h-3 text-gray-300 mr-1 shrink-0" />}
-          <span className={`text-sm ${depth === 0 ? "font-semibold" : ""} text-gray-900`}>{a.name}</span>
+          <span className={`text-sm ${isParent ? "font-semibold" : ""} text-gray-900`}>{a.name}</span>
+          {isParent && (
+            <span className="ml-2 shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Parent
+            </span>
+          )}
         </div>
       );
     }, sortable: true, filterable: true, minWidth: 200 },
@@ -381,8 +398,13 @@ export function ChartOfAccountsPage() {
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-              <button onClick={saveAccount} className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
-                <Save className="w-3.5 h-3.5" />{editId ? "Save Changes" : "Create Account"}
+              <button onClick={saveAccount} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed">
+                <Save className="w-3.5 h-3.5" />
+                {saving
+                  ? "Saving…"
+                  : editId
+                    ? "Save Changes"
+                    : "Create Account"}
               </button>
             </div>
           </div>

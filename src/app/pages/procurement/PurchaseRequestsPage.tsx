@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import {
   getPurchaseRequests,
+  createPurchaseRequest,
   updatePurchaseRequest,
   deletePurchaseRequest,
   PurchaseRequest as ApiPR,
@@ -20,7 +21,7 @@ import {
 import { DataTable, type Column } from "../../components/DataTable";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useApprovalRights } from "../../utils/useApprovalRights";
-import { useAuthUser } from "../../utils/useAuthUser";
+import { useAuthUser, getAuthUserName } from "../../utils/useAuthUser";
 import { toast } from "sonner";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
@@ -212,12 +213,26 @@ interface NewPRItemForm {
   estimatedUnitCost: string;
 }
 
+interface NewPRPayload {
+  title: string;
+  projectId?: string;
+  projectName: string;
+  requestedBy: string;
+  daysToDeliver: number;
+  items: {
+    description: string;
+    qty: number;
+    unit: string;
+    unitPrice: number;
+  }[];
+}
+
 function NewPRModal({
   onClose,
   onSave,
 }: {
   onClose: () => void;
-  onSave: (pr: PurchaseRequest) => void;
+  onSave: (payload: NewPRPayload) => void;
 }) {
   const today = new Date();
   const fmtDate = (d: Date) => formatDateByGeneralSettings(d);
@@ -229,6 +244,11 @@ function NewPRModal({
 
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
+  // The material catalogue, so a PR line can only reference a material that
+  // already exists rather than a free-typed name.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
   const [project, setProject] = useState("");
   const [mrRef, setMrRef] = useState("MR-0041");
   const [procType, setProcType] = useState<"direct" | "rfq">("direct");
@@ -256,6 +276,11 @@ function NewPRModal({
         setSelectedSuppliers((prev) =>
           prev.length ? prev : supplierNames.slice(0, 1),
         );
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
+        );
       })
       .catch(() => {});
   }, []);
@@ -278,32 +303,22 @@ function NewPRModal({
 
   async function save() {
     if (!valid || !selectedSuppliers.length) return;
-    const id = await allocate("PurchaseRequest");
-    const total = items.reduce(
-      (s, it) =>
-        s + parseFloat(it.qty) * parseFloat(it.estimatedUnitCost || "0"),
-      0,
-    );
+    // Consumes the next PR number for the numbering config's sequence, even
+    // though PurchaseRequest has no field of its own to store it in yet.
+    await allocate("PurchaseRequest");
     onSave({
-      id,
-      materialRequestRef: mrRef,
-      project,
-      raisedBy: "Amaka Osei",
-      procurementType: procType,
-      status: "draft",
-      raisedDate: fmtDate(today),
-      requiredDate: addDays(parseInt(daysToDeliver) || 7),
-      totalItems: items.length,
-      estimatedValue: total,
-      suppliers: selectedSuppliers.map((s) => ({
-        supplier: s,
-        status: "not_sent" as SupplierStatus,
-      })),
+      title: mrRef.trim()
+        ? `${project} — ${mrRef.trim()}`
+        : `Purchase Request — ${project}`,
+      projectId: projects.find((p) => p.name === project)?.id,
+      projectName: project,
+      requestedBy: getAuthUserName() || "Current User",
+      daysToDeliver: parseInt(daysToDeliver) || 7,
       items: items.map((it) => ({
-        material: it.material,
+        description: it.material,
         qty: parseFloat(it.qty) || 0,
         unit: it.unit,
-        estimatedUnitCost: parseFloat(it.estimatedUnitCost) || 0,
+        unitPrice: parseFloat(it.estimatedUnitCost) || 0,
       })),
     });
     onClose();
@@ -461,18 +476,40 @@ function NewPRModal({
                   key={i}
                   className="grid grid-cols-[1fr_60px_80px_90px_28px] gap-1.5 items-center"
                 >
-                  <input
+                  <select
                     value={it.material}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const name = e.target.value;
                       setItems((p) =>
                         p.map((x, j) =>
-                          j === i ? { ...x, material: e.target.value } : x,
+                          j === i ? { ...x, material: name } : x,
                         ),
-                      )
-                    }
-                    placeholder="Material"
-                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                      );
+                      // Adopt the catalogue's unit for the chosen material.
+                      const chosen = materialOptions.find(
+                        (m) => m.name === name,
+                      );
+                      if (chosen?.unit) {
+                        setItems((p) =>
+                          p.map((x, j) =>
+                            j === i ? { ...x, unit: chosen.unit } : x,
+                          ),
+                        );
+                      }
+                    }}
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      {materialOptions.length === 0
+                        ? "No materials in the catalogue"
+                        : "Select material…"}
+                    </option>
+                    {materialOptions.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="number"
                     value={it.qty}
@@ -953,17 +990,25 @@ export function PurchaseRequestsPage() {
     );
   }
 
-  function handleCreatePR(pr: PurchaseRequest) {
-    setPrList((prev) => [pr, ...prev]);
-    setShowNewPR(false);
-    logChange({
-      module: "procurement",
-      action: "created",
-      entityType: "purchase_request",
-      entityId: pr.id,
-      summary: `Created PR ${pr.id} for ${pr.project}`,
-      performedBy: "Amaka Osei",
-    });
+  async function handleCreatePR(payload: NewPRPayload) {
+    try {
+      const created = await createPurchaseRequest(payload);
+      const pr = fromApi(created);
+      setPrList((prev) => [pr, ...prev]);
+      setShowNewPR(false);
+      logChange({
+        module: "procurement",
+        action: "created",
+        entityType: "purchase_request",
+        entityId: pr.id,
+        summary: `Created PR ${pr.id} for ${pr.project}`,
+        performedBy: authUser.name || "Current User",
+      });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Failed to create the purchase request.",
+      );
+    }
   }
 
   if (loading)

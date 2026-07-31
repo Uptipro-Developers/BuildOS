@@ -74,9 +74,9 @@ const sidebarSections = [
     ],
   },
   {
-    label: "Configuration",
+    label: "Settings",
     items: [
-      { label: "Finance Configuration", href: "/apps/finance/config",          icon: <Settings2    className="w-4 h-4" />, end: true },
+      { label: "Finance Settings",      href: "/apps/finance/config",          icon: <Settings2    className="w-4 h-4" />, end: true },
       { label: "Process Mapping",       href: "/apps/finance/process-mapping", icon: <GitBranch    className="w-4 h-4" />, end: true },
     ],
   },

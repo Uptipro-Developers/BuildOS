@@ -154,6 +154,11 @@ function NewRFQModal({
 
   const [vendors, setVendors] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
+  // The material catalogue, so an RFQ can only be raised for materials that
+  // already exist rather than a free-typed name a vendor can't match to stock.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
   const [vendor, setVendor] = useState("");
   const [vendorEmail, setVendorEmail] = useState("");
   const [prRef, setPrRef] = useState("");
@@ -173,6 +178,11 @@ function NewRFQModal({
         setProjects(projectNames);
         setVendor((prev) => prev || vendorNames[0] || "");
         setProject((prev) => prev || projectNames[0] || "");
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
+        );
       })
       .catch(() => {});
   }, []);
@@ -313,12 +323,29 @@ function NewRFQModal({
                   key={i}
                   className="grid grid-cols-[1fr_80px_100px_32px] gap-2 items-center"
                 >
-                  <input
+                  <select
                     value={item.material}
-                    onChange={(e) => updateItem(i, "material", e.target.value)}
-                    placeholder="Material name"
-                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      updateItem(i, "material", name);
+                      // Adopt the catalogue's unit for the chosen material, so the RFQ
+                      // is raised in the unit the material is stocked in.
+                      const chosen = materialOptions.find((m) => m.name === name);
+                      if (chosen?.unit) updateItem(i, "unit", chosen.unit);
+                    }}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      {materialOptions.length === 0
+                        ? "No materials in the catalogue"
+                        : "Select material…"}
+                    </option>
+                    {materialOptions.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="number"
                     value={item.qty}

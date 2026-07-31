@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param } from '@nestjs/common';
+import { ServiceAuth } from '../auth/decorators';
 import { SuppliersService } from './suppliers.service';
 
 @Controller('suppliers')
@@ -8,6 +9,15 @@ export class SuppliersController {
     @Get()
     findAll() {
         return this.suppliersService.findAll();
+    }
+
+    // Service-accessible: the SabiQuot supplier portal pushes a profile here on
+    // registration/login so it appears in Procurement's supplier list instead of
+    // only ever existing on the portal side.
+    @Post('sync-from-portal')
+    @ServiceAuth()
+    syncFromPortal(@Body() body: any) {
+        return this.suppliersService.syncFromPortal(body);
     }
 
     @Get(':id')

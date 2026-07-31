@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getReportTemplates,
   createReportTemplate,
@@ -501,6 +502,10 @@ export function ReportBuilderPage() {
   const [statusFilter, setStatusFilter] = useState<ReportStatus | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ReportTemplate | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
 
   // ── Builder form state ──
   const [tplName, setTplName] = useState("");
@@ -845,17 +850,20 @@ export function ReportBuilderPage() {
     setOpenDropdownId(null);
   };
 
-  const deleteTemplate = (id: string) => {
-    deleteReportTemplate(id)
-      .then(() => {
-        setTemplates((prev) => prev.filter((t) => t.id !== id));
-        toast.success("Template deleted");
-      })
-      .catch((err) => {
-        console.error(err);
-        toast.error("Failed to delete template");
-      });
-    setOpenDropdownId(null);
+  const confirmDeleteTemplate = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteReportTemplate(deleteTarget.id);
+      setTemplates((prev) => prev.filter((t) => t.id !== deleteTarget.id));
+      toast.success("Template deleted");
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete template");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // ── Builder helpers ──
@@ -2367,7 +2375,10 @@ export function ReportBuilderPage() {
                             </button>
                           ) : (
                             <button
-                              onClick={() => deleteTemplate(tpl.id)}
+                              onClick={() => {
+                                setDeleteTarget(tpl);
+                                setOpenDropdownId(null);
+                              }}
                               className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-600 hover:bg-red-50"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -2408,6 +2419,17 @@ export function ReportBuilderPage() {
           </button>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!deleteTarget}
+        title="Delete Template?"
+        description={`Remove "${deleteTarget?.name ?? ""}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        isDangerous
+        isLoading={deleting}
+        onConfirm={confirmDeleteTemplate}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

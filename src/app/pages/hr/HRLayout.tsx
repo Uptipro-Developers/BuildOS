@@ -139,23 +139,6 @@ const sidebarSections = [
     ],
   },
   {
-    label: "General Setup",
-    items: [
-      {
-        label: "General Setup",
-        href: "/apps/hr/hr-general-setup",
-        icon: <Settings2 className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Base Calendar",
-        href: "/apps/hr/base-calendar",
-        icon: <CalendarCheck className="w-4 h-4" />,
-        end: true,
-      },
-    ],
-  },
-  {
     label: "Payroll Setup",
     items: [
       {
@@ -179,28 +162,6 @@ const sidebarSections = [
     ],
   },
   {
-    label: "Leave Setup",
-    items: [
-      {
-        label: "Leave Type Setup",
-        href: "/apps/hr/leave-type-setup",
-        icon: <CalendarDays className="w-4 h-4" />,
-        end: true,
-      },
-    ],
-  },
-  {
-    label: "Claims Setup",
-    items: [
-      {
-        label: "Claim Type Setup",
-        href: "/apps/hr/claim-type-setup",
-        icon: <CreditCard className="w-4 h-4" />,
-        end: true,
-      },
-    ],
-  },
-  {
     label: "Approvals",
     items: [
       {
@@ -218,6 +179,38 @@ const sidebarSections = [
         label: "HR Reports",
         href: "/apps/hr/reports",
         icon: <BarChart3 className="w-4 h-4" />,
+        end: true,
+      },
+    ],
+  },
+  // One Settings group at the end, as in the prototype. The setup pages were
+  // previously three separate groups ("General Setup", "Leave Setup", "Claims
+  // Setup") interleaved with the operational sections.
+  {
+    label: "Settings",
+    items: [
+      {
+        label: "Settings",
+        href: "/apps/hr/hr-general-setup",
+        icon: <Settings2 className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Leave Type Setup",
+        href: "/apps/hr/leave-type-setup",
+        icon: <CalendarDays className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Claim Type Setup",
+        href: "/apps/hr/claim-type-setup",
+        icon: <CreditCard className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Base Calendar",
+        href: "/apps/hr/base-calendar",
+        icon: <CalendarCheck className="w-4 h-4" />,
         end: true,
       },
     ],

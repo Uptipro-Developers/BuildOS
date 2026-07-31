@@ -14,6 +14,7 @@ import {
 } from '../auth/service-key.service';
 import type { EmailPayload } from '../email/email.service';
 import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
+import { PermissionsService } from '../permissions/permissions.service';
 
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
@@ -86,6 +87,7 @@ export class AdminExtrasService {
         private prisma: PrismaService,
         private mailQueue: MailQueueService,
         private serviceKeys: ServiceKeyService,
+        private permissions: PermissionsService,
     ) { }
 
     private settingsFilePath = path.join(process.cwd(), 'data', 'admin-settings.json');
@@ -1189,7 +1191,57 @@ export class AdminExtrasService {
             .map((w: any) => String(w?.processId ?? '').trim())
             .filter(Boolean);
 
+        // A process with NO configured workflow previously yielded no approvers at
+        // all, which meant nobody — not even an admin — could move a request out of
+        // pending: submissions simply stuck there forever with no way forward. Out
+        // of the box almost nothing has a workflow, so that was the normal case
+        // rather than an edge one.
+        //
+        // For those unconfigured processes, fall back to the role's `approve`
+        // permission from Admin › Roles. Where a workflow IS configured it stays
+        // authoritative and only the named approvers qualify, so configuring a
+        // workflow still narrows who can approve rather than widening it.
+        const configured = new Set(
+            workflows.map((w: any) => String(w?.processId ?? '').trim()).filter(Boolean),
+        );
+        const userId = String(forUser.userId ?? '').trim();
+        if (userId) {
+            const unconfigured = (await this.approvableProcessCatalogIds()).filter(
+                (id) => !configured.has(id),
+            );
+            for (const processId of unconfigured) {
+                if (await this.permissions.can(userId, processId, 'approve')) {
+                    processIds.push(processId);
+                }
+            }
+        }
+
         return { processIds: Array.from(new Set(processIds)) };
+    }
+
+    /** Catalog process ids that support an `approve` action. */
+    private async approvableProcessCatalogIds(): Promise<string[]> {
+        const ids = new Set<string>();
+        for (const proc of DEFAULT_PROCESS_CATALOG) {
+            if ((proc.actions as string[] | undefined)?.includes('approve')) {
+                ids.add(proc.id);
+            }
+        }
+        try {
+            const settings = await this.readAdminSettings();
+            const custom = Array.isArray(settings.processCatalog) ? settings.processCatalog : [];
+            for (const item of custom) {
+                const id = String(item?.id ?? '').trim();
+                if (!id) continue;
+                const actions = Array.isArray(item?.actions)
+                    ? item.actions.map((a: unknown) => String(a).trim().toLowerCase())
+                    : ['approve'];
+                if (actions.includes('approve')) ids.add(id);
+            }
+        } catch {
+            // Fall back to the module defaults already collected.
+        }
+        return [...ids];
     }
 
     /**

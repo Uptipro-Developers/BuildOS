@@ -185,6 +185,11 @@ function RecordDocModal({
   const [vendors, setVendors] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   const [stores, setStores] = useState<{ name: string; level: string }[]>([]);
+  // The material catalogue, so a line item can only reference a material
+  // that already exists rather than a free-typed name.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
   const [vendor, setVendor] = useState("");
   const [rfqRef, setRfqRef] = useState("");
   const [prRef, setPrRef] = useState("");
@@ -211,6 +216,11 @@ function RecordDocModal({
         setVendor((prev) => prev || vendorNames[0] || "");
         setProject((prev) => prev || projectNames[0] || "");
         setDestinationStore((prev) => prev || storeOptions[0]?.name || "");
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
+        );
       })
       .catch(() => {});
   }, []);
@@ -404,12 +414,28 @@ function RecordDocModal({
                   key={i}
                   className="grid grid-cols-[1fr_70px_90px_90px_32px] gap-1.5 items-center"
                 >
-                  <input
+                  <select
                     value={item.material}
-                    onChange={(e) => updateItem(i, "material", e.target.value)}
-                    placeholder="Material"
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      updateItem(i, "material", name);
+                      // Adopt the catalogue's unit for the chosen material.
+                      const chosen = materialOptions.find((m) => m.name === name);
+                      if (chosen?.unit) updateItem(i, "unit", chosen.unit);
+                    }}
+                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      {materialOptions.length === 0
+                        ? "No materials in the catalogue"
+                        : "Select material…"}
+                    </option>
+                    {materialOptions.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="number"
                     value={item.qty}

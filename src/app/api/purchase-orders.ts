@@ -6,11 +6,12 @@ function fmt(date: string | null) {
     return formatDateByGeneralSettings(date);
 }
 
-function mapPO(p: any) {
+export function mapPO(p: any) {
     return {
         id: p.id,
         prRef: p.prRef ?? '',
         mrRef: p.mrRef ?? '',
+        supplierId: p.supplierId ?? p.supplier?.id ?? '',
         supplier: p.supplier?.name ?? '',
         supplierContact: p.supplier?.contactPerson
             ? `${p.supplier.contactPerson}${p.supplier.phone ? ' — ' + p.supplier.phone : ''}`

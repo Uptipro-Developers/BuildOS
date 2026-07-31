@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Plus, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 import {
   getPurchaseInvoices,
@@ -113,6 +114,9 @@ export function PurchaseInvoicePage() {
     "All",
   );
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PurchaseInvoice | null>(
+    null,
+  );
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM, lines: [BLANK_LINE()] });
   const { logChange } = useChangelog();
@@ -240,7 +244,7 @@ export function PurchaseInvoicePage() {
         );
       case "Paid":
         return (
-          <button onClick={() => deleteInvoice(inv.id, inv.invoiceNo)}
+          <button onClick={() => setDeleteTarget(inv)}
             className="text-xs text-red-500 hover:underline">Delete</button>
         );
     }
@@ -652,6 +656,19 @@ export function PurchaseInvoicePage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!deleteTarget}
+        title="Delete Invoice?"
+        description={`Remove invoice "${deleteTarget?.invoiceNo ?? ""}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={() => {
+          if (deleteTarget) deleteInvoice(deleteTarget.id, deleteTarget.invoiceNo);
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

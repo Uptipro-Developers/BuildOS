@@ -33,6 +33,7 @@ import { listEquipmentResources } from "../../api/equipment-resources";
 import type { Vendor } from "./types";
 import { exportCSV } from "../../utils/exportCSV";
 import { useResources } from "../../contexts/ResourceContext";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 
 const statusStyles: Record<string, { badge: string; label: string }> = {
   Awarded: { badge: "bg-blue-100 text-blue-700", label: "Awarded" },
@@ -77,6 +78,10 @@ export function ProjectResourcesPage() {
   const vendors = allVendors.filter((v) => v.projectId === projectId);
 
   const [tab, setTab] = useState<ResourceTab>("human");
+  const [removeContractorTarget, setRemoveContractorTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [humanSubTab, setHumanSubTab] = useState<HumanSubTab>("vendors");
   const [search, setSearch] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -608,7 +613,12 @@ export function ProjectResourcesPage() {
                           </td>
                           <td className="px-4 py-2.5">
                             <button
-                              onClick={() => removeContractor(c.id)}
+                              onClick={() =>
+                                setRemoveContractorTarget({
+                                  id: c.id,
+                                  name: c.name,
+                                })
+                              }
                               className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
                               title="Remove"
                             >
@@ -1377,6 +1387,19 @@ export function ProjectResourcesPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!removeContractorTarget}
+        title="Remove Contractor?"
+        description={`Remove "${removeContractorTarget?.name ?? ""}"? This cannot be undone.`}
+        confirmLabel="Remove"
+        isDangerous
+        onConfirm={() => {
+          if (removeContractorTarget) removeContractor(removeContractorTarget.id);
+          setRemoveContractorTarget(null);
+        }}
+        onCancel={() => setRemoveContractorTarget(null)}
+      />
     </div>
   );
 }

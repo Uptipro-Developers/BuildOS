@@ -6,6 +6,7 @@ import {
   deleteMaterial,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
+import { getMaterialCategories } from "../../api/admin-extras";
 import { toast } from "sonner";
 import {
   getCurrencySymbol,
@@ -253,6 +254,15 @@ export function AllMaterialsPage() {
   );
   const [trackTarget, setTrackTarget] = useState<Material | null>(null);
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
+  /**
+   * Categories as configured under Storefront → Settings → Material Categories.
+   * The filter used to be built from whatever categories happened to appear on
+   * the loaded materials, so a configured category with no material yet was not
+   * filterable and a stale free-typed one still showed up.
+   */
+  const [configuredCategories, setConfiguredCategories] = useState<string[]>(
+    [],
+  );
 
   const toMaterial = (m: any): Material => ({
     id: m.id,
@@ -274,6 +284,16 @@ export function AllMaterialsPage() {
     allocatedProject: m.allocatedProject,
     condition: m.condition,
   });
+
+  useEffect(() => {
+    getMaterialCategories()
+      .then((list) =>
+        setConfiguredCategories(
+          list.map((c) => c.name).filter(Boolean),
+        ),
+      )
+      .catch(() => setConfiguredCategories([]));
+  }, []);
 
   useEffect(() => {
     Promise.all([getMaterials(), getReferenceData()])
@@ -393,11 +413,15 @@ export function AllMaterialsPage() {
   const allocated = reusable.filter(
     (m) => m.allocationStatus === "Allocated",
   ).length;
-  const categories = [
-    "All",
-    ...Array.from(new Set(materials.map((m) => m.category).filter(Boolean))),
-  ];
-  const editableCategories = categories.filter((c) => c !== "All");
+  // The configured list drives the filter. Any category still carried by a
+  // material but no longer configured is appended so those rows stay reachable.
+  const editableCategories = Array.from(
+    new Set([
+      ...configuredCategories,
+      ...materials.map((m) => m.category).filter(Boolean),
+    ]),
+  );
+  const categories = ["All", ...editableCategories];
 
   return (
     <div className="space-y-5">
@@ -515,9 +539,11 @@ export function AllMaterialsPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      {/* Table. Scrolls horizontally rather than clipping: at ten columns the
+          trailing actions cell was being cut off by the wrapper, which is what
+          made the Edit and Archive buttons unreachable on smaller screens. */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <table className="w-full min-w-[1000px] text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Material ID</th>

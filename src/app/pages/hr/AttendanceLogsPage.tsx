@@ -103,7 +103,8 @@ export function AttendanceLogsPage() {
     "All Departments",
     ...Array.from(new Set(logs.map((l) => l.department))).sort(),
   ];
-  const dates = ["All Dates", ...Array.from(new Set(logs.map((l) => l.date)))];
+  /** A log's date as YYYY-MM-DD, to compare against the date input's value. */
+  const dayKey = (d: string) => String(d ?? "").slice(0, 10);
   const employees = [
     "All Employees",
     ...Array.from(new Set(logs.map((l) => l.empName))).sort(),
@@ -112,7 +113,8 @@ export function AttendanceLogsPage() {
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");
   const [empFilter, setEmpFilter] = useState("All Employees");
-  const [dateFilter, setDateFilter] = useState("All Dates");
+  /** Empty means "all dates"; otherwise a YYYY-MM-DD day from the picker. */
+  const [dateFilter, setDateFilter] = useState("");
   const [statusFilter, setStatusFilter] =
     useState<(typeof statuses)[number]>("All Status");
   const [page, setPage] = useState(1);
@@ -124,7 +126,7 @@ export function AttendanceLogsPage() {
     const matchD =
       deptFilter === "All Departments" || l.department === deptFilter;
     const matchE = empFilter === "All Employees" || l.empName === empFilter;
-    const matchDt = dateFilter === "All Dates" || l.date === dateFilter;
+    const matchDt = !dateFilter || dayKey(l.date) === dateFilter;
     const matchSt = statusFilter === "All Status" || l.status === statusFilter;
     return matchS && matchD && matchE && matchDt && matchSt;
   });
@@ -259,18 +261,32 @@ export function AttendanceLogsPage() {
             <option key={d}>{d}</option>
           ))}
         </select>
-        <select
-          value={dateFilter}
-          onChange={(e) => {
-            setDateFilter(e.target.value);
-            setPage(1);
-          }}
-          className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
-        >
-          {dates.map((d) => (
-            <option key={d}>{d}</option>
-          ))}
-        </select>
+        {/* Calendar picker rather than a list of the dates that happen to be
+            present, so any day can be selected directly. */}
+        <div className="flex items-center gap-1">
+          <input
+            type="date"
+            value={dateFilter}
+            aria-label="Filter attendance by date"
+            onChange={(e) => {
+              setDateFilter(e.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+          />
+          {dateFilter && (
+            <button
+              onClick={() => {
+                setDateFilter("");
+                setPage(1);
+              }}
+              className="px-2 py-2 text-xs text-gray-500 hover:text-gray-700"
+              title="Clear date filter"
+            >
+              Clear
+            </button>
+          )}
+        </div>
         <select
           value={statusFilter}
           onChange={(e) => {

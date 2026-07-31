@@ -6,6 +6,7 @@ import {
   getStores,
   type StockTransfer as ApiTransfer,
 } from "../../api/materials";
+import { getReferenceData } from "../../api/reference-data";
 import { Plus, ArrowRight, Search } from "lucide-react";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { toast } from "sonner";
@@ -74,6 +75,23 @@ export function StockTransferPage() {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM });
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The material catalogue, so a transfer line can only reference a material
+  // that already exists rather than a free-typed name.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
+
+  useEffect(() => {
+    getReferenceData()
+      .then((data) =>
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
+        ),
+      )
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     Promise.all([getStockTransfers(), getStores()])
@@ -385,12 +403,30 @@ export function StockTransferPage() {
                     className="grid grid-cols-9 gap-2 mb-2 items-center"
                   >
                     <div className="col-span-5">
-                      <input
-                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                        placeholder="Item name"
+                      <select
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-teal-500"
                         value={item.name}
-                        onChange={(e) => updateItem(i, "name", e.target.value)}
-                      />
+                        onChange={(e) => {
+                          const name = e.target.value;
+                          updateItem(i, "name", name);
+                          // Adopt the catalogue's unit for the chosen material.
+                          const chosen = materialOptions.find(
+                            (m) => m.name === name,
+                          );
+                          if (chosen?.unit) updateItem(i, "unit", chosen.unit);
+                        }}
+                      >
+                        <option value="">
+                          {materialOptions.length === 0
+                            ? "No materials in the catalogue"
+                            : "Select material…"}
+                        </option>
+                        {materialOptions.map((m) => (
+                          <option key={m.name} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="col-span-2">
                       <input

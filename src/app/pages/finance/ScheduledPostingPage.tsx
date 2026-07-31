@@ -110,6 +110,9 @@ function NewPostingModal({
   const [scheduledDate, setScheduledDate] = useState("");
   const [recurringPattern, setRecurringPattern] = useState("");
   const [sourceProcess, setSourceProcess] = useState("");
+  /** Disables the confirm button while the posting is being allocated a number
+      and saved, so a double-click cannot create it twice. */
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     setDebit((prev) => prev || accountOptions[0] || "");
     setCredit((prev) => prev || accountOptions[1] || "");
@@ -123,7 +126,9 @@ function NewPostingModal({
     (scheduleType !== "scheduled" || scheduledDate);
 
   async function save() {
-    if (!valid) return;
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
     onSave({
       id: await allocate("ScheduledPosting"),
       description: description.trim(),
@@ -141,6 +146,9 @@ function NewPostingModal({
       createdDate: today,
     });
     onClose();
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -314,7 +322,7 @@ function NewPostingModal({
           </button>
           <button
             onClick={save}
-            disabled={!valid}
+            disabled={!valid || saving}
             className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {scheduleType === "immediate" ? (
@@ -322,7 +330,13 @@ function NewPostingModal({
             ) : (
               <CalendarClock className="w-4 h-4" />
             )}
-            {scheduleType === "immediate" ? "Post Now" : "Schedule"}
+            {saving
+              ? scheduleType === "immediate"
+                ? "Posting…"
+                : "Scheduling…"
+              : scheduleType === "immediate"
+                ? "Post Now"
+                : "Schedule"}
           </button>
         </div>
       </div>

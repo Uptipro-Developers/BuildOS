@@ -110,6 +110,9 @@ export function JournalEntryPage() {
   const [viewEntry, setViewEntry] = useState<JournalEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<JournalEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** Which save is in flight, so both buttons disable and the active one shows
+      progress — a second click was otherwise able to post a duplicate entry. */
+  const [savingEntry, setSavingEntry] = useState<EntryStatus | null>(null);
 
   const [form, setForm] = useState<{
     date: string;
@@ -187,7 +190,8 @@ export function JournalEntryPage() {
   const isBalanced = totalDebits === totalCredits && totalDebits > 0;
 
   async function saveEntry(status: EntryStatus) {
-    if (!form.description || !isBalanced) return;
+    if (!form.description || !isBalanced || savingEntry) return;
+    setSavingEntry(status);
     const payload = {
       date: new Date(form.date).toISOString(),
       description: form.description,
@@ -223,6 +227,8 @@ export function JournalEntryPage() {
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save journal entry");
+    } finally {
+      setSavingEntry(null);
     }
   }
 
@@ -610,17 +616,17 @@ export function JournalEntryPage() {
                 </button>
                 <button
                   onClick={() => saveEntry("Draft")}
-                  disabled={!form.description}
+                  disabled={!form.description || !!savingEntry}
                   className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                 >
-                  Save as Draft
+                  {savingEntry === "Draft" ? "Saving…" : "Save as Draft"}
                 </button>
                 <button
                   onClick={() => saveEntry("Posted")}
-                  disabled={!isBalanced || !form.description}
+                  disabled={!isBalanced || !form.description || !!savingEntry}
                   className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40"
                 >
-                  Post Entry
+                  {savingEntry === "Posted" ? "Posting…" : "Post Entry"}
                 </button>
               </div>
             </div>

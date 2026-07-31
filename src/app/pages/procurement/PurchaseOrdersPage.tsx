@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { fetchPurchaseOrders } from "../../api/purchase-orders";
+import { fetchPurchaseOrders, createPurchaseOrder, mapPO } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
+import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   csvAmountHeader,
   getCurrencySymbol,
@@ -42,6 +43,7 @@ interface PurchaseOrder {
   id: string;
   prRef: string;
   mrRef: string;
+  supplierId: string;
   supplier: string;
   supplierContact: string;
   status: POStatus;
@@ -151,12 +153,21 @@ interface POItem {
   unitCost: string;
 }
 
+interface NewPOPayload {
+  supplierId: string;
+  prRef?: string;
+  createdBy: string;
+  expectedDate: string;
+  totalValue: number;
+  items: { material: string; qty: number; unit: string; unitCost: number }[];
+}
+
 function NewPOModal({
   onClose,
   onSave,
 }: {
   onClose: () => void;
-  onSave: (po: PurchaseOrder) => void;
+  onSave: (payload: NewPOPayload) => void;
 }) {
   const today = new Date();
   const fmtDate = (d: Date) => formatDateByGeneralSettings(d);
@@ -165,10 +176,24 @@ function NewPOModal({
     d2.setDate(d2.getDate() + n);
     return fmtDate(d2);
   };
+  /** ISO variant of addDays, since addDays's display format can't be sent to the backend. */
+  const addDaysIso = (n: number) => {
+    const d2 = new Date(today);
+    d2.setDate(d2.getDate() + n);
+    d2.setHours(0, 0, 0, 0);
+    return d2.toISOString();
+  };
 
-  const [suppliers, setSuppliers] = useState<string[]>([]);
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>(
+    [],
+  );
   const [projects, setProjects] = useState<string[]>([]);
-  const [supplier, setSupplier] = useState("");
+  // The material catalogue, so a PO line can only reference a material that
+  // already exists rather than a free-typed name.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
+  const [supplierId, setSupplierId] = useState("");
   const [supplierContact, setSupplierContact] = useState("");
   const [prRef, setPrRef] = useState("");
   const [project, setProject] = useState("");
@@ -180,12 +205,20 @@ function NewPOModal({
   useEffect(() => {
     getReferenceData()
       .then((data) => {
-        const supplierNames = data.suppliers.map((s) => s.name);
+        const supplierList = data.suppliers.map((s) => ({
+          id: s.id,
+          name: s.name,
+        }));
         const projectNames = data.projects.map((p) => p.name);
-        setSuppliers(supplierNames);
+        setSuppliers(supplierList);
         setProjects(projectNames);
-        setSupplier((prev) => prev || supplierNames[0] || "");
+        setSupplierId((prev) => prev || supplierList[0]?.id || "");
         setProject((prev) => prev || projectNames[0] || "");
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
+        );
       })
       .catch(() => {});
   }, []);
@@ -205,35 +238,27 @@ function NewPOModal({
   );
   const { allocate } = useNumbering();
   const valid =
-    supplier &&
+    supplierId &&
     items.every(
       (it) => it.material.trim() && it.qty.trim() && it.unitCost.trim(),
     );
 
   async function handleSave() {
     if (!valid) return;
-    const nextId = await allocate("PurchaseOrder");
+    // Consumes the next PO number for the numbering config's sequence, even
+    // though PurchaseOrder has no field of its own to store it in yet.
+    await allocate("PurchaseOrder");
     onSave({
-      id: nextId,
-      prRef: prRef.trim() || "—",
-      mrRef: "—",
-      supplier,
-      supplierContact: supplierContact.trim() || supplier,
-      status: "draft",
-      paymentStatus: "unpaid",
-      sentToFinance: false,
-      createdBy: "Amaka Osei",
-      createdDate: fmtDate(today),
-      expectedDate: addDays(parseInt(deliveryDays) || 7),
-      totalItems: items.length,
+      supplierId,
+      prRef: prRef.trim() || undefined,
+      createdBy: getAuthUserName() || "Current User",
+      expectedDate: addDaysIso(parseInt(deliveryDays) || 7),
       totalValue,
-      receivedValue: 0,
       items: items.map((it) => ({
         material: it.material,
         qty: parseFloat(it.qty) || 0,
         unit: it.unit,
         unitCost: parseFloat(it.unitCost) || 0,
-        received: 0,
       })),
     });
   }
@@ -259,12 +284,14 @@ function NewPOModal({
                 Supplier <span className="text-red-500">*</span>
               </label>
               <select
-                value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {suppliers.map((s) => (
-                  <option key={s}>{s}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -339,12 +366,28 @@ function NewPOModal({
                   key={i}
                   className="grid grid-cols-[1fr_70px_90px_90px_32px] gap-1.5 items-center"
                 >
-                  <input
+                  <select
                     value={item.material}
-                    onChange={(e) => updateItem(i, "material", e.target.value)}
-                    placeholder="Material"
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      updateItem(i, "material", name);
+                      // Adopt the catalogue's unit for the chosen material.
+                      const chosen = materialOptions.find((m) => m.name === name);
+                      if (chosen?.unit) updateItem(i, "unit", chosen.unit);
+                    }}
+                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">
+                      {materialOptions.length === 0
+                        ? "No materials in the catalogue"
+                        : "Select material…"}
+                    </option>
+                    {materialOptions.map((m) => (
+                      <option key={m.name} value={m.name}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     type="number"
                     value={item.qty}
@@ -1033,17 +1076,27 @@ export function PurchaseOrdersPage() {
       {showNewPO && (
         <NewPOModal
           onClose={() => setShowNewPO(false)}
-          onSave={(po) => {
-            setPoList((prev) => [po, ...prev]);
-            logChange({
-              module: "Procurement",
-              action: "Created",
-              entityType: "PurchaseOrder",
-              entityId: po.id,
-              summary: `PO ${po.id} created — ${po.supplier} (${fmt(po.totalValue)})`,
-              performedBy: "Current User",
-            });
-            setShowNewPO(false);
+          onSave={async (payload) => {
+            try {
+              const created = await createPurchaseOrder(payload);
+              const po = mapPO(created);
+              setPoList((prev) => [po, ...prev]);
+              logChange({
+                module: "Procurement",
+                action: "Created",
+                entityType: "PurchaseOrder",
+                entityId: po.id,
+                summary: `PO ${po.id} created — ${po.supplier} (${fmt(po.totalValue)})`,
+                performedBy: "Current User",
+              });
+              setShowNewPO(false);
+            } catch (e) {
+              toast.error(
+                e instanceof Error
+                  ? e.message
+                  : "Failed to create the purchase order.",
+              );
+            }
           }}
         />
       )}

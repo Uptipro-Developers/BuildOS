@@ -451,6 +451,25 @@ export class AdminExtrasController {
     @Roles('admin')
     sendReportScheduleNow(@Param('id') id: string) { return this.scheduler.sendNow(id); }
 
+    /**
+     * Scheduler heartbeat and per-schedule due-ness.
+     *
+     * Diagnostic for "the scheduled email never arrives": it distinguishes a loop
+     * that is not running in the deployed environment from a schedule the loop
+     * has seen but does not consider due.
+     */
+    @Get('report-schedules/status')
+    @Roles('admin')
+    getReportSchedulerStatus() { return this.scheduler.status(); }
+
+    /** Forces a scheduler pass now, without waiting for the next tick. */
+    @Post('report-schedules/run-due')
+    @Roles('admin')
+    async runDueReportSchedules() {
+        await this.scheduler.tick();
+        return this.scheduler.status();
+    }
+
     // ── Report Templates ──
     @Get('report-templates')
     @Roles('admin')

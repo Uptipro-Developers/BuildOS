@@ -119,6 +119,11 @@ function RecordDeliveryModal({
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [warehouse, setWarehouse] = useState(existingGrn?.warehouse || "");
   const [deliveryNote, setDeliveryNote] = useState("");
+  // The material catalogue, so a receipt line can only reference a material
+  // that already exists rather than a free-typed name.
+  const [materialOptions, setMaterialOptions] = useState<
+    { name: string; unit: string }[]
+  >([]);
 
   // Load open purchase orders for the PO reference dropdown.
   useEffect(() => {
@@ -142,6 +147,11 @@ function RecordDeliveryModal({
         setWarehouses(storeNames);
         setWarehouse(
           (prev) => prev || existingGrn?.warehouse || storeNames[0] || "",
+        );
+        setMaterialOptions(
+          (data.materials ?? [])
+            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
+            .filter((m) => m.name),
         );
       })
       .catch(() => {});
@@ -343,14 +353,31 @@ function RecordDeliveryModal({
                             {item.material}
                           </span>
                         ) : (
-                          <input
+                          <select
                             value={item.material}
-                            onChange={(e) =>
-                              updateItem(i, "material", e.target.value)
-                            }
-                            placeholder="Material name"
-                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
+                            onChange={(e) => {
+                              const name = e.target.value;
+                              updateItem(i, "material", name);
+                              // Adopt the catalogue's unit for the chosen material.
+                              const chosen = materialOptions.find(
+                                (m) => m.name === name,
+                              );
+                              if (chosen?.unit)
+                                updateItem(i, "unit", chosen.unit);
+                            }}
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="">
+                              {materialOptions.length === 0
+                                ? "No materials in the catalogue"
+                                : "Select material…"}
+                            </option>
+                            {materialOptions.map((m) => (
+                              <option key={m.name} value={m.name}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
                         )}
                       </td>
                       <td className="px-2 py-1.5">
@@ -361,7 +388,13 @@ function RecordDeliveryModal({
                           }
                           className="border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                         >
-                          {GRN_UNITS.map((u) => (
+                          {/* Include the line's own unit so a catalogue unit
+                              outside GRN_UNITS still renders as selected. */}
+                          {Array.from(
+                            new Set(
+                              [...GRN_UNITS, item.unit].filter(Boolean),
+                            ),
+                          ).map((u) => (
                             <option key={u}>{u}</option>
                           ))}
                         </select>

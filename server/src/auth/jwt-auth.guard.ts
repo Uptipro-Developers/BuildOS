@@ -11,6 +11,7 @@ import { verify, type JwtPayload } from 'jsonwebtoken';
 import { RedisService } from '../redis/redis.service';
 import { RedisKeys } from '../redis/redis.constants';
 import { ServiceKeyService } from './service-key.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface AuthTokenPayload extends JwtPayload {
     sub?: string;
@@ -43,6 +44,7 @@ export class JwtAuthGuard implements CanActivate {
         private readonly reflector: Reflector,
         private readonly redis: RedisService,
         private readonly serviceKeys: ServiceKeyService,
+        private readonly prisma: PrismaService,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -86,7 +88,7 @@ export class JwtAuthGuard implements CanActivate {
         }
 
         await this.assertNotRevoked(payload);
-        this.assertRoles(context, payload);
+        await this.assertRoles(context, payload);
         this.assertPermissions(context, payload);
         this.assertApps(context, payload);
         return true;
@@ -145,7 +147,10 @@ export class JwtAuthGuard implements CanActivate {
         }
     }
 
-    private assertRoles(context: ExecutionContext, payload: AuthTokenPayload): void {
+    private async assertRoles(
+        context: ExecutionContext,
+        payload: AuthTokenPayload,
+    ): Promise<void> {
         const requiredRoles = this.reflector.getAllAndOverride<string[]>('roles', [
             context.getHandler(),
             context.getClass(),
@@ -167,10 +172,67 @@ export class JwtAuthGuard implements CanActivate {
         const rawRoles = payload.role ?? payload.roles ?? [];
         const userRoles = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map(canonical);
         const needed = requiredRoles.map(canonical);
-        if (!needed.some((role) => userRoles.includes(role))) {
-            throw new ForbiddenException(
-                `User does not have required role(s): ${requiredRoles.join(', ')}`,
-            );
+        if (needed.some((role) => userRoles.includes(role))) {
+            return;
+        }
+
+        // The `@Roles()` lists name a fixed set of built-in slugs, so a role an
+        // admin created ("Procurement Officer") could never satisfy one no matter
+        // what it had been granted — every such user got
+        // "does not have required role(s): admin". Fall back to the configured
+        // role table: a role flagged `isSuper` clears any role gate, and any role
+        // whose app scope covers this route's app is treated as satisfying it,
+        // leaving the fine-grained decision to the VCEAD checks that follow.
+        if (await this.roleSatisfiesByConfig(userRoles, context)) {
+            return;
+        }
+
+        throw new ForbiddenException(
+            `User does not have required role(s): ${requiredRoles.join(', ')}`,
+        );
+    }
+
+    /**
+     * Whether the caller's configured role clears a `@Roles()` gate.
+     *
+     * Deliberately coarse: it only decides that the role is *entitled to reach*
+     * the module. What the role may actually do there is enforced by
+     * `@RequiresProcess()` / the permission matrix, which reads the same
+     * configuration an admin edits in Admin › Roles.
+     */
+    private async roleSatisfiesByConfig(
+        userRoles: string[],
+        context: ExecutionContext,
+    ): Promise<boolean> {
+        if (userRoles.length === 0) return false;
+        try {
+            const canonical = (value: unknown) =>
+                String(value ?? '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[\s_-]+/g, '');
+
+            const roles = await this.prisma.appRole.findMany({
+                select: { name: true, isSuper: true, appScope: true },
+            });
+            const match = roles.find((r) => userRoles.includes(canonical(r.name)));
+            if (!match) return false;
+            if (match.isSuper) return true;
+
+            const requiredApps = this.reflector.getAllAndOverride<string[]>('requiredApps', [
+                context.getHandler(),
+                context.getClass(),
+            ]);
+            // Without a declared app there is nothing to scope against, so the
+            // static list stays authoritative.
+            if (!requiredApps || requiredApps.length === 0) return false;
+
+            const scope = (Array.isArray(match.appScope) ? match.appScope : []).map(canonical);
+            return requiredApps.map(canonical).some((app) => scope.includes(app));
+        } catch {
+            // A lookup failure must not turn into a spurious denial for a user the
+            // static list would otherwise have rejected; keep the original outcome.
+            return false;
         }
     }
 

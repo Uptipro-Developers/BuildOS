@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import {
   csvAmountHeader,
@@ -71,9 +71,23 @@ const reports: ReportConfig[] = [
 
 const fmt = (n: number) => `${getCurrencySymbol()}${(n / 1000000).toFixed(1)}M`;
 
+/**
+ * The six months ending with the current one, newest first — the period list
+ * was a hardcoded run of 2025 months, so it went stale as soon as the year
+ * turned over.
+ */
+function lastSixMonths(): string[] {
+  const now = new Date();
+  return Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  });
+}
+
 export function HRReportsPage() {
   const [activeReport, setActiveReport] = useState<ReportType>("attendance");
-  const [period, setPeriod] = useState("April 2025");
+  const periods = lastSixMonths();
+  const [period, setPeriod] = useState(periods[0]);
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<ReportType | null>(null);
 
@@ -103,8 +117,13 @@ export function HRReportsPage() {
   const [workforcePreview, setWorkforcePreview] = useState<WorkRow[]>([]);
   const [payrollPreview, setPayrollPreview] = useState<PayRow[]>([]);
 
-  useEffect(() => {
-    getAttendance()
+  /**
+   * Rebuilds every preview from the API. "Generate Report" used to be a 1.5s
+   * timer over data fetched once on mount, so a failed fetch (silently
+   * swallowed) left the report permanently blank with no way to retry.
+   */
+  const loadPreviews = useCallback(async () => {
+    const attendance = getAttendance()
       .then((recs) => {
         const deptMap = new Map<
           string,
@@ -152,10 +171,9 @@ export function HRReportsPage() {
                 : 0,
           })),
         );
-      })
-      .catch(() => {});
+      });
 
-    getWorkforceAllocations()
+    const workforce = getWorkforceAllocations()
       .then((allocs: any[]) => {
         const projMap = new Map<
           string,
@@ -182,10 +200,9 @@ export function HRReportsPage() {
             overAllocated: v.overCount,
           })),
         );
-      })
-      .catch(() => {});
+      });
 
-    getPayrollRuns()
+    const payroll = getPayrollRuns()
       .then((runs) => {
         const latest = runs[0];
         if (!latest) return;
@@ -211,21 +228,35 @@ export function HRReportsPage() {
             Array.from(dMap.entries()).map(([dept, v]) => ({ dept, ...v })),
           );
         });
-      })
-      .catch(() => {});
+      });
+
+    await Promise.all([attendance, workforce, payroll]);
   }, []);
 
-  const periods = ["January 2025", "February 2025", "March 2025", "April 2025"];
+  useEffect(() => {
+    loadPreviews().catch(() => {
+      toast.error("Could not load report data.");
+    });
+  }, [loadPreviews]);
 
-  function generate(type: ReportType) {
+  async function generate(type: ReportType) {
     setGenerating(true);
     setActiveReport(type);
-    setTimeout(() => {
-      setGenerating(false);
+    const title = reports.find((r) => r.type === type)?.title ?? "Report";
+    try {
+      await loadPreviews();
       setGenerated(type);
-      const title = reports.find((r) => r.type === type)?.title ?? "Report";
       toast.success(`${title} generated for ${period}.`);
-    }, 1500);
+    } catch (err) {
+      setGenerated(null);
+      toast.error(
+        err instanceof Error
+          ? `Could not generate ${title}: ${err.message}`
+          : `Could not generate ${title}.`,
+      );
+    } finally {
+      setGenerating(false);
+    }
   }
 
   function exportReport(type: ReportType) {

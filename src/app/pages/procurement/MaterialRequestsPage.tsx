@@ -36,6 +36,7 @@ import {
 import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
 import { getAuthUserName } from "../../utils/useAuthUser";
+import { createPurchaseRequest } from "../../api/procurement-requests";
 
 type ReqStatus =
   "pending" | "approved" | "rejected" | "in_procurement" | "fulfilled";
@@ -331,6 +332,21 @@ function NewMRModal({
     setItems((p) => p.filter((_, j) => j !== i));
   const updateItem = (i: number, k: keyof MRItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
+  /**
+   * Materials picked on every line except `i` — used to keep a material out of
+   * the other lines' dropdowns so it can't be requested twice in one request.
+   */
+  const materialsOnOtherLines = (i: number) =>
+    new Set(
+      items
+        .filter((_, j) => j !== i)
+        .map((it) => it.material)
+        .filter(Boolean),
+    );
+  /** True once every catalogue material is already on a line. */
+  const allMaterialsUsed =
+    materialOptions.length > 0 &&
+    items.filter((it) => it.material).length >= materialOptions.length;
   const { allocate } = useNumbering();
   const valid =
     project &&
@@ -482,7 +498,13 @@ function NewMRModal({
               </label>
               <button
                 onClick={addItem}
-                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                disabled={allMaterialsUsed}
+                title={
+                  allMaterialsUsed
+                    ? "Every material in the catalogue is already on this request"
+                    : undefined
+                }
+                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 disabled:text-gray-300 disabled:hover:text-gray-300 disabled:cursor-not-allowed"
               >
                 <Plus className="w-3 h-3" /> Add Item
               </button>
@@ -510,11 +532,19 @@ function NewMRModal({
                         ? "No materials in the catalogue"
                         : "Select material…"}
                     </option>
-                    {materialOptions.map((m) => (
-                      <option key={m.name} value={m.name}>
-                        {m.name}
-                      </option>
-                    ))}
+                    {/* A material already on another line is dropped, so the
+                        same item cannot be requested twice in one request. */}
+                    {materialOptions
+                      .filter(
+                        (m) =>
+                          m.name === item.material ||
+                          !materialsOnOtherLines(i).has(m.name),
+                      )
+                      .map((m) => (
+                        <option key={m.name} value={m.name}>
+                          {m.name}
+                        </option>
+                      ))}
                   </select>
                   <input
                     type="number"
@@ -528,7 +558,11 @@ function NewMRModal({
                     onChange={(e) => updateItem(i, "unit", e.target.value)}
                     className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {MR_UNITS.map((u) => (
+                    {/* Include the line's own unit so a catalogue unit outside
+                        MR_UNITS still renders as selected. */}
+                    {Array.from(
+                      new Set([...MR_UNITS, item.unit].filter(Boolean)),
+                    ).map((u) => (
                       <option key={u}>{u}</option>
                     ))}
                   </select>
@@ -726,6 +760,7 @@ function RaisePRModal({
   const [procType, setProcType] = useState<"direct" | "rfq">("direct");
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const { allocate } = useNumbering();
 
   useEffect(() => {
@@ -749,10 +784,35 @@ function RaisePRModal({
   }
 
   async function submit() {
-    if (!selected.length) return;
-    const prId = await allocate("PurchaseRequest");
-    onDone(prId, procType, selected);
-    onClose();
+    if (!selected.length || submitting) return;
+    setSubmitting(true);
+    try {
+      // nextId is discarded once the server returns the real prRef; allocate()
+      // is still called for its numbering-sequence side effect.
+      await allocate("PurchaseRequest");
+      const created = await createPurchaseRequest({
+        title: `${req.project} — ${req.id}`,
+        projectName: req.project,
+        requestedBy: getAuthUserName() || "Current User",
+        notes: `Raised from Material Request ${req.id} (${procType === "direct" ? "Direct Procurement" : "RFQ"}, supplier${selected.length > 1 ? "s" : ""}: ${selected.join(", ")}).`,
+        items: req.items.map((it) => ({
+          description: it.material,
+          qty: it.qty,
+          unit: it.unit,
+          unitPrice: 0,
+        })),
+      });
+      onDone(created.prRef ?? created.id, procType, selected);
+      onClose();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to raise the purchase request.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -869,10 +929,11 @@ function RaisePRModal({
           </button>
           <button
             onClick={submit}
-            disabled={!selected.length}
+            disabled={!selected.length || submitting}
             className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <ShoppingCart className="w-4 h-4" /> Create Purchase Request
+            <ShoppingCart className="w-4 h-4" />{" "}
+            {submitting ? "Creating…" : "Create Purchase Request"}
           </button>
         </div>
       </div>
@@ -1251,7 +1312,7 @@ export function MaterialRequestsPage() {
                             : "Awaiting approval from the approver configured for Material Requests."}
                         </p>
                       ))}
-                    {req.status === "approved" && (
+                    {req.status === "approved" && mayApproveRequests && (
                       <div className="flex gap-2 mt-4 justify-end">
                         <button
                           onClick={(e) => {

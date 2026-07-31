@@ -168,6 +168,9 @@ export function ExpenseManagementPage() {
   const [viewExpense, setViewExpense] = useState<Expense | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** Which save is in flight, so both buttons disable and the active one shows
+      progress — a second click was otherwise able to file a duplicate expense. */
+  const [savingExpense, setSavingExpense] = useState<ExpenseStatus | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [rejectState, setRejectState] = useState<{
     id: string;
@@ -297,7 +300,8 @@ export function ExpenseManagementPage() {
   }
 
   async function saveExpense(status: ExpenseStatus) {
-    if (!form.project || !form.amount || !form.description) return;
+    if (!form.project || !form.amount || !form.description || savingExpense) return;
+    setSavingExpense(status);
     const projectId = projects.find((p) => p.name === form.project)?.id;
     const payload = {
       projectId,
@@ -329,6 +333,8 @@ export function ExpenseManagementPage() {
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save expense");
+    } finally {
+      setSavingExpense(null);
     }
   }
 
@@ -690,15 +696,19 @@ export function ExpenseManagementPage() {
               </button>
               <button
                 onClick={() => saveExpense("Draft")}
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800"
+                disabled={!!savingExpense}
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Save className="w-3.5 h-3.5" /> Save as Draft
+                <Save className="w-3.5 h-3.5" />
+                {savingExpense === "Draft" ? "Saving…" : "Save as Draft"}
               </button>
               <button
                 onClick={() => saveExpense("Submitted")}
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                disabled={!!savingExpense}
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Send className="w-3.5 h-3.5" /> Submit
+                <Send className="w-3.5 h-3.5" />
+                {savingExpense === "Submitted" ? "Submitting…" : "Submit"}
               </button>
             </div>
           </div>

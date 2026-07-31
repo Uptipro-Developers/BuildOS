@@ -856,6 +856,9 @@ function StockThresholdsPanel() {
   const [stores, setStores] = useState<ApiStore[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<StoreThreshold | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StoreThreshold | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Omit<StoreThreshold, "id">>({
     storeName: "",
@@ -933,6 +936,11 @@ function StockThresholdsPanel() {
       thresholds.filter((x) => x.id !== id),
       "Threshold deleted",
     );
+  }
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    await remove(deleteTarget.id);
+    setDeleteTarget(null);
   }
 
   return (
@@ -1023,7 +1031,7 @@ function StockThresholdsPanel() {
                       <Edit className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => remove(t.id)}
+                      onClick={() => setDeleteTarget(t)}
                       title="Delete threshold"
                       className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
                     >
@@ -1178,6 +1186,36 @@ function StockThresholdsPanel() {
                 className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60"
               >
                 {saving ? "Saving…" : editing ? "Save Changes" : "Add Store"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-gray-900">
+              Delete Threshold?
+            </h2>
+            <p className="text-sm text-gray-600">
+              Remove the threshold for{" "}
+              <span className="font-semibold">{deleteTarget.storeName}</span>?
+              This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={saving}
+                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl disabled:opacity-60"
+              >
+                {saving ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>

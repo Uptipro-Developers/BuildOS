@@ -35,6 +35,7 @@ import { fetchEmployees } from "../../api/employees";
 import { listMaterialResources } from "../../api/material-resources";
 import { listEquipmentResources } from "../../api/equipment-resources";
 import { exportCSV } from "../../utils/exportCSV";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   useResources,
   type IndividualContractor,
@@ -133,6 +134,9 @@ export function ResourcesOverviewPage() {
   });
 
   const [showVendorModal, setShowVendorModal] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<
+    { type: "contractor" | "vendor"; id: string; name: string } | null
+  >(null);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [vendorForm, setVendorForm] = useState({
     name: "",
@@ -703,7 +707,13 @@ export function ResourcesOverviewPage() {
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => removeContractor(c.id)}
+                            onClick={() =>
+                              setRemoveTarget({
+                                type: "contractor",
+                                id: c.id,
+                                name: c.name,
+                              })
+                            }
                             className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
                             title="Remove"
                           >
@@ -889,7 +899,13 @@ export function ResourcesOverviewPage() {
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
                               <button
-                                onClick={() => removeVendor(v.id)}
+                                onClick={() =>
+                                  setRemoveTarget({
+                                    type: "vendor",
+                                    id: v.id,
+                                    name: v.name,
+                                  })
+                                }
                                 className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
                                 title="Remove"
                               >
@@ -1574,6 +1590,22 @@ export function ResourcesOverviewPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!removeTarget}
+        title={`Remove ${removeTarget?.type === "vendor" ? "Vendor" : "Contractor"}?`}
+        description={`Remove "${removeTarget?.name ?? ""}"? This cannot be undone.`}
+        confirmLabel="Remove"
+        isDangerous
+        onConfirm={() => {
+          if (removeTarget) {
+            if (removeTarget.type === "vendor") removeVendor(removeTarget.id);
+            else removeContractor(removeTarget.id);
+          }
+          setRemoveTarget(null);
+        }}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 

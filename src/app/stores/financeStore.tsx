@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
 import { fetchAccruals, fetchAccrualTypes } from "../api/accruals";
+import { getChartAccounts } from "../api/finance-extras";
 import type {
   Account, AccountType, FiscalYear,
   Accrual, TxnType, AccrualTypeConfig,
@@ -116,6 +117,29 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     fetchAccrualTypes()
       .then(setAccrualTypeConfigs)
       .catch(() => setAccrualTypeConfigs([]));
+
+    // The chart of accounts is persisted server-side. SEED_ACCOUNTS is only the
+    // pre-load placeholder: without this, every consumer of the store (the
+    // Accruals line-item picker most visibly) offered the same demo ledger
+    // rather than the accounts the org actually configured.
+    getChartAccounts()
+      .then((rows) => {
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        setAccounts(
+          rows.map((a: any) => ({
+            id: a.id,
+            code: a.code ?? "",
+            name: a.name ?? "",
+            type: a.type,
+            parentId: a.parentId ?? null,
+            description: a.description ?? "",
+            balance: a.balance ?? undefined,
+          })),
+        );
+      })
+      .catch(() => {
+        /* keep the placeholder ledger if the lookup fails */
+      });
   }, [reloadAccruals]);
 
   const getDescendantIds = useCallback((parentId: string): string[] => {

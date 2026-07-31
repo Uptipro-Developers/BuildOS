@@ -362,6 +362,12 @@ export class AuthService {
             assignedApps = dbUser?.assignedApps ?? [];
         }
 
+        // ESS is every employee's baseline — it is where they raise their own
+        // requests, so it is never something to be assigned or withheld. Without
+        // this, a user whose record simply had no apps assigned yet was locked out
+        // of ESS by the guard's app check. Mirrors PermissionsService.resolveForUser.
+        assignedApps = Array.from(new Set(['ess', ...assignedApps]));
+
         const payload = { sub: user.id, email: user.email, role: user.role, assignedApps };
         const accessTtl = this.getAccessTokenTtl();
         const refreshTtl = this.getRefreshTokenTtl();

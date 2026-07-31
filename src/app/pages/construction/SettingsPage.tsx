@@ -28,6 +28,7 @@ import type {
   ProjectTypeSetting,
 } from "./types";
 import { ALL_PERMISSIONS } from "./types";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   defaultScheduleLevels,
   defaultWeatherConfig,
@@ -116,6 +117,9 @@ type SectionId =
 export function SettingsPage() {
   const { roles, addRole, updateRole, deleteRole } = useRoles();
   const [editingRole, setEditingRole] = useState<string | null>(null);
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState<ProjectRole | null>(
+    null,
+  );
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleDesc, setNewRoleDesc] = useState("");
   const [roleFormName, setRoleFormName] = useState("");
@@ -865,7 +869,7 @@ export function SettingsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => deleteRole(role.id)}
+                          onClick={() => setDeleteRoleTarget(role)}
                           className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1028,6 +1032,19 @@ export function SettingsPage() {
           </button>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteRoleTarget}
+        title="Delete Role?"
+        description={`Remove the "${deleteRoleTarget?.name ?? ""}" role? This cannot be undone.`}
+        confirmLabel="Delete"
+        isDangerous
+        onConfirm={() => {
+          if (deleteRoleTarget) deleteRole(deleteRoleTarget.id);
+          setDeleteRoleTarget(null);
+        }}
+        onCancel={() => setDeleteRoleTarget(null)}
+      />
     </div>
   );
 }

@@ -62,6 +62,11 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
     private startupTimer: NodeJS.Timeout | null = null;
     /** Guards against a slow tick overlapping the next one. */
     private running = false;
+    /** When the loop last completed a pass, for the status endpoint. */
+    private lastTickAt: string | null = null;
+    private lastTickError: string | null = null;
+    private ticks = 0;
+    private readonly startedAt = new Date().toISOString();
 
     constructor(
         private prisma: PrismaService,
@@ -420,11 +425,57 @@ export class ReportSchedulerService implements OnModuleInit, OnModuleDestroy {
             }
 
             if (changed) await this.writeSchedules(schedules);
+            this.lastTickError = null;
         } catch (error) {
+            this.lastTickError = (error as Error).message;
             this.logger.error(`Report scheduler tick failed: ${(error as Error).message}`);
         } finally {
+            this.lastTickAt = new Date().toISOString();
+            this.ticks += 1;
             this.running = false;
         }
+    }
+
+    /**
+     * Whether the loop is actually alive, and what it currently thinks is due.
+     *
+     * Delivery failures here are almost always environmental rather than logical
+     * — the process not staying up between windows, or more than one instance —
+     * and none of that is visible from the Report Automation screen, where a
+     * schedule that never fires looks identical to one the loop has never seen.
+     * This reports the loop's own heartbeat alongside each schedule's computed
+     * due-ness so the two cases can be told apart.
+     */
+    async status() {
+        const settings = await this.readSettings();
+        const schedules: ReportSchedule[] = Array.isArray(settings.reportSchedules)
+            ? settings.reportSchedules
+            : [];
+        const now = new Date();
+        const timeZone =
+            String(settings?.generalSettings?.timezone ?? '').trim() || 'UTC';
+
+        return {
+            running: this.timer !== null,
+            startedAt: this.startedAt,
+            lastTickAt: this.lastTickAt,
+            lastTickError: this.lastTickError,
+            ticks: this.ticks,
+            tickIntervalMinutes: TICK_MS / 60000,
+            timeZone,
+            serverTime: now.toISOString(),
+            schedules: schedules.map((s) => ({
+                id: s.id,
+                name: s.name,
+                enabled: s.enabled,
+                frequency: s.frequency,
+                sendTime: s.sendTime,
+                recipients: s.recipients,
+                lastSent: s.lastSent ?? null,
+                lastError: s.lastError ?? null,
+                dueNow: this.isDue(s, now, timeZone),
+            })),
+        };
     }
 
     /** Runs one schedule and emails the result. Also used by "Send now". */
