@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailQueueService } from '../queue/mail-queue.service';
 import { RedisService } from '../redis/redis.service';
 import { RedisKeys } from '../redis/redis.constants';
+import { EmailTemplateService } from '../email/email-template.service';
 import type { User } from '@prisma/client';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class AuthService {
         private config: ConfigService,
         private mailQueue: MailQueueService,
         private redis: RedisService,
+        private emailTemplates: EmailTemplateService,
     ) { }
 
     private parseDurationToMs(value: string): number {
@@ -112,46 +114,6 @@ export class AuthService {
             .replace(/'/g, '&#39;');
     }
 
-    /**
-     * Looks up the enabled admin email template for a trigger (stored in the
-     * admin-settings SystemSetting row) and renders {{variable}} tokens.
-     * Returns null when no template is configured so callers use their
-     * built-in default email.
-     */
-    private async composeTemplatedEmail(
-        trigger: string,
-        vars: Record<string, unknown>,
-    ): Promise<{ subject: string; text: string; html: string; cc: string[] } | null> {
-        try {
-            const row = await this.prisma.systemSetting.findUnique({ where: { key: 'admin-settings' } });
-            const settings = (row?.value ?? {}) as Record<string, any>;
-            const configs = Array.isArray(settings.emailConfigs) ? settings.emailConfigs : [];
-            const config = configs.find(
-                (c: any) => c?.enabled !== false && String(c?.trigger ?? '') === trigger,
-            );
-            if (!config || (!String(config.subject ?? '').trim() && !String(config.body ?? '').trim())) {
-                return null;
-            }
-            const render = (template: string) =>
-                String(template ?? '').replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (match, key) => {
-                    const snake = String(key).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-                    const value = vars[snake] ?? vars[String(key)];
-                    return value === undefined || value === null ? match : String(value);
-                });
-            const subject = render(String(config.subject ?? '')).trim();
-            const text = render(String(config.body ?? ''));
-            const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1f2937;white-space:pre-wrap;">${this.escapeHtml(text)}</div>`;
-            const cc = render(String(config.cc ?? ''))
-                .split(/[,;]/)
-                .map((s: string) => s.trim())
-                .filter((s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
-            return { subject, text, html, cc };
-        } catch (error) {
-            this.logger.warn(`Email template lookup failed: ${(error as Error).message}`);
-            return null;
-        }
-    }
-
     private normalizeBaseUrl(value: string): string {
         return String(value || '').trim().replace(/\/$/, '');
     }
@@ -189,7 +151,7 @@ export class AuthService {
 
         // Admin-configured template ("Password Reset Requested") takes
         // precedence over the built-in reset email.
-        const templated = await this.composeTemplatedEmail('Password Reset Requested', {
+        const templated = await this.emailTemplates.compose('Password Reset Requested', {
             name: safeName,
             user_name: safeName,
             email,
@@ -197,11 +159,22 @@ export class AuthService {
             reset_link: resetLink,
         });
         if (templated) {
+            // Only add the built-in button when the template does not provide a
+            // link of its own — write `[[Reset Password]]({{reset_link}})` in the
+            // body to control its label and placement.
+            const fallbackButton = templated.hasLink
+                ? ''
+                : `<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;">` +
+                  `<a href="${this.escapeHtml(resetLink)}" style="display:inline-block;` +
+                  `padding:12px 20px;border-radius:10px;background:#2563eb;color:#ffffff;` +
+                  `text-decoration:none;font-weight:600;font-size:14px;">Reset Password</a></p>`;
             await this.mailQueue.enqueueEmail({
                 to: email,
                 subject: templated.subject || 'Reset your BuildOS password',
-                text: `${templated.text}\n\nReset your password: ${resetLink}`,
-                html: `${templated.html}<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;"><a href="${this.escapeHtml(resetLink)}" style="display:inline-block;padding:12px 20px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;">Reset Password</a></p>`,
+                text: templated.hasLink
+                    ? templated.text
+                    : `${templated.text}\n\nReset your password: ${resetLink}`,
+                html: `${templated.html}${fallbackButton}`,
                 ...(templated.cc.length > 0 ? { cc: templated.cc } : {}),
             });
             return;

@@ -1,21 +1,14 @@
-import { AdminExtrasService } from './admin-extras.service';
+import { EmailTemplateService } from './email-template.service';
 
 /**
- * `renderEmailLinks` decides what markup reaches a recipient's inbox, so it is
+ * `renderLinks` decides what markup reaches a recipient's inbox, so it is
  * covered directly. It runs on an already-escaped body and re-introduces only
  * the link and button forms; anything else must stay inert text.
  *
- * The service is constructed with null collaborators: this method touches none
- * of them.
+ * Constructed with a null Prisma client: this method touches none of it.
  */
 function render(escaped: string): string {
-    const svc = new AdminExtrasService(
-        null as any,
-        null as any,
-        null as any,
-        null as any,
-    );
-    return (svc as any).renderEmailLinks(escaped);
+    return new EmailTemplateService(null as any).renderLinks(escaped);
 }
 
 /** Mirrors the escaping the caller applies before this method runs. */
@@ -28,7 +21,7 @@ function escape(value: string): string {
         .replace(/'/g, '&#39;');
 }
 
-describe('renderEmailLinks', () => {
+describe('renderLinks', () => {
     it('turns [label](url) into an anchor', () => {
         const out = render(escape('Go to [Open ESS](https://app.test/ess) now'));
         expect(out).toContain('<a href="https://app.test/ess"');

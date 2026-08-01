@@ -162,6 +162,13 @@ const APPLICATIONS = [
 ];
 
 // ─── Data Sources ──────────────────────────────────────────────────────────
+/**
+ * How many of each table's fields are pre-selected when several tables are
+ * picked. The registry lists a source's most identifying columns first, so this
+ * gives a readable joined row without selecting every column of every table.
+ */
+const DEFAULT_FIELDS_PER_SOURCE = 4;
+
 const DATA_SOURCES: DataSource[] = [
   {
     value: "projects",
@@ -585,10 +592,29 @@ export function ReportBuilderPage() {
    * a stale key would silently match nothing.
    */
   const toggleDataSource = (value: string) => {
-    setTplDataSources((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    const next = tplDataSources.includes(value)
+      ? tplDataSources.filter((v) => v !== value)
+      : [...tplDataSources, value];
+    setTplDataSources(next);
+
+    // Seed a selection for the new set. With several tables an empty selection
+    // reads as two unrelated tables side by side, so each contributes its
+    // identifying columns up front and the joined shape is visible immediately.
+    const chosen = next
+      .map((v) => liveSources.find((s) => s.value === v))
+      .filter((s): s is ReportSourceDef => Boolean(s));
+    const multi = chosen.length > 1;
+    setSelectedFields(
+      multi
+        ? chosen.flatMap((s) =>
+            s.fields.slice(0, DEFAULT_FIELDS_PER_SOURCE).map((f) => ({
+              key: `${s.value}:${f.key}`,
+              displayLabel: f.label,
+              aggregation: "none" as Aggregation,
+            })),
+          )
+        : [],
     );
-    setSelectedFields([]);
     setFilters([]);
     setSortRules([]);
     setHasRun(false);
@@ -618,10 +644,13 @@ export function ReportBuilderPage() {
           label: selectedSources.map((s) => s.label).join(" + "),
           module: selectedSources[0].module,
           appKey: selectedSources[0].app,
+          // Labels stay plain — the table name is not repeated in front of every
+          // header. The key carries the source, so two tables sharing a column
+          // name still resolve unambiguously.
           fields: selectedSources.flatMap((s) =>
             s.fields.map((f) => ({
               key: fieldKeyFor(s.value, f.key),
-              label: isMultiSource ? `${s.label} — ${f.label}` : f.label,
+              label: f.label,
               type: f.type as (typeof baseSource.fields)[number]["type"],
               queryable: f.queryable,
             })),
@@ -1378,9 +1407,9 @@ export function ReportBuilderPage() {
               )}
               {isMultiSource && (
                 <p className="mt-1.5 text-[11px] text-gray-500">
-                  Rows from each table are listed together with a Source column.
-                  They are not joined — there is no defined key to join these
-                  tables on.
+                  Related tables are joined into one row. Tables with no relation
+                  between them are listed together instead, with a Source column
+                  saying which each row came from.
                 </p>
               )}
             </div>

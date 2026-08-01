@@ -15,6 +15,7 @@ import {
 import type { EmailPayload } from '../email/email.service';
 import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 import { PermissionsService } from '../permissions/permissions.service';
+import { EmailTemplateService, type ComposedEmail } from '../email/email-template.service';
 
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
@@ -88,6 +89,7 @@ export class AdminExtrasService {
         private mailQueue: MailQueueService,
         private serviceKeys: ServiceKeyService,
         private permissions: PermissionsService,
+        private emailTemplates: EmailTemplateService,
     ) { }
 
     private settingsFilePath = path.join(process.cwd(), 'data', 'admin-settings.json');
@@ -2401,88 +2403,13 @@ export class AdminExtrasService {
             // template would break as soon as the environment changes.
             result[trigger] = [
                 ...new Set([
-                    ...AdminExtrasService.URL_VARIABLE_NAMES,
+                    ...EmailTemplateService.URL_VARIABLE_NAMES,
                     ...(source.extras ?? []),
                     ...fields,
                 ]),
             ];
         }
         return result;
-    }
-
-    /**
-     * URL variables every template can use, so an admin can link into the app
-     * without hardcoding a domain that differs between environments. Resolved
-     * from the same FRONTEND_URL/APP_WEB_URL/APP_URL chain the system emails use.
-     */
-    private urlTemplateVars(): Record<string, string> {
-        const base = this.getFrontendBaseUrl();
-        return {
-            app_url: base,
-            login_url: `${base}/auth/login`,
-            ess_url: `${base}/apps/ess`,
-        };
-    }
-
-    /** Names of the URL variables, for the Admin variable palette. */
-    static readonly URL_VARIABLE_NAMES = ['app_url', 'login_url', 'ess_url'];
-
-    /**
-     * Turns links and buttons in an already-HTML-escaped body into real anchors.
-     *
-     * The body is escaped first and only these patterns are re-introduced as
-     * markup, so a template can add a link without being able to inject
-     * arbitrary HTML into outgoing mail.
-     *
-     *   [Open ESS](https://…)     → inline anchor
-     *   [[Open ESS]](https://…)   → button-styled anchor
-     *   https://… on its own      → auto-linked
-     *
-     * Only http/https targets are accepted; anything else (javascript:, data:)
-     * is left as plain text.
-     */
-    private renderEmailLinks(escaped: string): string {
-        const safeHref = (raw: string): string | null => {
-            // The input is HTML-escaped, so &amp; must be restored before use.
-            const url = raw.replace(/&amp;/g, '&').trim();
-            return /^https?:\/\/[^\s<>"]+$/i.test(url) ? url : null;
-        };
-        const attr = (url: string) => this.escapeHtml(url).replace(/&amp;/g, '&amp;');
-
-        let out = escaped;
-
-        // Button form first — its [[…]] would otherwise match the inline form.
-        out = out.replace(
-            /\[\[([^\]\n]+)\]\]\(([^)\s]+)\)/g,
-            (match, label: string, href: string) => {
-                const url = safeHref(href);
-                if (!url) return match;
-                return (
-                    `<a href="${attr(url)}" style="display:inline-block;` +
-                    `background:#4f46e5;color:#ffffff;text-decoration:none;` +
-                    `padding:10px 18px;border-radius:8px;font-weight:600;` +
-                    `margin:8px 0;">${label}</a>`
-                );
-            },
-        );
-
-        out = out.replace(
-            /\[([^\]\n]+)\]\(([^)\s]+)\)/g,
-            (match, label: string, href: string) => {
-                const url = safeHref(href);
-                if (!url) return match;
-                return `<a href="${attr(url)}" style="color:#4f46e5;">${label}</a>`;
-            },
-        );
-
-        // Bare URLs, skipping any already inside an href we just produced.
-        out = out.replace(/(href="[^"]*"|>)|(https?:\/\/[^\s<>"]+)/g, (match, skip, bare) => {
-            if (skip) return match;
-            const url = safeHref(bare);
-            return url ? `<a href="${attr(url)}" style="color:#4f46e5;">${url}</a>` : match;
-        });
-
-        return out;
     }
 
     /** Replaces {{ variable }} tokens (case-insensitive, optional spaces). */
@@ -2517,46 +2444,8 @@ export class AdminExtrasService {
     async composeTemplatedEmail(
         trigger: string,
         vars: Record<string, unknown>,
-    ): Promise<{
-        subject: string;
-        text: string;
-        html: string;
-        cc: string[];
-        /**
-         * True when the admin's body already renders its own link or button.
-         * Callers that append a default call-to-action use this to step aside,
-         * so a template that defines its own button does not get a second one
-         * bolted on underneath it.
-         */
-        hasLink: boolean;
-    } | null> {
-        const settings = await this.readAdminSettings();
-        const config = settings.emailConfigs.find(
-            (c: any) => c?.enabled !== false && String(c?.trigger ?? '') === trigger,
-        );
-        if (!config || (!String(config.subject ?? '').trim() && !String(config.body ?? '').trim())) {
-            return null;
-        }
-        // URL variables are merged under the caller's, so a trigger that supplies
-        // its own more specific link (an activation URL) still wins.
-        const withUrls = { ...this.urlTemplateVars(), ...vars };
-
-        const subject = this.renderEmailTemplate(String(config.subject ?? ''), withUrls).trim();
-        const text = this.renderEmailTemplate(String(config.body ?? ''), withUrls);
-        // Escape the whole body, then re-introduce only the link/button forms, so
-        // a template can add a clickable link without being able to inject
-        // arbitrary HTML. Previously the escaped text was used as-is, so a link
-        // typed into a template arrived as literal markup.
-        const body = this.renderEmailLinks(this.escapeHtml(text));
-        const html =
-            `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;` +
-            `line-height:1.6;color:#1f2937;white-space:pre-wrap;">` +
-            `${body}</div>`;
-        const cc = this.renderEmailTemplate(String(config.cc ?? ''), withUrls)
-            .split(/[,;]/)
-            .map((s: string) => s.trim())
-            .filter((s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
-        return { subject, text, html, cc, hasLink: body.includes('<a href="') };
+    ): Promise<ComposedEmail | null> {
+        return this.emailTemplates.compose(trigger, vars);
     }
 
     /**

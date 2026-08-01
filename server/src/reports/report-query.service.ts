@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type ReportFieldType = 'text' | 'number' | 'date' | 'status';
@@ -521,6 +522,40 @@ export interface ReportRunRequest {
 /** Separates the source from the field in a namespaced multi-source key. */
 const SOURCE_KEY_SEPARATOR = ':';
 
+/**
+ * A to-one relation from one report source's model to another's, discovered from
+ * Prisma's DMMF rather than hand-maintained here — the schema already describes
+ * every foreign key, and a second copy would drift.
+ */
+interface SourceRelation {
+    /** Relation field on the root model, e.g. `project` on Income. */
+    field: string;
+}
+
+/** DMMF model whose delegate name (lowercased) matches `model`. */
+function dmmfModelFor(model: string) {
+    return Prisma.dmmf.datamodel.models.find(
+        (m) => m.name.toLowerCase() === String(model ?? '').toLowerCase(),
+    );
+}
+
+/**
+ * The to-one relation from `fromModel` to `toModel`, if one exists.
+ *
+ * To-one only: a to-many would multiply the root's rows by its children, turning
+ * "purchase orders with their supplier" into one row per line item, which is not
+ * what selecting two tables in a report builder means.
+ */
+export function findToOneRelation(fromModel: string, toModel: string): SourceRelation | null {
+    const from = dmmfModelFor(fromModel);
+    const to = dmmfModelFor(toModel);
+    if (!from || !to) return null;
+    const field = from.fields.find(
+        (f) => f.kind === 'object' && !f.isList && f.type === to.name,
+    );
+    return field ? { field: field.name } : null;
+}
+
 export function namespacedFieldKey(sourceValue: string, fieldKey: string): string {
     return `${sourceValue}${SOURCE_KEY_SEPARATOR}${fieldKey}`;
 }
@@ -665,6 +700,14 @@ export class ReportQueryService {
             });
         }
 
+        // Prefer a real join. If one selected source can reach every other
+        // through a to-one relation, the report is one row per root record with
+        // the related tables' columns alongside — which is what selecting several
+        // tables is asking for. Stacking is only the fallback for genuinely
+        // unrelated tables, where no join key exists.
+        const joined = await this.tryJoinedRun(sources, request);
+        if (joined) return joined;
+
         // Split the row budget across the selected sources so one large table
         // cannot crowd the others out of the result entirely.
         const budget = Math.min(Math.max(Number(request.limit) || 100, 1), MAX_ROWS);
@@ -692,7 +735,9 @@ export class ReportQueryService {
             for (const column of result.columns) {
                 columns.push({
                     key: namespacedFieldKey(source.value, column.key),
-                    label: `${source.label} — ${column.label}`,
+                    // Plain label: the table name is carried by the Source column,
+                    // not repeated in front of every header.
+                    label: column.label,
                     type: column.type,
                 });
             }
@@ -718,6 +763,172 @@ export class ReportQueryService {
         return {
             source: sources.map((s) => s.value).join(','),
             sources: sources.map((s) => s.value),
+            columns,
+            rows,
+            rowCount: rows.length,
+            total,
+            truncated: total > rows.length,
+            generatedAt: new Date(),
+        };
+    }
+
+    /**
+     * Runs the selected sources as a single joined query, or returns null when no
+     * root reaches all the others.
+     *
+     * Each related source's columns are pulled through its relation field with a
+     * nested `select`, so one root record yields one row carrying every selected
+     * table's fields. Filters and sorts still resolve through the registry, so
+     * this cannot reach a column a source does not declare.
+     */
+    private async tryJoinedRun(sources: ReportSource[], request: ReportRunRequest) {
+        // Any selected source may serve as the root; take the first that reaches
+        // all the others.
+        let root: ReportSource | undefined;
+        let relations: Map<string, SourceRelation> | undefined;
+
+        for (const candidate of sources) {
+            const found = new Map<string, SourceRelation>();
+            const reachesAll = sources.every((other) => {
+                if (other.value === candidate.value) return true;
+                const relation = findToOneRelation(candidate.model, other.model);
+                if (!relation) return false;
+                found.set(other.value, relation);
+                return true;
+            });
+            if (reachesAll) {
+                root = candidate;
+                relations = found;
+                break;
+            }
+        }
+        if (!root || !relations) return null;
+
+        const rootSource = root;
+        const rootRelations = relations;
+
+        /** The fields requested for a source, defaulting to all of them. */
+        const fieldsFor = (source: ReportSource): ReportField[] => {
+            const requested = this.stripNamespace(request.fields, source.value);
+            const chosen = requested
+                .map((key) => source.fields.find((f) => f.key === key))
+                .filter((f): f is ReportField => Boolean(f));
+            return chosen.length > 0 ? chosen : source.fields;
+        };
+
+        const rootFields = fieldsFor(rootSource);
+        const select: Record<string, any> = {};
+        for (const field of rootFields) {
+            if (field.column) select[field.column] = true;
+            for (const [key, value] of Object.entries(field.select ?? {})) {
+                select[key] =
+                    key === '_count' && select._count
+                        ? { select: { ...select._count.select, ...(value as any).select } }
+                        : value;
+            }
+        }
+
+        // Pull each related source's columns through its relation field.
+        const relatedFields = new Map<string, ReportField[]>();
+        for (const source of sources) {
+            if (source.value === rootSource.value) continue;
+            const relation = rootRelations.get(source.value)!;
+            const fields = fieldsFor(source);
+            relatedFields.set(source.value, fields);
+            const nested: Record<string, any> = {};
+            for (const field of fields) {
+                if (field.column) nested[field.column] = true;
+                for (const [key, value] of Object.entries(field.select ?? {})) {
+                    nested[key] = value;
+                }
+            }
+            if (Object.keys(nested).length === 0) nested.id = true;
+            select[relation.field] = { select: nested };
+        }
+        if (Object.keys(select).length === 0) select.id = true;
+
+        // Filters and sorts apply to the root only: a clause on a joined table
+        // would need relation filtering, which the registry does not describe.
+        const rootFilters = (request.filters ?? [])
+            .filter((f) => {
+                const split = splitNamespacedKey(f.field);
+                return !split || split.source === rootSource.value;
+            })
+            .map((f) => ({ ...f, field: this.stripKey(f.field, rootSource.value) }));
+        const where = this.buildWhere(rootSource, rootFilters);
+
+        const orderBy = (request.sort ?? [])
+            .filter((s) => {
+                const split = splitNamespacedKey(s.field);
+                return !split || split.source === rootSource.value;
+            })
+            .map((rule) => {
+                const key = this.stripKey(rule.field, rootSource.value);
+                const field = rootSource.fields.find((f) => f.key === key);
+                if (!field?.column || field.queryable === false) return null;
+                return { [field.column]: rule.direction === 'desc' ? 'desc' : 'asc' };
+            })
+            .filter(Boolean) as Record<string, 'asc' | 'desc'>[];
+
+        const take = Math.min(Math.max(Number(request.limit) || 100, 1), MAX_ROWS);
+        const delegate = (this.prisma as any)[rootSource.model];
+        if (!delegate?.findMany) return null;
+
+        const [records, total] = await Promise.all([
+            delegate.findMany({
+                where,
+                select,
+                ...(orderBy.length > 0 ? { orderBy } : {}),
+                take,
+            }),
+            delegate.count({ where }),
+        ]);
+
+        // Column labels stay plain — the table name is not repeated in every
+        // header. Keys remain namespaced so two tables sharing a column name
+        // (id, status, name) do not collide.
+        const columns: Array<{ key: string; label: string; type: string }> = rootFields.map(
+            (f) => ({
+                key: namespacedFieldKey(rootSource.value, f.key),
+                label: f.label,
+                type: f.type,
+            }),
+        );
+        for (const [sourceValue, fields] of relatedFields) {
+            for (const field of fields) {
+                columns.push({
+                    key: namespacedFieldKey(sourceValue, field.key),
+                    label: field.label,
+                    type: field.type,
+                });
+            }
+        }
+
+        const rows = records.map((record: any) => {
+            const row: Record<string, unknown> = {};
+            for (const field of rootFields) {
+                row[namespacedFieldKey(rootSource.value, field.key)] = field.derive
+                    ? field.derive(record)
+                    : (record[field.column as string] ?? null);
+            }
+            for (const [sourceValue, fields] of relatedFields) {
+                const relation = rootRelations.get(sourceValue)!;
+                const nested = record[relation.field] ?? null;
+                for (const field of fields) {
+                    row[namespacedFieldKey(sourceValue, field.key)] = nested
+                        ? field.derive
+                            ? field.derive(nested)
+                            : (nested[field.column as string] ?? null)
+                        : null;
+                }
+            }
+            return row;
+        });
+
+        return {
+            source: sources.map((s) => s.value).join(','),
+            sources: sources.map((s) => s.value),
+            joinedOn: rootSource.value,
             columns,
             rows,
             rowCount: rows.length,
