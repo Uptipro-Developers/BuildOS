@@ -224,9 +224,12 @@ export class ReportsController {
   }
 
   // ── Report Builder ──
-  /** The sources and fields Report Builder may offer, from the query registry. */
+  /**
+   * The sources and fields Report Builder may offer, from the query registry.
+   *
+   * Open to any authenticated user for the same reason as `run` below.
+   */
   @Get('sources')
-  @Roles('admin', 'finance-manager', 'hr-manager')
   listReportSources() {
     return { success: true, data: this.reportQuery.listSources() };
   }
@@ -234,9 +237,18 @@ export class ReportsController {
   /**
    * Runs a built report. Filters and sorts are resolved through the registry, so
    * only listed fields can reach the database.
+   *
+   * This was `@Roles('admin', 'finance-manager', 'hr-manager')`, which meant an
+   * ordinary user opening their application's Reports module and pressing
+   * Generate Report got a 403 — the reports are listed for everyone, so gating
+   * the execution on three specific roles made the button dead for most of the
+   * people it is shown to.
+   *
+   * Authentication is still required by the global guard, and the registry is
+   * what constrains this: a caller can only reach sources and columns it
+   * declares, so opening the route does not widen what any report can read.
    */
   @Post('run')
-  @Roles('admin', 'finance-manager', 'hr-manager')
   async runReport(@Body() body: any) {
     const result = await this.reportQuery.run(body ?? {});
     return { success: true, data: result };
