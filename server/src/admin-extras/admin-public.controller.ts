@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, Query, UseGuards } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
 import { RolesGuard } from '../auth/roles.guard';
 import { AdminExtrasService } from './admin-extras.service';
@@ -27,6 +27,22 @@ export class AdminPublicController {
     @Get('reference-data')
     getReferenceData() {
         return this.svc.referenceData();
+    }
+
+    /**
+     * Report templates that have been deployed from Report Builder, optionally
+     * for one application.
+     *
+     * Deliberately open to any authenticated user: each app's Reports module
+     * lists these, and gating it on `admin` would leave every non-admin looking
+     * at a Reports page with nothing on it. Only deployed templates are returned
+     * — a draft is still being edited — and the payload is configuration
+     * (name, source, fields), not report data. Running one still goes through
+     * `/reports/run`, which resolves fields through the registry.
+     */
+    @Get('report-templates/deployed')
+    getDeployedReportTemplates(@Query('app') app?: string) {
+        return this.svc.findDeployedReportTemplates(app);
     }
 
     @Get('company-profile')

@@ -35,6 +35,7 @@ import {
 } from "../../components/AdvancedFilter";
 import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
+import { getUnits } from "../../api/admin-extras";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import { createPurchaseRequest } from "../../api/procurement-requests";
 
@@ -222,7 +223,12 @@ const MR_FILTER_FIELDS: FilterFieldDef[] = [
   },
 ];
 
-const MR_UNITS = [
+/**
+ * Fallback units, used only until the configured list loads (or if it fails).
+ * The real list is Storefront's Units of Measurement — a hardcoded list here
+ * offered units nobody had configured and omitted ones they had.
+ */
+const MR_UNIT_FALLBACK = [
   "Tonnes",
   "Bags",
   "Metres",
@@ -282,6 +288,8 @@ function NewMRModal({
   const [materialOptions, setMaterialOptions] = useState<
     { name: string; unit: string }[]
   >([]);
+  /** Units of Measurement as configured in Storefront settings. */
+  const [unitOptions, setUnitOptions] = useState<string[]>(MR_UNIT_FALLBACK);
   // MaterialRequest.storeName is required by the backend, so the fulfilling
   // store has to be captured here rather than defaulted server-side.
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
@@ -295,7 +303,7 @@ function NewMRModal({
   );
   const [justification, setJustification] = useState("");
   const [items, setItems] = useState<MRItem[]>([
-    { material: "", qty: "", unit: MR_UNITS[0], available: "", notes: "" },
+    { material: "", qty: "", unit: "", available: "", notes: "" },
   ]);
 
   useEffect(() => {
@@ -314,6 +322,14 @@ function NewMRModal({
         );
       })
       .catch(() => {});
+    getUnits()
+      .then((rows) => {
+        const names = rows.map((u) => u.abbreviation || u.name).filter(Boolean);
+        if (names.length > 0) setUnitOptions(names);
+      })
+      .catch(() => {
+        /* keep the fallback list */
+      });
     getStores()
       .then((list) => {
         const options = list.map((s) => ({ id: s.id, name: s.name }));
@@ -326,7 +342,7 @@ function NewMRModal({
   const addItem = () =>
     setItems((p) => [
       ...p,
-      { material: "", qty: "", unit: MR_UNITS[0], available: "", notes: "" },
+      { material: "", qty: "", unit: "", available: "", notes: "" },
     ]);
   const removeItem = (i: number) =>
     setItems((p) => p.filter((_, j) => j !== i));
@@ -558,10 +574,11 @@ function NewMRModal({
                     onChange={(e) => updateItem(i, "unit", e.target.value)}
                     className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {/* Include the line's own unit so a catalogue unit outside
-                        MR_UNITS still renders as selected. */}
+                    {/* Include the line's own unit so a material's configured
+                        unit still renders as selected even if it is not in the
+                        configured list. */}
                     {Array.from(
-                      new Set([...MR_UNITS, item.unit].filter(Boolean)),
+                      new Set([...unitOptions, item.unit].filter(Boolean)),
                     ).map((u) => (
                       <option key={u}>{u}</option>
                     ))}

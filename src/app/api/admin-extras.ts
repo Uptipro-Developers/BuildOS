@@ -545,6 +545,35 @@ export interface ReportRunResult {
     generatedAt: string;
 }
 
+/**
+ * A template deployed from Report Builder, as an app's Reports module sees it.
+ * Only the configuration needed to run and label the report.
+ */
+export interface DeployedReportTemplate {
+    id: string;
+    name: string;
+    description: string;
+    application: string;
+    /** Comma-joined source list; multi-source templates carry several. */
+    dataSource: string;
+    vizType?: string;
+    selectedFields: Array<{ key: string; displayLabel: string; aggregation?: string }>;
+    filters: Array<{
+        field: string;
+        operator: string;
+        value: string;
+        valueTo?: string;
+    }>;
+    sortRules: Array<{ field: string; direction: 'asc' | 'desc' }>;
+    rowLimit: number;
+}
+
+/** Deployed templates for one application's Reports module. */
+export const getDeployedReportTemplates = (app?: string) =>
+    apiFetch<DeployedReportTemplate[]>(
+        `/report-templates/deployed${app ? `?app=${encodeURIComponent(app)}` : ''}`,
+    );
+
 export const getReportSources = () =>
     apiFetch<{ success: boolean; data: ReportSourceDef[] }>('/reports/sources').then((r) => r.data);
 

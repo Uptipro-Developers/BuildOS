@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { DeployedReports } from "../../components/DeployedReports";
 import { useEffect, useState } from "react";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
@@ -658,6 +659,10 @@ export function ReportsPage() {
           filters.
         </p>
       </div>
+
+      {/* The note above points users at Report Builder, so the templates
+          deployed from it are listed here rather than only described. */}
+      <DeployedReports app="construction" accent="orange" />
     </div>
   );
 }

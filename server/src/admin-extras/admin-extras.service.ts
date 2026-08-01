@@ -20,6 +20,13 @@ import { EmailTemplateService, type ComposedEmail } from '../email/email-templat
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
 /**
+ * How long after their last request a user still counts as signed in.
+ * Comfortably longer than the dashboard's own poll interval so an idle-but-open
+ * session is not flickering in and out of the count.
+ */
+const ACTIVE_SESSION_WINDOW_MS = 15 * 60 * 1000;
+
+/**
  * Maps each email trigger to the Prisma model whose fields are exposed as
  * template variables ("the concerned table"), plus context-only variables
  * that exist at send time but not on the table (links, company name, …).
@@ -1539,16 +1546,23 @@ export class AdminExtrasService {
 
     async systemSummary() {
         const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-        const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        // Presence window. A user is counted as signed in while requests are
+        // still arriving from them; closing the tab drops them within this long.
+        const activeSince = new Date(Date.now() - ACTIVE_SESSION_WINDOW_MS);
 
-        const [users, roles, pendingApprovals, usersThisMonth, pendingInvites, recentSessions] =
+        const [users, roles, pendingApprovals, usersThisMonth, pendingInvites, activeSessions] =
             await Promise.all([
                 this.prisma.user.count(),
                 this.prisma.appRole.count(),
                 this.findApprovals('all').then((rows) => rows.filter((r) => r.status === 'pending').length),
                 this.prisma.user.count({ where: { createdAt: { gte: startOfMonth } } }),
                 this.prisma.user.count({ where: { status: { in: ['pending_invite', 'invited', 'PENDING_INVITE'] } } }),
-                this.prisma.user.count({ where: { lastLogin: { gte: since24h } } }),
+                // Counted from `lastSeenAt`, refreshed as a user works. This used
+                // to count `lastLogin` within 24 hours — a daily-logins figure
+                // that reported somebody who signed in at 9am and left as an
+                // active session all day — and was floored at 1, so it could
+                // never read zero even with nobody signed in.
+                this.prisma.user.count({ where: { lastSeenAt: { gte: activeSince } } }),
             ]);
 
         // Health: verify DB is reachable; returns 100% for a healthy monolith
@@ -1562,7 +1576,7 @@ export class AdminExtrasService {
         return {
             users,
             roles,
-            activeSessions: Math.max(recentSessions, 1), // at least 1 (caller is active)
+            activeSessions,
             pendingApprovals,
             usersThisMonth,
             pendingInvites,
@@ -2830,6 +2844,23 @@ export class AdminExtrasService {
     }
 
     // ── Report Templates ──
+    /**
+     * Deployed templates, optionally scoped to one application.
+     *
+     * Drafts are excluded: a draft is a template still being built, and listing
+     * it on an app's Reports page would offer users a report whose configuration
+     * is mid-edit.
+     */
+    async findDeployedReportTemplates(app?: string) {
+        const settings = await this.readAdminSettings();
+        const wanted = String(app ?? '').trim().toLowerCase();
+        return (settings.reportTemplates ?? []).filter((tpl: any) => {
+            if (String(tpl?.status ?? '') !== 'deployed') return false;
+            if (!wanted) return true;
+            return String(tpl?.application ?? '').trim().toLowerCase() === wanted;
+        });
+    }
+
     async findReportTemplates() {
         const settings = await this.readAdminSettings();
         return settings.reportTemplates;

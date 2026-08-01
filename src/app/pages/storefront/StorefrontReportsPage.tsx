@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DeployedReports } from "../../components/DeployedReports";
 import { exportCSV, type CsvCell } from "../../utils/exportCSV";
 import {
   TrendingDown,
@@ -657,6 +658,11 @@ export function StorefrontReportsPage() {
           </div>
         </div>
       )}
+
+      {/* Reports deployed from Admin → Report Builder for this app.
+          Additive: the module's own reports above keep their charts and
+          drill-downs, which a generic template runner does not replace. */}
+      <DeployedReports app="storefront" accent="teal" />
     </div>
   );
 }

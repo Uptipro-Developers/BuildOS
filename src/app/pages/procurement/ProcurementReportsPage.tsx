@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DeployedReports } from "../../components/DeployedReports";
 import { toast } from "sonner";
 import { csvAmountHeader, getCurrencySymbol } from "../../utils/generalSettings";
 import { exportCSV, type CsvCell } from "../../utils/exportCSV";
@@ -573,6 +574,11 @@ export function ProcurementReportsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Reports deployed from Admin → Report Builder for this app.
+          Additive: the module's own reports above keep their charts and
+          drill-downs, which a generic template runner does not replace. */}
+      <DeployedReports app="procurement" accent="blue" />
     </div>
   );
 }

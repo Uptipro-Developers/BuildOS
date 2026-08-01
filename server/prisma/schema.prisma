@@ -562,6 +562,12 @@ model User {
 
   // Last login tracking
   lastLogin             DateTime?
+
+  /// Last time an authenticated request was seen from this user, refreshed as
+  /// they use the app rather than only at login. `lastLogin` cannot answer "who
+  /// is logged in now" — somebody who signed in this morning and left still
+  /// counts against it all day.
+  lastSeenAt DateTime?
   inviteToken           String?
   inviteExpiresAt       DateTime?
   refreshTokenHash      String?
@@ -576,6 +582,9 @@ model User {
   auditLogs       AuditLog[]
   passwordHistory UserPasswordHistory[]
   employee        Employee?
+
+  /// The Active Sessions metric counts by this on every dashboard load.
+  @@index([lastSeenAt])
 }
 
 model UserRole {
@@ -2105,6 +2114,23 @@ model NumberingConfig {
   /// The value the NEXT allocation will use.
   nextNumber  Int    @default(1)
   description String @default("")
+
+  /// Reference format, e.g. "PO-{N:4}". `{N:n}` is the sequence padded to n
+  /// digits. This is what an admin edits; prefix/separator/padLength are kept
+  /// as the pre-template representation and derived from it on save.
+  template String @default("")
+
+  /// First number the sequence issues.
+  startingNumber Int @default(1)
+  /// Last number it may issue; null means unbounded.
+  endingNumber   Int?
+  /// Step between successive numbers.
+  incrementBy    Int @default(1)
+
+  /// The last number actually issued, and when — shown in Settings so an admin
+  /// can see where a sequence has reached without inferring it from `nextNumber`.
+  lastUsedNumber Int       @default(0)
+  lastUsedDate   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

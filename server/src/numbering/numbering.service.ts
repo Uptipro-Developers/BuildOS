@@ -4,6 +4,7 @@ import { NUMBERING_SEEDS } from './numbering.defaults';
 
 /** Bounds on what an admin may configure, so a reference stays a reference. */
 const MAX_PAD_LENGTH = 10;
+const MAX_TEMPLATE_LENGTH = 40;
 const MAX_PREFIX_LENGTH = 12;
 const MAX_SEPARATOR_LENGTH = 3;
 
@@ -39,7 +40,15 @@ export class NumberingService implements OnModuleInit {
 
             if (missing.length > 0) {
                 await this.prisma.numberingConfig.createMany({
-                    data: missing,
+                    // Seeds predate templates and still define the parts, so the
+                    // template is derived rather than duplicated in the seed list.
+                    data: missing.map((seed) => ({
+                        ...seed,
+                        template: `${seed.prefix}${seed.separator}{N:${seed.padLength}}`,
+                        startingNumber: 1,
+                        incrementBy: 1,
+                        lastUsedNumber: Math.max(seed.nextNumber - 1, 0),
+                    })),
                     skipDuplicates: true,
                 });
                 this.logger.log(`Seeded ${missing.length} numbering config(s).`);
@@ -63,12 +72,42 @@ export class NumberingService implements OnModuleInit {
         });
     }
 
-    /** Formats a sequence value using a config's prefix/separator/padding. */
+    /**
+     * Formats a sequence value against a reference template.
+     *
+     * `{N}` inserts the number, `{N:4}` pads it to four digits. A config with no
+     * template falls back to the prefix/separator/padding it was created with,
+     * which is what rows written before templates existed carry.
+     */
     private format(
-        config: { prefix: string; separator: string; padLength: number },
+        config: { template?: string | null; prefix: string; separator: string; padLength: number },
         value: number,
     ): string {
-        return `${config.prefix}${config.separator}${String(value).padStart(config.padLength, '0')}`;
+        const template = String(config.template ?? '').trim();
+        if (!template) {
+            return `${config.prefix}${config.separator}${String(value).padStart(config.padLength, '0')}`;
+        }
+        return template.replace(/\{N(?::(\d+))?\}/gi, (_m, pad?: string) =>
+            String(value).padStart(pad ? Number(pad) : 1, '0'),
+        );
+    }
+
+    /**
+     * Derives prefix/separator/padding from a template.
+     *
+     * Those columns predate templates and are still what an un-templated row
+     * formats from, so they are kept in step rather than left to go stale.
+     */
+    private partsFromTemplate(template: string) {
+        const match = /^(.*?)\{N(?::(\d+))?\}/i.exec(template);
+        const lead = match?.[1] ?? '';
+        const padLength = match?.[2] ? Number(match[2]) : 1;
+        const sep = /[^A-Za-z0-9]+$/.exec(lead);
+        return {
+            prefix: sep ? lead.slice(0, sep.index) : lead,
+            separator: sep ? sep[0] : '',
+            padLength: Math.min(Math.max(padLength, 1), MAX_PAD_LENGTH),
+        };
     }
 
     /**
@@ -87,18 +126,29 @@ export class NumberingService implements OnModuleInit {
         const key = String(module ?? '').trim();
         if (!key) throw new BadRequestException('A module is required.');
 
-        try {
-            const updated = await this.prisma.numberingConfig.update({
-                where: { module: key },
-                data: { nextNumber: { increment: 1 } },
-            });
-            // `update` returns the row after incrementing, so the value handed out
-            // is the one that was there before.
-            const value = updated.nextNumber - 1;
-            return { module: key, reference: this.format(updated, value), value };
-        } catch {
-            throw new BadRequestException(`No numbering is configured for "${key}".`);
+        const current = await this.prisma.numberingConfig.findUnique({ where: { module: key } });
+        if (!current) throw new BadRequestException(`No numbering is configured for "${key}".`);
+
+        const value = current.nextNumber;
+        // A bounded sequence must stop rather than run past its ceiling and issue
+        // a reference outside the range an admin configured.
+        if (current.endingNumber !== null && value > current.endingNumber) {
+            throw new BadRequestException(
+                `Numbering for "${key}" has reached its ending number (${current.endingNumber}). ` +
+                    'Raise it in Settings before creating more records.',
+            );
         }
+
+        const step = Math.max(current.incrementBy || 1, 1);
+        const updated = await this.prisma.numberingConfig.update({
+            where: { module: key },
+            data: {
+                nextNumber: { increment: step },
+                lastUsedNumber: value,
+                lastUsedDate: new Date(),
+            },
+        });
+        return { module: key, reference: this.format(updated, value), value };
     }
 
     /** The reference a module would produce next, without consuming it. */
@@ -112,28 +162,61 @@ export class NumberingService implements OnModuleInit {
     }
 
     private sanitize(input: any) {
-        const padLength = Number(input?.padLength);
-        const nextNumber = Number(input?.nextNumber);
-        const prefix = String(input?.prefix ?? '').trim();
-        const separator = String(input?.separator ?? '');
-
-        if (prefix.length === 0) throw new BadRequestException('A prefix is required.');
-        if (prefix.length > MAX_PREFIX_LENGTH) {
-            throw new BadRequestException(`A prefix may be at most ${MAX_PREFIX_LENGTH} characters.`);
-        }
-        if (separator.length > MAX_SEPARATOR_LENGTH) {
+        const template = String(input?.template ?? '').trim();
+        if (!template) throw new BadRequestException('A template is required.');
+        if (!/\{N(?::\d+)?\}/i.test(template)) {
             throw new BadRequestException(
-                `A separator may be at most ${MAX_SEPARATOR_LENGTH} characters.`,
+                'A template must contain {N} — the sequence number — e.g. "PO-{N:4}".',
             );
         }
-        if (!Number.isInteger(padLength) || padLength < 1 || padLength > MAX_PAD_LENGTH) {
-            throw new BadRequestException(`Padding must be between 1 and ${MAX_PAD_LENGTH}.`);
+        if (template.length > MAX_TEMPLATE_LENGTH) {
+            throw new BadRequestException(
+                `A template may be at most ${MAX_TEMPLATE_LENGTH} characters.`,
+            );
         }
-        if (!Number.isInteger(nextNumber) || nextNumber < 1) {
+
+        const startingNumber = Number(input?.startingNumber ?? 1);
+        const incrementBy = Number(input?.incrementBy ?? 1);
+        const endingRaw = input?.endingNumber;
+        const endingNumber =
+            endingRaw === null || endingRaw === undefined || endingRaw === ''
+                ? null
+                : Number(endingRaw);
+
+        if (!Number.isInteger(startingNumber) || startingNumber < 1) {
+            throw new BadRequestException('The starting number must be 1 or greater.');
+        }
+        if (!Number.isInteger(incrementBy) || incrementBy < 1) {
+            throw new BadRequestException('Increment by must be 1 or greater.');
+        }
+        if (endingNumber !== null) {
+            if (!Number.isInteger(endingNumber) || endingNumber < startingNumber) {
+                throw new BadRequestException(
+                    'The ending number must be a whole number no lower than the starting number.',
+                );
+            }
+        }
+
+        // `nextNumber` is the live sequence position. It is only taken from the
+        // caller when supplied — an admin editing the template must not silently
+        // rewind the counter and re-issue references that already exist.
+        const nextRaw = input?.nextNumber;
+        const nextNumber =
+            nextRaw === undefined || nextRaw === null || nextRaw === ''
+                ? undefined
+                : Number(nextRaw);
+        if (nextNumber !== undefined && (!Number.isInteger(nextNumber) || nextNumber < 1)) {
             throw new BadRequestException('The next number must be 1 or greater.');
         }
 
-        return { prefix, separator, padLength, nextNumber };
+        return {
+            template,
+            startingNumber,
+            endingNumber,
+            incrementBy,
+            ...(nextNumber === undefined ? {} : { nextNumber }),
+            ...this.partsFromTemplate(template),
+        };
     }
 
     /** Updates one module's format. */
@@ -164,12 +247,15 @@ export class NumberingService implements OnModuleInit {
         const existing = await this.prisma.numberingConfig.findUnique({ where: { module } });
         if (existing) throw new BadRequestException(`"${module}" already has numbering configured.`);
 
+        const data = this.sanitize(body);
         return this.prisma.numberingConfig.create({
             data: {
                 module,
                 app,
                 description: String(body?.description ?? ''),
-                ...this.sanitize(body),
+                ...data,
+                // A brand-new sequence issues its starting number first.
+                nextNumber: data.nextNumber ?? data.startingNumber,
             },
         });
     }
@@ -201,6 +287,10 @@ export class NumberingService implements OnModuleInit {
                 prefix: seed.prefix,
                 separator: seed.separator,
                 padLength: seed.padLength,
+                template: `${seed.prefix}${seed.separator}{N:${seed.padLength}}`,
+                startingNumber: 1,
+                endingNumber: null,
+                incrementBy: 1,
                 description: seed.description,
             },
         });

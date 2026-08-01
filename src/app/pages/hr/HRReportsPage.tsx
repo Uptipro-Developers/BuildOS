@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { DeployedReports } from "../../components/DeployedReports";
 import { toast } from "sonner";
 import {
   csvAmountHeader,
@@ -684,6 +685,11 @@ export function HRReportsPage() {
           </div>
         )}
       </div>
+
+      {/* Reports deployed from Admin → Report Builder for this app.
+          Additive: the module's own reports above keep their charts and
+          drill-downs, which a generic template runner does not replace. */}
+      <DeployedReports app="hr" accent="purple" />
     </div>
   );
 }

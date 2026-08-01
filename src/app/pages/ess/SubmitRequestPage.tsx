@@ -23,6 +23,8 @@ import {
   Wrench,
   Edit2,
 } from "lucide-react";
+import { getMaterials } from "../../api/materials";
+import { getUnits } from "../../api/admin-extras";
 import { IssueForm } from "../../components/IssueForm";
 import { ChangeRequestForm } from "../../components/ChangeRequestForm";
 import { AttachmentsSection } from "../../components/AttachmentsSection";
@@ -43,28 +45,19 @@ import { useAuthUser } from "../../utils/useAuthUser";
 // Shared material catalogue with stock status — mirrors Storefront inventory
 type StockLevel = "in_stock" | "low_stock" | "out_of_stock";
 
-const MATERIAL_CATALOGUE: { name: string; stock: StockLevel }[] = [
-  { name: "Cement (50kg bag)", stock: "low_stock" },
-  { name: "Steel Rebar Y16", stock: "low_stock" },
-  { name: "Steel Rebar Y12", stock: "in_stock" },
-  { name: "Binding Wire", stock: "in_stock" },
-  { name: "Concrete Block 9 Inch", stock: "in_stock" },
-  { name: "Formwork Plywood", stock: "low_stock" },
-  { name: "PVC Pipes 2 Inch", stock: "out_of_stock" },
-  { name: "Sand", stock: "out_of_stock" },
-  { name: "Flush Doors", stock: "in_stock" },
-  { name: "2.5mm Twin Cable", stock: "in_stock" },
-  { name: "Electrical Conduit 25mm", stock: "out_of_stock" },
-  { name: "Granite Tiles 600x600", stock: "out_of_stock" },
-  { name: "Paint (Emulsion 20L)", stock: "in_stock" },
-  { name: "Nails (Assorted)", stock: "in_stock" },
-  { name: "Gravel / Aggregate", stock: "low_stock" },
-  { name: "Plaster of Paris", stock: "in_stock" },
-  { name: "Aluminium Window Frame", stock: "in_stock" },
-  { name: "Ceramic Floor Tiles", stock: "in_stock" },
-  { name: "Reinforcing Mesh", stock: "in_stock" },
-  { name: "Glass Panel 6mm", stock: "low_stock" },
-];
+interface CatalogueEntry {
+  name: string;
+  stock: StockLevel;
+  /** The unit this material is stocked in, from Storefront. */
+  unit: string;
+}
+
+/** Stock level derived from the material's own quantities, not a fixed label. */
+function stockLevelOf(m: { availableQty?: number; reorderLevel?: number }): StockLevel {
+  const available = Number(m.availableQty ?? 0);
+  if (available <= 0) return "out_of_stock";
+  return available <= Number(m.reorderLevel ?? 0) ? "low_stock" : "in_stock";
+}
 
 const STOCK_LABEL: Record<StockLevel, string> = {
   in_stock: "In Stock",
@@ -81,11 +74,16 @@ function MaterialCombobox({
   value,
   onChange,
   onStockChange,
+  onUnitChange,
+  catalogue,
   error,
 }: {
   value: string;
   onChange: (v: string) => void;
   onStockChange: (s: StockLevel | null) => void;
+  /** Adopts the material's configured unit, so the requester never guesses. */
+  onUnitChange?: (unit: string) => void;
+  catalogue: CatalogueEntry[];
   error?: string;
 }) {
   const [query, setQuery] = useState(value);
@@ -94,10 +92,10 @@ function MaterialCombobox({
 
   const matches =
     query.length > 0
-      ? MATERIAL_CATALOGUE.filter((m) =>
+      ? catalogue.filter((m) =>
           m.name.toLowerCase().includes(query.toLowerCase()),
         )
-      : MATERIAL_CATALOGUE;
+      : catalogue;
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -108,10 +106,11 @@ function MaterialCombobox({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  function select(m: { name: string; stock: StockLevel }) {
+  function select(m: CatalogueEntry) {
     setQuery(m.name);
     onChange(m.name);
     onStockChange(m.stock);
+    if (m.unit) onUnitChange?.(m.unit);
     setOpen(false);
   }
 
@@ -462,6 +461,37 @@ function MaterialForm({
     "material",
   );
   const [selectedStock, setSelectedStock] = useState<StockLevel | null>(null);
+  /**
+   * The material catalogue and units, both from Storefront. These were hardcoded
+   * lists in this file, so the picker offered materials that may not exist and
+   * units that were never configured.
+   */
+  const [catalogue, setCatalogue] = useState<CatalogueEntry[]>([]);
+  const [unitOptions, setUnitOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    getMaterials()
+      .then((rows) =>
+        setCatalogue(
+          rows
+            .filter((m) => m.name)
+            .map((m) => ({
+              name: m.name,
+              stock: stockLevelOf(m),
+              unit: m.unit ?? "",
+            })),
+        ),
+      )
+      .catch(() => toast.error("Could not load the material catalogue."));
+
+    getUnits()
+      .then((rows) =>
+        setUnitOptions(
+          rows.map((u) => u.abbreviation || u.name).filter(Boolean),
+        ),
+      )
+      .catch(() => setUnitOptions([]));
+  }, []);
   const [showCreationForm, setShowCreationForm] = useState(false);
   const [formState, setFormState] = useState({
     project: "",
@@ -651,6 +681,8 @@ function MaterialForm({
                 value={formState.material}
                 onChange={(v) => field("material", v)}
                 onStockChange={(s) => setSelectedStock(s)}
+                onUnitChange={(u) => field("unit", u)}
+                catalogue={catalogue}
                 error={errors.material}
               />
               {errors.material && (
@@ -734,17 +766,14 @@ function MaterialForm({
                         onChange={(e) => field("unit", e.target.value)}
                         className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
                       >
-                        {[
-                          "pcs",
-                          "bags",
-                          "kg",
-                          "tonnes",
-                          "metres",
-                          "m²",
-                          "m³",
-                          "litres",
-                          "sets",
-                        ].map((u) => (
+                        {unitOptions.length === 0 && !formState.unit && (
+                          <option value="">No units configured</option>
+                        )}
+                        {Array.from(
+                          new Set(
+                            [...unitOptions, formState.unit].filter(Boolean),
+                          ),
+                        ).map((u) => (
                           <option key={u}>{u}</option>
                         ))}
                       </select>

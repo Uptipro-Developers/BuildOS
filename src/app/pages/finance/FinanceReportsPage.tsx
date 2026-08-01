@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { DeployedReports } from "../../components/DeployedReports";
 import { toast } from "sonner";
 import { BarChart3, Download, TrendingUp, TrendingDown, DollarSign, ScrollText } from "lucide-react";
 import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../../stores/financeStore";
@@ -411,6 +412,11 @@ export function FinanceReportsPage() {
           </div>
         </div>
       </div>
+
+      {/* Reports deployed from Admin → Report Builder for this app.
+          Additive: the module's own reports above keep their charts and
+          drill-downs, which a generic template runner does not replace. */}
+      <DeployedReports app="finance" accent="emerald" />
     </div>
   );
 }

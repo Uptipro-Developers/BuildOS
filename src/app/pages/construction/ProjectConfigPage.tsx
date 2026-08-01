@@ -101,7 +101,7 @@ function ProjectTypesPanel() {
                   {t.description || "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                  <div className="flex items-center gap-1 justify-end">
                     <button
                       onClick={() => openEdit(t)}
                       className="p-1.5 text-gray-400 hover:text-orange-600 rounded-lg hover:bg-orange-50"
@@ -303,7 +303,7 @@ function ProjectStatusesPanel() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                    <div className="flex items-center gap-1 justify-end">
                       <button
                         onClick={() => openEdit(s)}
                         className="p-1.5 text-gray-400 hover:text-orange-600 rounded-lg hover:bg-orange-50"

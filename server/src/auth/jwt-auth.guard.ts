@@ -38,8 +38,20 @@ interface AuthTokenPayload extends JwtPayload {
  * guard because this guard is registered globally (APP_GUARD) and therefore
  * runs first — a route-scoped guard would never see the request.
  */
+/** How often a given user's presence is written back. */
+const TOUCH_INTERVAL_MS = 2 * 60 * 1000;
+
+/** Ceiling on the throttle map before stale entries are swept. */
+const MAX_TRACKED_USERS = 5000;
+
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+    /**
+     * Last time each user's presence was written, shared across guard instances
+     * so the throttle holds regardless of how Nest resolves this provider.
+     */
+    private static readonly lastTouched = new Map<string, number>();
+
     constructor(
         private readonly reflector: Reflector,
         private readonly redis: RedisService,
@@ -91,7 +103,44 @@ export class JwtAuthGuard implements CanActivate {
         await this.assertRoles(context, payload);
         this.assertPermissions(context, payload);
         this.assertApps(context, payload);
+        this.touchPresence(payload.sub);
         return true;
+    }
+
+    /**
+     * Records that this user is currently using the app, for the Active Sessions
+     * metric.
+     *
+     * Throttled through an in-process map so an active user costs one write per
+     * TOUCH_INTERVAL_MS rather than one per request, and deliberately not awaited
+     * — presence is a metric, and it must not add latency to, or fail, the
+     * request it is observing.
+     */
+    private touchPresence(userId?: string): void {
+        if (!userId) return;
+        const now = Date.now();
+        const last = JwtAuthGuard.lastTouched.get(userId) ?? 0;
+        if (now - last < TOUCH_INTERVAL_MS) return;
+        JwtAuthGuard.lastTouched.set(userId, now);
+
+        // Bound the map: without this a long-running process accumulates an entry
+        // for every user that ever signed in.
+        if (JwtAuthGuard.lastTouched.size > MAX_TRACKED_USERS) {
+            for (const [key, at] of JwtAuthGuard.lastTouched) {
+                if (now - at > TOUCH_INTERVAL_MS) JwtAuthGuard.lastTouched.delete(key);
+            }
+        }
+
+        // Wrapped as well as `.catch`ed: presence is a metric, and neither a
+        // rejected write nor a synchronous failure may surface on the request
+        // that happened to trigger it.
+        try {
+            void this.prisma.user
+                ?.update({ where: { id: userId }, data: { lastSeenAt: new Date() } })
+                ?.catch(() => undefined);
+        } catch {
+            /* ignore */
+        }
     }
 
     private extractAndVerify(request: Request): AuthTokenPayload | null {

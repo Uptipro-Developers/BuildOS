@@ -63,6 +63,8 @@ function makePrisma(
     roles: { name: string; isSuper?: boolean; appScope?: string[] }[] = [],
 ) {
     return {
+        // Presence tracking touches this on every authenticated request.
+        user: { update: jest.fn().mockResolvedValue({}) },
         appRole: {
             findMany: jest.fn().mockResolvedValue(
                 roles.map((r) => ({
@@ -231,6 +233,31 @@ describe('JwtAuthGuard', () => {
             })}`,
         });
         await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('records presence for the authenticated user', async () => {
+        const prisma = makePrisma();
+        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), prisma);
+        const { context } = makeContext({}, {
+            authorization: `Bearer ${token({ sub: 'presence-user-1', role: 'staff' })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+        expect((prisma as any).user.update).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { id: 'presence-user-1' } }),
+        );
+    });
+
+    it('does not fail the request when the presence write throws', async () => {
+        // Presence is a metric; it must never take down the request it observes.
+        const prisma = makePrisma();
+        (prisma as any).user.update = jest.fn(() => {
+            throw new Error('db down');
+        });
+        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), prisma);
+        const { context } = makeContext({}, {
+            authorization: `Bearer ${token({ sub: 'presence-user-2', role: 'staff' })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
     });
 
     it('allows legacy tokens without an assignedApps claim (backward compat)', async () => {

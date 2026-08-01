@@ -74,3 +74,45 @@ describe('renderLinks', () => {
         expect(out).toBe('Dear Ada, your request was approved.');
     });
 });
+
+/**
+ * The call-to-action is configured as a name/link pair rather than as markup in
+ * the body, so it is validated separately: a button with no destination, or one
+ * pointing somewhere unsafe, must not render.
+ */
+describe('renderButton', () => {
+    const render = (label: string, url: string) =>
+        (new EmailTemplateService(null as any) as any).renderButton(label, url);
+
+    it('renders a button when both label and url are given', () => {
+        const out = render('Reset Password', 'https://app.test/reset?token=abc');
+        expect(out.html).toContain('<a href="https://app.test/reset?token=abc"');
+        expect(out.html).toContain('>Reset Password</a>');
+        expect(out.url).toBe('https://app.test/reset?token=abc');
+    });
+
+    it('renders nothing without a label', () => {
+        expect(render('', 'https://app.test').html).toBe('');
+    });
+
+    it('renders nothing without a url', () => {
+        expect(render('Reset Password', '').html).toBe('');
+    });
+
+    it('rejects a non-http target', () => {
+        expect(render('Click', 'javascript:alert(1)').html).toBe('');
+        expect(render('Click', 'data:text/html,x').html).toBe('');
+    });
+
+    it('escapes a label so it cannot inject markup', () => {
+        const out = render('<script>x</script>', 'https://app.test');
+        expect(out.html).not.toContain('<script>');
+        expect(out.html).toContain('&lt;script&gt;');
+    });
+
+    it('drops an unresolved {{variable}} target rather than linking to it', () => {
+        // A template referencing a variable the trigger does not supply leaves
+        // the token in place; that is not a URL and must not become a link.
+        expect(render('Open', '{{missing_var}}').html).toBe('');
+    });
+});

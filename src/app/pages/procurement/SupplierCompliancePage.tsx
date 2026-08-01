@@ -408,7 +408,7 @@ export function SupplierCompliancePage() {
                   <LevelBadge level={d.level} />
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={() => openEdit(d)}
                       className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700"

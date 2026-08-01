@@ -24,6 +24,21 @@ export interface ModuleNumbering {
   padLength: number;
   nextNumber: number;
   description: string;
+  /**
+   * Reference format, e.g. "PO-{N:4}" — `{N:n}` is the sequence padded to n
+   * digits. This is what Settings edits; the prefix/separator/padding above are
+   * derived from it server-side and kept for rows written before templates.
+   */
+  template?: string;
+  /** First number the sequence issues. */
+  startingNumber?: number;
+  /** Last number it may issue; null/undefined means unbounded. */
+  endingNumber?: number | null;
+  /** Step between successive numbers. */
+  incrementBy?: number;
+  /** The last number actually issued, and when. */
+  lastUsedNumber?: number;
+  lastUsedDate?: string | null;
 }
 
 interface NumberingContextValue {
@@ -144,11 +159,21 @@ export function NumberingProvider({ children }: { children: ReactNode }) {
     void reload();
   }, [reload]);
 
-  const format = useCallback(
-    (cfg: ModuleNumbering, value: number) =>
-      `${cfg.prefix}${cfg.separator}${String(value).padStart(cfg.padLength, "0")}`,
-    [],
-  );
+  /**
+   * Mirrors the server's formatter so a previewed reference matches the one that
+   * will actually be issued. This composed prefix/separator/padding directly and
+   * ignored the template, so once a template was configured the preview showed a
+   * different reference from the record that got created.
+   */
+  const format = useCallback((cfg: ModuleNumbering, value: number) => {
+    const template = String(cfg.template ?? "").trim();
+    if (!template) {
+      return `${cfg.prefix}${cfg.separator}${String(value).padStart(cfg.padLength, "0")}`;
+    }
+    return template.replace(/\{N(?::(\d+))?\}/gi, (_m, pad?: string) =>
+      String(value).padStart(pad ? Number(pad) : 1, "0"),
+    );
+  }, []);
 
   const peekNextId = useCallback(
     (module: string) => {

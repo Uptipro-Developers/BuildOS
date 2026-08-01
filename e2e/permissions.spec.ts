@@ -225,24 +225,71 @@ test.describe("role-driven permissions", () => {
     ];
 
     const catalogSource = readFileSync("src/app/utils/navCatalog.ts", "utf-8");
-    const catalogIds = new Set(
-      [...catalogSource.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]),
-    );
+    const catalog = new Map<string, { label: string; section: string }>();
+    for (const m of catalogSource.matchAll(
+      /\{\s*id:\s*"([^"]+)",\s*label:\s*"([^"]*)",\s*section:\s*"([^"]*)"\s*\}/g,
+    )) {
+      catalog.set(m[1], { label: m[2], section: m[3] });
+    }
 
     // Commented-out nav items are not rendered, so they are not permission
     // surfaces — strip comments before scanning or the check reports phantoms.
     const stripComments = (source: string) =>
       source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-    const missing: string[] = [];
+    // Labels and section headers are checked as well as hrefs. Checking only the
+    // href let a *rename* pass silently: Layer 2 kept offering "Finance
+    // Configuration" and an "HR General Setup" group long after the sidebars had
+    // been reorganised, so admins were configuring against module names that no
+    // longer existed anywhere in the app.
+    const problems: string[] = [];
+    const seen = new Set<string>();
+
     for (const layout of LAYOUTS) {
       const source = stripComments(readFileSync(layout, "utf-8"));
-      for (const match of source.matchAll(/href:\s*"(\/apps\/[^"]+)"/g)) {
-        if (!catalogIds.has(match[1])) missing.push(`${layout}: ${match[1]}`);
+      // A `label:` with no `href:` is a sidebar group header; it names the
+      // section every item after it belongs to.
+      let section = "";
+      for (const match of source.matchAll(
+        /label:\s*"([^"]*)"(?:\s*,\s*href:\s*"([^"]+)")?/g,
+      )) {
+        const [, label, href] = match;
+        if (!href) {
+          section = label;
+          continue;
+        }
+        if (!href.startsWith("/apps/")) continue;
+        seen.add(href);
+
+        const entry = catalog.get(href);
+        if (!entry) {
+          problems.push(`${layout}: missing "${href}" ("${label}")`);
+          continue;
+        }
+        if (entry.label !== label) {
+          problems.push(
+            `${layout}: ${href} label is "${entry.label}", sidebar renders "${label}"`,
+          );
+        }
+        if (entry.section !== section) {
+          problems.push(
+            `${layout}: ${href} section is "${entry.section}", sidebar groups it under "${section}"`,
+          );
+        }
       }
     }
 
-    expect(missing, `navCatalog.ts is missing nav items:\n${missing.join("\n")}`).toEqual([]);
+    // A catalog entry no route renders is a permission for a page that is gone.
+    for (const [href, entry] of catalog) {
+      if (!seen.has(href)) {
+        problems.push(`stale: ${href} ("${entry.label}") is in the catalog but no sidebar renders it`);
+      }
+    }
+
+    expect(
+      problems,
+      `navCatalog.ts is out of step with the sidebars:\n${problems.join("\n")}`,
+    ).toEqual([]);
   });
 });
 

@@ -143,6 +143,10 @@ interface EmailConfig {
   body: string;
   recipients: string;
   cc: string;
+  /** Call-to-action label, e.g. "Reset Password". Empty means no button. */
+  buttonLabel: string;
+  /** Where the button points; supports {{app_url}} and friends. */
+  buttonUrl: string;
   enabled: boolean;
 }
 
@@ -163,6 +167,8 @@ const BLANK_FORM: Omit<EmailConfig, "id"> = {
   body: "",
   recipients: "",
   cc: "",
+  buttonLabel: "",
+  buttonUrl: "",
   enabled: true,
 };
 
@@ -185,36 +191,6 @@ export function EmailConfigPage() {
   const [deletingConfig, setDeletingConfig] = useState<EmailConfig | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [triggerVars, setTriggerVars] = useState<Record<string, string[]>>({});
-  /**
-   * The in-progress link/button being composed. Non-null while the inline form
-   * is open, which replaces the insert instructions rather than dropping raw
-   * `[text](url)` markup into the body for the admin to edit in place.
-   */
-  const [linkDraft, setLinkDraft] = useState<{
-    kind: "link" | "button";
-    label: string;
-    url: string;
-  } | null>(null);
-
-  const openLinkDraft = (kind: "link" | "button") =>
-    setLinkDraft({ kind, label: "", url: "{{app_url}}" });
-
-  /** Composes the syntax the server understands and appends it to the body. */
-  const insertLinkDraft = () => {
-    if (!linkDraft) return;
-    const label = linkDraft.label.trim();
-    const url = linkDraft.url.trim();
-    if (!label || !url) return;
-    const snippet =
-      linkDraft.kind === "button" ? `[[${label}]](${url})` : `[${label}](${url})`;
-    setForm((p) => ({
-      ...p,
-      // Separated from preceding text so it reads as its own element.
-      body: p.body && !p.body.endsWith("\n") ? `${p.body}\n${snippet}` : `${p.body}${snippet}`,
-    }));
-    setLinkDraft(null);
-  };
-
   useEffect(() => {
     apiFetch<EmailConfig[]>("/admin/email-config")
       .then((data) => setConfigs(Array.isArray(data) ? data : []))
@@ -528,129 +504,61 @@ export function EmailConfigPage() {
                   value={form.body}
                   onChange={(e) => setForm({ ...form, body: e.target.value })}
                 />
-                {/* Link & button inserter.
-                    The body is plain text the server escapes before sending, so a
-                    link has to be written in one of two syntaxes. Rather than
-                    dropping raw `[text](url)` into the body and leaving the admin
-                    to edit it in place, picking a kind swaps these instructions
-                    for a small two-field form and composes the syntax on insert. */}
-                <div className="mt-2">
-                  {!linkDraft ? (
-                    <>
-                      <p className="text-xs text-gray-400 mb-1.5">
-                        Add a link or button to the body:
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => openLinkDraft("link")}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 transition-colors"
-                        >
-                          Insert link
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openLinkDraft("button")}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 transition-colors"
-                        >
-                          Insert button
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs font-medium text-indigo-800">
-                          {linkDraft.kind === "button"
-                            ? "Insert button"
-                            : "Insert link"}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setLinkDraft(null)}
-                          className="text-gray-400 hover:text-gray-600"
-                          aria-label="Cancel"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-1">
-                            {linkDraft.kind === "button"
-                              ? "Button text"
-                              : "Link text"}
-                          </label>
-                          <input
-                            autoFocus
-                            value={linkDraft.label}
-                            onChange={(e) =>
-                              setLinkDraft((d) =>
-                                d ? { ...d, label: e.target.value } : d,
-                              )
-                            }
-                            placeholder="Open ESS"
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-gray-500 mb-1">
-                            URL
-                          </label>
-                          <input
-                            value={linkDraft.url}
-                            onChange={(e) =>
-                              setLinkDraft((d) =>
-                                d ? { ...d, url: e.target.value } : d,
-                              )
-                            }
-                            placeholder="{{app_url}} or https://…"
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </div>
-                      </div>
-                      {/* The URL variables resolve per environment, so offer them
-                          instead of a hardcoded domain. */}
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {URL_VARIABLES.map((v) => (
-                          <button
-                            key={v}
-                            type="button"
-                            onClick={() =>
-                              setLinkDraft((d) =>
-                                d ? { ...d, url: `{{${v}}}` } : d,
-                              )
-                            }
-                            className="px-2 py-0.5 rounded-full text-[11px] font-mono bg-white text-gray-600 hover:bg-indigo-100 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 transition-colors"
-                          >
-                            {`{{${v}}}`}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex justify-end gap-2 mt-3">
-                        <button
-                          type="button"
-                          onClick={() => setLinkDraft(null)}
-                          className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-white"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={insertLinkDraft}
-                          disabled={
-                            !linkDraft.label.trim() || !linkDraft.url.trim()
-                          }
-                          className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          Insert
-                        </button>
-                      </div>
+                {/* Call to action.
+                    Configured as its own name/link pair rather than as markup
+                    inside the body, so adding a button never requires knowing a
+                    link syntax. Leaving both empty falls back to the built-in
+                    button for emails that have one. */}
+                <div className="mt-3 rounded-xl border border-gray-200 p-3">
+                  <p className="text-xs font-medium text-gray-600 mb-2">
+                    Call-to-action button{" "}
+                    <span className="font-normal text-gray-400">(optional)</span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-1">
+                        Button name
+                      </label>
+                      <input
+                        value={form.buttonLabel}
+                        onChange={(e) =>
+                          setForm({ ...form, buttonLabel: e.target.value })
+                        }
+                        placeholder="Reset Password"
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-gray-500"
+                      />
                     </div>
-                  )}
-                  <p className="mt-1.5 text-[11px] text-gray-400">
-                    A template that supplies its own button replaces the built-in
-                    one for that email.
+                    <div>
+                      <label className="block text-[11px] text-gray-500 mb-1">
+                        Button link
+                      </label>
+                      <input
+                        value={form.buttonUrl}
+                        onChange={(e) =>
+                          setForm({ ...form, buttonUrl: e.target.value })
+                        }
+                        placeholder="{{app_url}} or https://..."
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-mono outline-none focus:ring-2 focus:ring-gray-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {URL_VARIABLES.map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() =>
+                          setForm((p) => ({ ...p, buttonUrl: `{{${v}}}` }))
+                        }
+                        className="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-700 border border-gray-200 hover:border-indigo-300 transition-colors"
+                      >
+                        {`{{${v}}}`}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] text-gray-400">
+                    Set both to replace this email's built-in button. Leave empty
+                    to keep it.
                   </p>
                 </div>
 

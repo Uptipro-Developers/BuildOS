@@ -325,7 +325,7 @@ export function DocumentsPage() {
             {folderCount === 0 && fileCount === 0 && "empty"}
           </span>
           {!isEditing && (
-            <div className="relative opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="relative">
               <button
                 onClick={(e) => {
                   e.stopPropagation();

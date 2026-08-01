@@ -402,7 +402,7 @@ export function ProjectsListPage() {
                     <div className="relative">
                       <button
                         onClick={() => setDeleteConfirmId(p.id)}
-                        className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-red-500"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

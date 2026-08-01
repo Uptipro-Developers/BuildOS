@@ -919,6 +919,17 @@ function StockThresholdsPanel() {
   }
   async function save() {
     if (!form.storeName.trim()) return;
+    // A store has one threshold. Two rows for the same store would give the
+    // stock-status calculation two different answers with nothing deciding
+    // which applies, so the second is rejected rather than silently shadowing
+    // the first.
+    const duplicate = thresholds.some(
+      (t) => t.id !== editing?.id && t.storeName === form.storeName,
+    );
+    if (duplicate) {
+      toast.error(`${form.storeName} already has a stock threshold.`);
+      return;
+    }
     const next = editing
       ? thresholds.map((t) =>
           t.id === editing.id ? { ...t, ...form } : t,
@@ -1083,11 +1094,19 @@ function StockThresholdsPanel() {
                   ) : (
                     <>
                       <option value="">— Select a store —</option>
-                      {stores.map((s) => (
-                        <option key={s.id} value={s.name}>
-                          {s.name}
-                        </option>
-                      ))}
+                      {/* A store that already has a threshold is not offered
+                          again; the one being edited stays selectable. */}
+                      {stores
+                        .filter(
+                          (s) =>
+                            s.name === editing?.storeName ||
+                            !thresholds.some((t) => t.storeName === s.name),
+                        )
+                        .map((s) => (
+                          <option key={s.id} value={s.name}>
+                            {s.name}
+                          </option>
+                        ))}
                     </>
                   )}
                 </select>

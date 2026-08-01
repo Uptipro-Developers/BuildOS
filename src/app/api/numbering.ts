@@ -9,6 +9,12 @@ export interface NumberingConfig {
   /** The value the next allocation will use. */
   nextNumber: number;
   description: string;
+  template?: string;
+  startingNumber?: number;
+  endingNumber?: number | null;
+  incrementBy?: number;
+  lastUsedNumber?: number;
+  lastUsedDate?: string | null;
 }
 
 export const getNumberingConfigs = (app?: string) =>

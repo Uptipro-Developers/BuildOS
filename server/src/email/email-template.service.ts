@@ -150,6 +150,32 @@ export class EmailTemplateService {
     }
 
     /**
+     * Renders the configured call-to-action button.
+     *
+     * Both a label and an http/https target are required — a button with no
+     * destination, or one pointing at `javascript:`, is dropped rather than
+     * rendered. Returns an empty url when nothing is configured, which is how
+     * callers know to fall back to their built-in button.
+     */
+    private renderButton(
+        rawLabel: string,
+        rawUrl: string,
+    ): { html: string; label: string; url: string } {
+        const label = String(rawLabel ?? '').trim();
+        const url = String(rawUrl ?? '').trim();
+        if (!label || !url || !/^https?:\/\/[^\s<>"]+$/i.test(url)) {
+            return { html: '', label: '', url: '' };
+        }
+        const html =
+            `<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;">` +
+            `<a href="${this.escapeHtml(url)}" style="display:inline-block;` +
+            `background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 20px;` +
+            `border-radius:10px;font-weight:600;font-size:14px;">` +
+            `${this.escapeHtml(label)}</a></p>`;
+        return { html, label, url };
+    }
+
+    /**
      * Resolves the enabled admin template for a trigger and renders it. Returns
      * null when no template is configured, so callers keep their built-in email.
      */
@@ -177,15 +203,30 @@ export class EmailTemplateService {
             const subject = this.renderTemplate(String(config.subject ?? ''), withUrls).trim();
             const text = this.renderTemplate(String(config.body ?? ''), withUrls);
             const body = this.renderLinks(this.escapeHtml(text));
+
+            // The call-to-action is configured as its own name/link pair rather
+            // than as markup inside the body, so an admin never has to know a
+            // link syntax to add a button to an email.
+            const button = this.renderButton(
+                this.renderTemplate(String(config.buttonLabel ?? ''), withUrls),
+                this.renderTemplate(String(config.buttonUrl ?? ''), withUrls),
+            );
+
             const html =
                 `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;` +
-                `line-height:1.6;color:#1f2937;white-space:pre-wrap;">${body}</div>`;
+                `line-height:1.6;color:#1f2937;white-space:pre-wrap;">${body}</div>${button.html}`;
             const cc = this.renderTemplate(String(config.cc ?? ''), withUrls)
                 .split(/[,;]/)
                 .map((s: string) => s.trim())
                 .filter((s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
 
-            return { subject, text, html, cc, hasLink: body.includes('<a href="') };
+            return {
+                subject,
+                text: button.url ? `${text}\n\n${button.label}: ${button.url}` : text,
+                html,
+                cc,
+                hasLink: Boolean(button.url) || body.includes('<a href="'),
+            };
         } catch (error) {
             this.logger.warn(`Email template lookup failed: ${(error as Error).message}`);
             return null;
