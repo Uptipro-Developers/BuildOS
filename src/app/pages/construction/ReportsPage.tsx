@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { safePercent } from "../../utils/number";
 import { DeployedReports } from "../../components/DeployedReports";
 import { useEffect, useState } from "react";
 import { getCurrencySymbol } from "../../utils/generalSettings";
@@ -262,7 +263,7 @@ export function ReportsPage() {
           },
           {
             label: "Avg Utilisation",
-            value: `${Math.round((totalSpent / totalBudget) * 100)}%`,
+            value: `${safePercent(totalSpent, totalBudget)}%`,
           },
         ].map((s) => (
           <div

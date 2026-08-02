@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { useState, useEffect } from "react";
 import {
   GitCompare,
@@ -117,7 +118,19 @@ export function ChangeRequestsPage() {
   }
 
   async function handleCreate() {
-    if (!form.description.trim() || !id) return;
+    // Bailed silently, so pressing Create with a blank field looked like the
+    // button was broken.
+    if (!id) return;
+    const missing = [
+      !form.description.trim() && "a description",
+      !form.reason.trim() && "a reason",
+      form.changeTypes.length === 0 && "at least one change type",
+      !form.raisedBy.trim() && "who raised it",
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      toast.error(`A change request needs ${missing.join(", ")}.`);
+      return;
+    }
     const newCR: ChangeRequest = {
       id: await allocate("ChangeRequest"),
       projectId: id,

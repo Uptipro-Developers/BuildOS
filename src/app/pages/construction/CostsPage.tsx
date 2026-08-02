@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { safePercent } from "../../utils/number";
 import { useMemo, useState, useEffect, Fragment } from "react";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
@@ -214,7 +215,7 @@ export function CostsPage() {
             </span>
           </div>
           <p className="text-xl font-bold text-gray-900">
-            {totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0}
+            {safePercent(totalSpent, totalBudget)}
             %
           </p>
         </div>
@@ -574,7 +575,7 @@ export function CostsPage() {
               <div className="flex justify-between text-xs text-gray-400 mt-1.5">
                 <span>0%</span>
                 <span>
-                  {Math.round((totalSpent / totalBudget) * 100)}% utilised
+                  {safePercent(totalSpent, totalBudget)}% utilised
                 </span>
                 <span>100%</span>
               </div>
@@ -600,7 +601,7 @@ export function CostsPage() {
               <div className="flex justify-between text-xs text-gray-400 mt-1.5">
                 <span>{getCurrencySymbol()}0</span>
                 <span>
-                  {Math.max(0, Math.round((totalVariance / totalBudget) * 100))}
+                  {Math.max(0, safePercent(totalVariance, totalBudget))}
                   % remaining
                 </span>
                 <span>{fmtCurrency(totalBudget)}</span>

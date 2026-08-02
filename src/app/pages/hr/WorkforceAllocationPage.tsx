@@ -1,6 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { getWorkforceAllocations } from "../../api/workforce-allocation";
+import {
+  getWorkforceAllocations,
+  createWorkforceAllocation,
+} from "../../api/workforce-allocation";
 import { Users, AlertTriangle, Plus, Search, X, Building2 } from "lucide-react";
 
 interface Allocation {
@@ -38,39 +41,96 @@ export function WorkforceAllocationPage() {
   );
   const [projectSearch] = useState("");
   const [showAssign, setShowAssign] = useState(false);
+  /**
+   * The assignment being composed. The modal's inputs were uncontrolled and the
+   * Assign button had no handler at all, so the whole flow was inert — a user
+   * could fill it in, press Assign, and nothing happened or was reported.
+   */
+  const [assignForm, setAssignForm] = useState({
+    employee: "",
+    project: "",
+    role: "",
+    allocPct: "",
+  });
+  const [assigning, setAssigning] = useState(false);
+
+  async function submitAssignment() {
+    const pct = Number(assignForm.allocPct);
+    const missing = [
+      !assignForm.employee && "an employee",
+      !assignForm.project && "a project",
+      !assignForm.role.trim() && "a role",
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      toast.error(`An assignment needs ${missing.join(", ")}.`);
+      return;
+    }
+    if (!Number.isFinite(pct) || pct < 5 || pct > 100) {
+      toast.error("Allocation must be between 5% and 100%.");
+      return;
+    }
+
+    setAssigning(true);
+    try {
+      await createWorkforceAllocation({
+        employeeName: assignForm.employee,
+        projectName: assignForm.project,
+        role: assignForm.role.trim(),
+        allocPct: pct,
+        startDate: new Date().toISOString().slice(0, 10),
+      });
+      await loadAllocations();
+      toast.success(
+        `${assignForm.employee} assigned to ${assignForm.project} at ${pct}%.`,
+      );
+      setAssignForm({ employee: "", project: "", role: "", allocPct: "" });
+      setShowAssign(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not create the assignment.",
+      );
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  /**
+   * Loads allocations and groups the flat records by employee. Extracted so a
+   * newly created assignment can refresh the list through the same path rather
+   * than duplicating the grouping.
+   */
+  const loadAllocations = useCallback(async () => {
+    const items = await getWorkforceAllocations();
+    const map = new Map<string, Allocation>();
+    for (const item of items) {
+      const key = item.employeeId ?? item.employeeName;
+      if (!map.has(key)) {
+        map.set(key, {
+          empId: item.employeeId ?? key,
+          empName: item.employeeName,
+          role: item.role,
+          department: "",
+          projects: [],
+          totalAlloc: 0,
+        });
+      }
+      const entry = map.get(key)!;
+      entry.projects.push({
+        name: item.projectName ?? "",
+        allocPct: item.allocPct,
+        role: item.role,
+        startDate: item.startDate?.slice(0, 10) ?? "",
+      });
+      entry.totalAlloc += item.allocPct;
+    }
+    setAllocs(Array.from(map.values()));
+  }, []);
 
   useEffect(() => {
-    getWorkforceAllocations()
-      .then((items) => {
-        // Group flat records by employeeName
-        const map = new Map<string, Allocation>();
-        for (const item of items) {
-          const key = item.employeeId ?? item.employeeName;
-          if (!map.has(key)) {
-            map.set(key, {
-              empId: item.employeeId ?? key,
-              empName: item.employeeName,
-              role: item.role,
-              department: "",
-              projects: [],
-              totalAlloc: 0,
-            });
-          }
-          const entry = map.get(key)!;
-          entry.projects.push({
-            name: item.projectName ?? "",
-            allocPct: item.allocPct,
-            role: item.role,
-            startDate: item.startDate?.slice(0, 10) ?? "",
-          });
-          entry.totalAlloc += item.allocPct;
-        }
-        setAllocs(Array.from(map.values()));
-      })
-      .catch(() =>
+    loadAllocations().catch(() =>
       toast.error("Could not load workforce allocations."),
     );
-  }, []);
+  }, [loadAllocations]);
 
   const depts = [
     "All",
@@ -325,10 +385,16 @@ export function WorkforceAllocationPage() {
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Employee
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                <select
+                  value={assignForm.employee}
+                  onChange={(e) =>
+                    setAssignForm((f) => ({ ...f, employee: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                >
                   <option value="">Select employee...</option>
                   {allocs.map((a) => (
-                    <option key={a.empId}>
+                    <option key={a.empId} value={a.empName}>
                       {a.empName} ({a.empId})
                     </option>
                   ))}
@@ -338,10 +404,16 @@ export function WorkforceAllocationPage() {
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Project
                 </label>
-                <select className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500">
+                <select
+                  value={assignForm.project}
+                  onChange={(e) =>
+                    setAssignForm((f) => ({ ...f, project: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                >
                   <option value="">Select project...</option>
                   {activeProjects.map((p) => (
-                    <option key={p.name}>{p.name}</option>
+                    <option key={p.name} value={p.name}>{p.name}</option>
                   ))}
                 </select>
               </div>
@@ -350,6 +422,10 @@ export function WorkforceAllocationPage() {
                   Role on Project
                 </label>
                 <input
+                  value={assignForm.role}
+                  onChange={(e) =>
+                    setAssignForm((f) => ({ ...f, role: e.target.value }))
+                  }
                   placeholder="e.g. Lead Site Engineer"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -360,6 +436,10 @@ export function WorkforceAllocationPage() {
                 </label>
                 <input
                   type="number"
+                  value={assignForm.allocPct}
+                  onChange={(e) =>
+                    setAssignForm((f) => ({ ...f, allocPct: e.target.value }))
+                  }
                   placeholder="e.g. 50"
                   min={5}
                   max={100}
@@ -374,8 +454,12 @@ export function WorkforceAllocationPage() {
               >
                 Cancel
               </button>
-              <button className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800">
-                Assign
+              <button
+                onClick={submitAssignment}
+                disabled={assigning}
+                className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {assigning ? "Assigning…" : "Assign"}
               </button>
             </div>
           </div>

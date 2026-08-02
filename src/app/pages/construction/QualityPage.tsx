@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { useState, useEffect } from "react";
 import {
   CheckSquare,
@@ -234,7 +235,14 @@ function NCRModal({
     targetCloseDate: "",
   });
   async function handleSubmit() {
-    if (!form.description.trim()) return;
+    const missing = [
+      !form.description.trim() && "a description",
+      !form.raisedBy?.trim() && "who raised it",
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      toast.error(`An NCR needs ${missing.join(", ")}.`);
+      return;
+    }
     const newNcr: QualityNCR = {
       id: await allocate("NonConformance"),
       projectId,

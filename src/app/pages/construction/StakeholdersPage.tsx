@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { useState, useMemo, useEffect } from "react";
 import {
   Users,
@@ -263,7 +264,20 @@ export function StakeholdersPage() {
   ];
 
   async function handleAddStakeholder() {
-    if (!addForm.name || !addForm.organization) return;
+    const missing = [
+      !addForm.name.trim() && "a name",
+      !addForm.organization.trim() && "an organisation",
+      !addForm.role.trim() && "a role",
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      toast.error(`A stakeholder needs ${missing.join(", ")}.`);
+      return;
+    }
+    // Only validated when supplied: contact details are optional here.
+    if (addForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addForm.email)) {
+      toast.error("Enter a valid email address.");
+      return;
+    }
     const newSh = {
       id: await allocate("Stakeholder"),
       projectId: id ?? "",

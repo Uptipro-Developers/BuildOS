@@ -401,12 +401,16 @@ export function AccrualsPage() {
                               placeholder="Line description" className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500" />
                           </td>
                           <td className="px-4 py-2">
+                            {/* A journal line is a debit OR a credit, never
+                                both. The design disables the opposite side once
+                                one is entered; without it a line could carry
+                                both and the entry would not balance. */}
                             <input type="number" value={line.debit || ""} onChange={e => updateLine(line.id, "debit", parseFloat(e.target.value) || 0)}
-                              placeholder="0.00" className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right" min={0} />
+                              placeholder="0.00" disabled={!!line.credit} className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right disabled:bg-gray-50 disabled:text-gray-400" min={0} />
                           </td>
                           <td className="px-4 py-2">
                             <input type="number" value={line.credit || ""} onChange={e => updateLine(line.id, "credit", parseFloat(e.target.value) || 0)}
-                              placeholder="0.00" className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right" min={0} />
+                              placeholder="0.00" disabled={!!line.debit} className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 text-right disabled:bg-gray-50 disabled:text-gray-400" min={0} />
                           </td>
                           <td className="px-4 py-2 text-center">
                             {form.lines.length > 2 && (

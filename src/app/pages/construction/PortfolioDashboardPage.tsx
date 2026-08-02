@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { safePercent } from "../../utils/number";
 import { useEffect, useState, useMemo } from "react";
 import {
   LayoutDashboard,
@@ -301,7 +302,7 @@ export function PortfolioDashboardPage() {
           {(() => {
             const totalBudget = projects.reduce((s, p) => s + p.budget, 0);
             const totalSpent = projects.reduce((s, p) => s + p.spent, 0);
-            const pct = Math.round((totalSpent / totalBudget) * 100);
+            const pct = safePercent(totalSpent, totalBudget);
             const remaining = totalBudget - totalSpent;
             return (
               <>

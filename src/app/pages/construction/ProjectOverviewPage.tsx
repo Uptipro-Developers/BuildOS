@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router";
+import { safeAverage } from "../../utils/number";
 import { ArrowLeft, MapPin, Calendar, Users, DollarSign, Building2, FileText, AlertTriangle, CheckSquare, Clock, Truck } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { Task, Vendor, DailyReport, Issue } from "./types";
@@ -96,9 +97,11 @@ export function ProjectOverviewPage() {
   }
 
   const workPackageCount = projectTasks.filter(t => t.level === 4).length;
-  const avgPercentComplete = projectTasks.length > 0
-    ? Math.round(projectTasks.reduce((s, t) => s + t.percentComplete, 0) / projectTasks.length)
-    : 0;
+  // `percentComplete` is optional on API-sourced tasks; summing it raw made
+  // the whole average NaN as soon as one task lacked it.
+  const avgPercentComplete = Math.round(
+    safeAverage(projectTasks.map((t) => t.percentComplete)),
+  );
 
   const sortedReports = [...projectReports].sort(
     (a, b) => new Date(b.reportDate).getTime() - new Date(a.reportDate).getTime()

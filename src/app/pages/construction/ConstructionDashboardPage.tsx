@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safePercent } from "../../utils/number";
 import { useNavigate } from "react-router";
 import {
   formatDateByGeneralSettings,
@@ -326,19 +327,19 @@ export function ConstructionDashboardPage() {
                 {
                   label: "On Track",
                   count: onTrackCount,
-                  pct: Math.round((onTrackCount / totalMapped) * 100),
+                  pct: safePercent(onTrackCount, totalMapped),
                   color: "bg-green-500",
                 },
                 {
                   label: "At Risk",
                   count: atRiskCount,
-                  pct: Math.round((atRiskCount / totalMapped) * 100),
+                  pct: safePercent(atRiskCount, totalMapped),
                   color: "bg-amber-500",
                 },
                 {
                   label: "Delayed",
                   count: delayedMapped,
-                  pct: Math.round((delayedMapped / totalMapped) * 100),
+                  pct: safePercent(delayedMapped, totalMapped),
                   color: "bg-red-500",
                 },
               ].map((s) => (

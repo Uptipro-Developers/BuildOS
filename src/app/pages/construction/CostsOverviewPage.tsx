@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { safePercent } from "../../utils/number";
 import {
   DollarSign,
   TrendingUp,
@@ -33,8 +34,9 @@ export function CostsOverviewPage() {
 
   const totalBudget = projects.reduce((s, p) => s + p.budget, 0);
   const totalSpent = projects.reduce((s, p) => s + p.spent, 0);
-  const avgUtil =
-    projects.length > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+  // Guarded on projects.length while dividing by totalBudget, so any project
+  // set with no budget produced NaN.
+  const avgUtil = safePercent(totalSpent, totalBudget);
   const onBudget = projects.filter((p) => p.spent <= p.budget).length;
 
   const stats = [

@@ -226,10 +226,12 @@ export function TasksPage({
         prev.map((t) => (t.id === editId ? { ...t, ...form } : t)),
       );
       setShowModal(false);
-      updateAppTask(editId, { ...form }).catch((err) => {
-        setTasks(prevTasks);
-        toast.error(err?.message || "Failed to update task.");
-      });
+      updateAppTask(editId, { ...form })
+        .then(() => toast.success("Task updated."))
+        .catch((err) => {
+          setTasks(prevTasks);
+          toast.error(err?.message || "Failed to update task.");
+        });
     } else {
       const tempId = makeId();
       const newTask: Task = {
@@ -252,6 +254,7 @@ export function TasksPage({
           setTasks((prev) =>
             prev.map((t) => (t.id === tempId ? { ...t, id: created.id } : t)),
           );
+          toast.success("Task created.");
         })
         .catch((err) => {
           setTasks((prev) => prev.filter((t) => t.id !== tempId));
@@ -268,19 +271,23 @@ export function TasksPage({
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status: next } : t)),
     );
-    updateAppTask(id, { status: STATUS_TO_BACKEND[next] }).catch((err) => {
-      setTasks(prevTasks);
-      toast.error(err?.message || "Failed to update task status.");
-    });
+    updateAppTask(id, { status: STATUS_TO_BACKEND[next] })
+      .then(() => toast.success(`Task moved to ${next}.`))
+      .catch((err) => {
+        setTasks(prevTasks);
+        toast.error(err?.message || "Failed to update task status.");
+      });
   }
 
   function deleteTask(id: string) {
     const prevTasks = tasks;
     setTasks((prev) => prev.filter((t) => t.id !== id));
-    deleteAppTask(id).catch((err) => {
-      setTasks(prevTasks);
-      toast.error(err?.message || "Failed to delete task.");
-    });
+    deleteAppTask(id)
+      .then(() => toast.success("Task deleted."))
+      .catch((err) => {
+        setTasks(prevTasks);
+        toast.error(err?.message || "Failed to delete task.");
+      });
   }
 
   const isOverdue = (dueDate: string, status: TaskStatus) =>
