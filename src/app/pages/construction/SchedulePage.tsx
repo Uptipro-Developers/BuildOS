@@ -126,19 +126,31 @@ export function SchedulePage() {
   useEffect(() => {
     listConstructionTasks(projectId)
       .then((data) => {
-        if (data.length > 0) setTasks(calcFloat(data as Task[]));
+        setTasks(calcFloat(data as Task[]));
       })
-      .catch(() => {});
+      .catch(() => {
+        // The API is authoritative; a failure must not leave sample
+        // records on screen looking like real ones.
+        setTasks([]);
+      });
     listConstructionBaselines(projectId)
       .then((data) => {
-        if (data.length > 0) setBaselines(data as typeof mockBaselines);
+        setBaselines(data as typeof mockBaselines);
       })
-      .catch(() => {});
+      .catch(() => {
+        // The API is authoritative; a failure must not leave sample
+        // records on screen looking like real ones.
+        setBaselines([]);
+      });
     listConstructionCalendars(projectId)
       .then((data) => {
-        if (data.length > 0) setCalendars(data as typeof mockCalendars);
+        setCalendars(data as typeof mockCalendars);
       })
-      .catch(() => {});
+      .catch(() => {
+        // The API is authoritative; a failure must not leave sample
+        // records on screen looking like real ones.
+        setCalendars([]);
+      });
   }, [projectId]);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [expanded, setExpanded] = useState<Set<string>>(

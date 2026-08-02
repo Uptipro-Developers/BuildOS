@@ -41,10 +41,12 @@ export function DailyReportsOverviewPage() {
     let active = true;
     listDailyReports()
       .then((data) => {
-        if (active && data.length > 0) setDailyReports(data);
+        if (active) setDailyReports(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setDailyReports([]);
       });
     return () => {
       active = false;

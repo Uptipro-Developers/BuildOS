@@ -78,17 +78,21 @@ export function DocumentsPage() {
     let active = true;
     listDocumentFolders(id)
       .then((data) => {
-        if (active && data.length > 0) setLocalFolders(data);
+        if (active) setLocalFolders(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setLocalFolders([]);
       });
     listDocumentFiles(id)
       .then((data) => {
-        if (active && data.length > 0) setLocalFiles(data);
+        if (active) setLocalFiles(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setLocalFiles([]);
       });
     return () => {
       active = false;

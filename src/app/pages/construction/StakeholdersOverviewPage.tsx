@@ -51,10 +51,12 @@ export function StakeholdersOverviewPage() {
     let active = true;
     listStakeholders()
       .then((data) => {
-        if (active && data.length > 0) setLocalStakeholders(data);
+        if (active) setLocalStakeholders(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setLocalStakeholders([]);
       });
     return () => {
       active = false;

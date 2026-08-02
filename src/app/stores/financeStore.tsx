@@ -62,45 +62,14 @@ export interface IncomeStatementRow {
   isSection?: boolean;
 }
 
-// ── Seed Accounts ──────────────────────────────────────────────────────────
-const SEED_ACCOUNTS: Account[] = [
-  { id: "a1",  code: "1000", name: "Assets",                type: "Assets",      parentId: null, description: "All asset accounts" },
-  { id: "a2",  code: "1100", name: "Current Assets",        type: "Assets",      parentId: "a1",  description: "Short-term assets" },
-  { id: "a3",  code: "1110", name: "Cash & Bank",           type: "Assets",      parentId: "a2",  description: "Cash on hand and bank balances" },
-  { id: "a4",  code: "1120", name: "Accounts Receivable",   type: "Assets",      parentId: "a2",  description: "Amounts owed by customers" },
-  { id: "a5",  code: "1200", name: "Fixed Assets",          type: "Assets",      parentId: "a1",  description: "Long-term physical assets" },
-  { id: "a6",  code: "1210", name: "Plant & Equipment",     type: "Assets",      parentId: "a5",  description: "Machinery and equipment" },
-  { id: "a7",  code: "2000", name: "Liabilities",           type: "Liabilities", parentId: null, description: "All liability accounts" },
-  { id: "a8",  code: "2100", name: "Current Liabilities",   type: "Liabilities", parentId: "a7",  description: "Short-term obligations" },
-  { id: "a9",  code: "2110", name: "Accounts Payable",      type: "Liabilities", parentId: "a8",  description: "Amounts owed to suppliers" },
-  { id: "a10", code: "2120", name: "Accrued Expenses",      type: "Liabilities", parentId: "a8",  description: "Expenses incurred but not yet paid" },
-  { id: "a11", code: "3000", name: "Equity",                type: "Equity",      parentId: null, description: "Owner's equity" },
-  { id: "a12", code: "3100", name: "Retained Earnings",     type: "Equity",      parentId: "a11", description: "Accumulated profits" },
-  { id: "a13", code: "4000", name: "Income",                type: "Income",      parentId: null, description: "All income accounts" },
-  { id: "a14", code: "4100", name: "Contract Revenue",      type: "Income",      parentId: "a13", description: "Revenue from construction contracts" },
-  { id: "a15", code: "4200", name: "Service Income",        type: "Income",      parentId: "a13", description: "Revenue from services rendered" },
-  { id: "a16", code: "5000", name: "Expenses",              type: "Expenses",    parentId: null, description: "All expense accounts" },
-  { id: "a17", code: "5100", name: "Labour Costs",          type: "Expenses",    parentId: "a16", description: "Wages and salaries" },
-  { id: "a18", code: "5200", name: "Material Costs",        type: "Expenses",    parentId: "a16", description: "Raw materials and supplies" },
-  { id: "a19", code: "5300", name: "Equipment Costs",       type: "Expenses",    parentId: "a16", description: "Equipment hire and maintenance" },
-  { id: "a20", code: "5400", name: "Overhead",              type: "Expenses",    parentId: "a16", description: "General overhead costs" },
-];
-
-// ── Seed Fiscal Years ──────────────────────────────────────────────────────
-const SEED_FISCAL_YEARS: FiscalYear[] = [
-  { id: "fy1", label: "FY 2025", startDate: "2025-01-01", endDate: "2025-12-31", status: "closed", isCurrent: false, closedAt: "2026-01-15", closedBy: "Sola Adeleke" },
-  { id: "fy2", label: "FY 2026", startDate: "2026-01-01", endDate: "2026-12-31", status: "open", isCurrent: true },
-];
-
-
-
-// ── Context ────────────────────────────────────────────────────────────────
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
 export function FinanceProvider({ children }: { children: ReactNode }) {
-  const [accounts, setAccounts] = useState<Account[]>(SEED_ACCOUNTS);
+  // Starts empty and loads from the API. A seeded demo ledger rendered as if
+  // it were the org's real chart of accounts until the fetch landed.
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>(SEED_FISCAL_YEARS);
+  const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
   // Accruals and their type catalogue are persisted server-side. They used to be
   // seeded from a hardcoded array and mirrored into localStorage, so nothing a
   // user entered survived a refresh (and every session showed the same demo rows).
@@ -118,13 +87,13 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       .then(setAccrualTypeConfigs)
       .catch(() => setAccrualTypeConfigs([]));
 
-    // The chart of accounts is persisted server-side. SEED_ACCOUNTS is only the
-    // pre-load placeholder: without this, every consumer of the store (the
-    // Accruals line-item picker most visibly) offered the same demo ledger
-    // rather than the accounts the org actually configured.
+    // The chart of accounts is persisted server-side. This used to be seeded
+    // from a hardcoded demo ledger, so every consumer of the store — the
+    // Accruals line-item picker most visibly — offered accounts the org had
+    // never configured.
     getChartAccounts()
       .then((rows) => {
-        if (!Array.isArray(rows) || rows.length === 0) return;
+        if (!Array.isArray(rows)) return;
         setAccounts(
           rows.map((a: any) => ({
             id: a.id,
@@ -138,7 +107,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         );
       })
       .catch(() => {
-        /* keep the placeholder ledger if the lookup fails */
+        // Nothing to fall back to, and inventing accounts would be worse than
+        // an empty ledger the user can see is empty.
+        setAccounts([]);
       });
   }, [reloadAccruals]);
 

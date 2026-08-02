@@ -189,47 +189,6 @@ export interface InventoryEquipment {
   defaultInternalCostPerDay: number;
   status: string;
 }
-
-export const materialInventory: InventoryMaterial[] = [
-  { id: "INV-MAT-001", name: "Cement (Grade 42.5)", category: "Concrete", unit: "bags", defaultUnitCost: 5500, inStock: 2000 },
-  { id: "INV-MAT-002", name: "Reinforcement Steel (16mm)", category: "Reinforcement", unit: "tonnes", defaultUnitCost: 850000, inStock: 45 },
-  { id: "INV-MAT-003", name: "Sharp Sand", category: "Aggregates", unit: "tonnes", defaultUnitCost: 12000, inStock: 300 },
-  { id: "INV-MAT-004", name: "Granite (3/4 inch)", category: "Aggregates", unit: "tonnes", defaultUnitCost: 18000, inStock: 200 },
-  { id: "INV-MAT-005", name: "PVC Pipes (4 inch)", category: "Plumbing", unit: "pieces", defaultUnitCost: 4500, inStock: 150 },
-  { id: "INV-MAT-006", name: "PVC Pipes (2 inch)", category: "Plumbing", unit: "pieces", defaultUnitCost: 2800, inStock: 300 },
-  { id: "INV-MAT-007", name: "Electrical Cable (2.5mm)", category: "Electrical", unit: "rolls", defaultUnitCost: 85000, inStock: 20 },
-  { id: "INV-MAT-008", name: "Electrical Cable (4mm)", category: "Electrical", unit: "rolls", defaultUnitCost: 120000, inStock: 15 },
-  { id: "INV-MAT-009", name: "Paint (Emulsion, 20L)", category: "Paint & Coatings", unit: "pails", defaultUnitCost: 45000, inStock: 40 },
-  { id: "INV-MAT-010", name: "Paint (Gloss, 4L)", category: "Paint & Coatings", unit: "litres", defaultUnitCost: 8500, inStock: 60 },
-  { id: "INV-MAT-011", name: "Ceramic Tiles (600x600mm)", category: "Finishing", unit: "m²", defaultUnitCost: 8500, inStock: 500 },
-  { id: "INV-MAT-012", name: "Waterproof Membrane", category: "Waterproofing", unit: "rolls", defaultUnitCost: 65000, inStock: 25 },
-  { id: "INV-MAT-013", name: "Plywood (12mm)", category: "Lumber / Formwork", unit: "sheets", defaultUnitCost: 9500, inStock: 200 },
-  { id: "INV-MAT-014", name: "Plywood (18mm)", category: "Lumber / Formwork", unit: "sheets", defaultUnitCost: 12500, inStock: 150 },
-  { id: "INV-MAT-015", name: "Nails (3 inch)", category: "Hardware", unit: "kg", defaultUnitCost: 1200, inStock: 80 },
-];
-
-export const equipmentInventory: InventoryEquipment[] = [
-  { id: "INV-EQ-001", name: "Excavator (20 ton)", category: "Earthwork", defaultInternalCostPerDay: 120000, status: "Available" },
-  { id: "INV-EQ-002", name: "Excavator (30 ton)", category: "Earthwork", defaultInternalCostPerDay: 160000, status: "Available" },
-  { id: "INV-EQ-003", name: "Bulldozer D6", category: "Earthwork", defaultInternalCostPerDay: 180000, status: "Assigned" },
-  { id: "INV-EQ-004", name: "Concrete Mixer (1m³)", category: "Concreting", defaultInternalCostPerDay: 45000, status: "Available" },
-  { id: "INV-EQ-005", name: "Concrete Pump", category: "Concreting", defaultInternalCostPerDay: 95000, status: "Available" },
-  { id: "INV-EQ-006", name: "Vibratory Roller", category: "Compaction", defaultInternalCostPerDay: 80000, status: "Available" },
-  { id: "INV-EQ-007", name: "Tower Crane (50m)", category: "Lifting", defaultInternalCostPerDay: 250000, status: "Assigned" },
-  { id: "INV-EQ-008", name: "Mobile Crane (25 ton)", category: "Lifting", defaultInternalCostPerDay: 180000, status: "Available" },
-  { id: "INV-EQ-009", name: "Generator (100 KVA)", category: "Generators / Power", defaultInternalCostPerDay: 35000, status: "Available" },
-  { id: "INV-EQ-010", name: "Generator (250 KVA)", category: "Generators / Power", defaultInternalCostPerDay: 65000, status: "Under Maintenance" },
-  { id: "INV-EQ-011", name: "Water Pump (3 inch)", category: "Pumping", defaultInternalCostPerDay: 15000, status: "Available" },
-  { id: "INV-EQ-012", name: "Dump Truck (20 ton)", category: "Transport", defaultInternalCostPerDay: 75000, status: "Available" },
-  { id: "INV-EQ-013", name: "Forklift (3 ton)", category: "Transport", defaultInternalCostPerDay: 55000, status: "Available" },
-  { id: "INV-EQ-014", name: "Pile Driver", category: "Piling", defaultInternalCostPerDay: 200000, status: "Available" },
-  { id: "INV-EQ-015", name: "Safety Scaffolding Set", category: "Safety", defaultInternalCostPerDay: 8000, status: "Available" },
-];
-
-// ── Lookup helpers ──────────────────────────────────────────────────────────
-// The current project is read from the live project store (populated by the
-// project list/detail pages after fetching). The other helpers filter over the
-// (now empty) arrays; pages fetch their own project-scoped data from the API.
 export function getProjectById(id: string): Project | undefined {
   return getCachedProject(id);
 }

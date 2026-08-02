@@ -42,10 +42,12 @@ export function IssuesOverviewPage() {
     let active = true;
     listIssues()
       .then((data) => {
-        if (active && data.length > 0) setIssues(data);
+        if (active) setIssues(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setIssues([]);
       });
     return () => {
       active = false;

@@ -46,10 +46,12 @@ export function HSEOverviewPage() {
     let active = true;
     listHseRecords()
       .then((data) => {
-        if (active && data.length > 0) setHseMatrix(data);
+        if (active) setHseMatrix(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setHseMatrix([]);
       });
     return () => {
       active = false;

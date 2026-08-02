@@ -404,10 +404,12 @@ export function QualityPage() {
     let active = true;
     listQualityNcrs(id)
       .then((data) => {
-        if (active && data.length > 0) setNcrData(data);
+        if (active) setNcrData(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setNcrData([]);
       });
     return () => {
       active = false;

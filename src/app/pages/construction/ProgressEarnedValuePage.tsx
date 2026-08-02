@@ -28,10 +28,13 @@ export function ProgressEarnedValuePage() {
   useEffect(() => {
     listEarnedValueRecords(id ?? undefined)
       .then((data) => {
-        if (data.length > 0)
-          setEarnedValueHistory(data as typeof mockEvHistory);
+        setEarnedValueHistory(data as typeof mockEvHistory);
       })
-      .catch(() => {});
+      .catch(() => {
+        // The API is authoritative; a failure must not leave sample
+        // records on screen looking like real ones.
+        setEarnedValueHistory([]);
+      });
   }, [id]);
 
   const ev = useMemo(() => {

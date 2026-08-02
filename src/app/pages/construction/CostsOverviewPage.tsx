@@ -22,9 +22,13 @@ export function CostsOverviewPage() {
   useEffect(() => {
     fetchConstructionProjects()
       .then((data) => {
-        if (data.length > 0) setProjects(data as typeof mockProjects);
+        setProjects(data as typeof mockProjects);
       })
-      .catch(() => {});
+      .catch(() => {
+        // The API is authoritative; a failure must not leave sample
+        // records on screen looking like real ones.
+        setProjects([]);
+      });
   }, []);
 
   const totalBudget = projects.reduce((s, p) => s + p.budget, 0);

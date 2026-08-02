@@ -79,10 +79,12 @@ export function CommunicationLogPage() {
     let active = true;
     listCommunications(projectId)
       .then((data) => {
-        if (active && data.length > 0) setAllComms(data);
+        if (active) setAllComms(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setAllComms([]);
       });
     return () => {
       active = false;

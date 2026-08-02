@@ -64,10 +64,12 @@ export function DisbursementsPage() {
     let active = true;
     listDisbursements(projectId)
       .then((data) => {
-        if (active && data.length > 0) setAllDisbursements(data);
+        if (active) setAllDisbursements(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setAllDisbursements([]);
       });
     return () => {
       active = false;

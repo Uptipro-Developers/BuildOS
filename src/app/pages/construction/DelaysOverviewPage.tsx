@@ -26,10 +26,12 @@ export function DelaysOverviewPage() {
     let active = true;
     listDelays()
       .then((data) => {
-        if (active && data.length > 0) setDelays(data);
+        if (active) setDelays(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative: empty means none, and a failure
+        // must not be papered over with sample records.
+        if (active) setDelays([]);
       });
     return () => {
       active = false;
