@@ -38,18 +38,21 @@ export function DelaysPage() {
   } | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const [projectDelays, setProjectDelays] = useState<Delay[]>(() =>
-    id ? delays.filter((d) => d.projectId === id) : [],
-  );
+  // Starts empty and is filled from the API. This seeded from mockData and
+  // only replaced it when the API returned a NON-EMPTY array, so a project
+  // with no records — or a failing endpoint — showed fabricated ones.
+  const [projectDelays, setProjectDelays] = useState<Delay[]>([]);
   useEffect(() => {
     if (!id) return;
     let active = true;
     listDelays(id)
       .then((data) => {
-        if (active && data.length > 0) setProjectDelays(data);
+        if (active) setProjectDelays(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        // The API is authoritative; an empty list means no delays, and a
+        // failure must not be papered over with sample records.
+        if (active) setProjectDelays([]);
       });
     return () => {
       active = false;

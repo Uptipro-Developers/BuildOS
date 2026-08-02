@@ -78,18 +78,19 @@ export function ChangeRequestsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
 
-  const [projectCRs, setProjectCRs] = useState<ChangeRequest[]>(() =>
-    id ? changeRequests.filter((cr) => cr.projectId === id) : [],
-  );
+  // Starts empty and is filled from the API. This seeded from mockData and
+  // only replaced it when the API returned a NON-EMPTY array, so a project
+  // with no records — or a failing endpoint — showed fabricated ones.
+  const [projectCRs, setProjectCRs] = useState<ChangeRequest[]>([]);
   useEffect(() => {
     if (!id) return;
     let active = true;
     listChangeRequests(id)
       .then((data) => {
-        if (active && data.length > 0) setProjectCRs(data);
+        if (active) setProjectCRs(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        if (active) setProjectCRs([]);
       });
     return () => {
       active = false;

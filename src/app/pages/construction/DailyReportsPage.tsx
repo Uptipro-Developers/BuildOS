@@ -47,7 +47,10 @@ export function DailyReportsPage() {
   const [searchTerm, setSearchTerm] = useState("");
 
   // Local state for review actions (approve/reject)
-  const [localReports, setLocalReports] = useState<DailyReport[]>(allReports);
+  // Starts empty and is filled from the API. This seeded from mockData and
+  // only replaced it when the API returned a NON-EMPTY array, so a project
+  // with no records — or a failing endpoint — showed fabricated ones.
+  const [localReports, setLocalReports] = useState<DailyReport[]>([]);
   const reports = localReports;
 
   // Load reports from the backend, falling back to mock data when unavailable.
@@ -56,10 +59,10 @@ export function DailyReportsPage() {
     let active = true;
     listDailyReports(projectId)
       .then((data) => {
-        if (active && data.length > 0) setLocalReports(data);
+        if (active) setLocalReports(data);
       })
       .catch(() => {
-        /* keep mock data on failure */
+        if (active) setLocalReports([]);
       });
     return () => {
       active = false;

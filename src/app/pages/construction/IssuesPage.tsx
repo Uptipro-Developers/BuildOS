@@ -10,13 +10,13 @@ import {
   Loader2,
 } from "lucide-react";
 import {
-  getIssuesByProject,
   getProjectById,
   getTasksByProject,
   fmtDate,
 } from "./mockData";
 import type { Issue } from "./types";
 import { listIssues, createIssue } from "../../api/construction-issues";
+import { toast } from "sonner";
 import { fetchEmployees } from "../../api/employees";
 import { useNumbering } from "../../stores/numberingStore";
 
@@ -82,9 +82,12 @@ export function IssuesPage() {
   const { allocate } = useNumbering();
   const { id } = useParams();
   const project = id ? getProjectById(id) : undefined;
-  const [issues, setIssues] = useState<Issue[]>(() =>
-    id ? getIssuesByProject(id) : [],
-  );
+  // Starts empty and is filled from the API. This used to seed from mockData
+  // and only replace it when the API returned a NON-EMPTY array, so a project
+  // with no issues — or a failing endpoint — displayed fabricated records that
+  // looked real.
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -112,17 +115,23 @@ export function IssuesPage() {
     };
   }, []);
 
-  // Load issues from the backend, falling back to mock data when the API is
-  // unavailable or returns no records for this project.
+  // The API is authoritative: an empty result means this project has no issues,
+  // and a failure is reported rather than papered over with sample data.
   useEffect(() => {
     if (!id) return;
     let active = true;
     listIssues(id)
       .then((data) => {
-        if (active && data.length > 0) setIssues(data);
+        if (!active) return;
+        setIssues(data);
+        setLoadError(null);
       })
-      .catch(() => {
-        /* keep mock data on failure */
+      .catch((err) => {
+        if (!active) return;
+        setIssues([]);
+        setLoadError(
+          err instanceof Error ? err.message : "Could not load issues.",
+        );
       });
     return () => {
       active = false;
@@ -154,7 +163,23 @@ export function IssuesPage() {
   }
 
   async function handleLogIssue() {
-    if (!form.title.trim()) return;
+    // Only the title was checked, so an issue could be logged with no owner, no
+    // target date and no description — and nothing said why the button appeared
+    // to do nothing when the title was blank.
+    const problems: string[] = [];
+    if (!form.title.trim()) problems.push("a title");
+    if (!form.description.trim()) problems.push("a description");
+    if (!form.ownerId) problems.push("an owner");
+    if (!form.targetDate) problems.push("a target date");
+    if (form.impactTypes.length === 0) problems.push("at least one impact type");
+    if (problems.length > 0) {
+      toast.error(`An issue needs ${problems.join(", ")}.`);
+      return;
+    }
+    if (new Date(form.targetDate) < new Date(new Date().toDateString())) {
+      toast.error("The target date cannot be in the past.");
+      return;
+    }
     const newIssue: Issue = {
       id: await allocate("Issue"),
       projectId: id!,
@@ -328,8 +353,14 @@ export function IssuesPage() {
         </table>
         {filtered.length === 0 && (
           <div className="py-16 text-center">
-            <AlertTriangle className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-            <p className="text-sm text-gray-500">No issues found</p>
+            <AlertTriangle
+              className={`w-8 h-8 mx-auto mb-2 ${loadError ? "text-red-300" : "text-gray-300"}`}
+            />
+            {/* "No issues" and "could not load issues" look identical
+                otherwise, and the second is not something to hide. */}
+            <p className="text-sm text-gray-500">
+              {loadError ? `Could not load issues — ${loadError}` : "No issues found"}
+            </p>
           </div>
         )}
       </div>
