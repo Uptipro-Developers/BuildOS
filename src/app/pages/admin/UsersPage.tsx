@@ -49,6 +49,7 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  Copy,
 } from "lucide-react";
 import { getReferenceData } from "../../api/reference-data";
 import { toast } from "sonner";
@@ -760,6 +761,27 @@ function UserDetailPanel({
           {/* ── Basic Info ── */}
           {tab === "info" && (
             <div className="space-y-4">
+              {/* The user's ID was never shown, so anyone asked to pair this
+                  account with an external system — the SabiQuot portal's
+                  "BuildOS User ID" — could not find it. */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-semibold text-gray-500 uppercase tracking-wide">
+                  User ID
+                </span>
+                <code className="font-mono text-gray-800 bg-gray-100 border border-gray-200 rounded px-2 py-1">
+                  {user.id}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(user.id);
+                    toast.success("User ID copied");
+                  }}
+                  className="p-1 text-gray-500 hover:text-gray-900"
+                  aria-label="Copy user ID"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { Icon: Mail, label: "Email", value: user.email },

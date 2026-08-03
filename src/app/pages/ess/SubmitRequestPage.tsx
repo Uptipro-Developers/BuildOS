@@ -256,6 +256,29 @@ function MaterialCreationForm({
     unit: "pcs",
     notes: "",
   });
+  // The unit list was hardcoded here while Storefront configures units of
+  // measurement, so a request could be raised in a unit the store does not
+  // stock. Same defect that was fixed on the Material Request form.
+  const [unitOptions, setUnitOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    getUnits()
+      .then((rows) => {
+        if (!alive) return;
+        const names = (rows ?? [])
+          .map((u) => u.abbreviation || u.name)
+          .filter(Boolean);
+        if (names.length > 0) setUnitOptions(names);
+      })
+      .catch(() => {
+        // Leave the list empty rather than offering units that may not exist.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -390,19 +413,7 @@ function MaterialCreationForm({
                 onChange={(e) => field("unit", e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
-                {[
-                  "pcs",
-                  "bags",
-                  "kg",
-                  "tonnes",
-                  "metres",
-                  "m²",
-                  "m³",
-                  "litres",
-                  "sets",
-                  "sheets",
-                  "rolls",
-                ].map((u) => (
+                {unitOptions.map((u) => (
                   <option key={u}>{u}</option>
                 ))}
               </select>

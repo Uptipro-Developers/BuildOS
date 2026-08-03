@@ -26,6 +26,7 @@ import {
   Edit,
   Trash2,
   User,
+  Copy,
 } from "lucide-react";
 import {
   getCurrencySymbol,
@@ -477,6 +478,27 @@ export function SuppliersPage() {
 
                   {supplierTab === "overview" && (
                     <div className="px-5 py-4">
+                      {/* The supplier's ID was never displayed, so a vendor
+                          asked for their "BuildOS Vendor ID" on the SabiQuot
+                          portal had no way to obtain it. */}
+                      <div className="flex items-center gap-2 mb-4 text-xs">
+                        <span className="font-semibold text-gray-500 uppercase tracking-wide">
+                          Vendor ID
+                        </span>
+                        <code className="font-mono text-gray-800 bg-gray-100 border border-gray-200 rounded px-2 py-1">
+                          {sup.id}
+                        </code>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(sup.id);
+                            toast.success("Vendor ID copied");
+                          }}
+                          className="p-1 text-gray-500 hover:text-gray-900"
+                          aria-label="Copy vendor ID"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       <div className="grid grid-cols-3 gap-6 mb-5">
                         <div>
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
