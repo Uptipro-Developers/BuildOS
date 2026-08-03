@@ -1,5 +1,5 @@
 import { useParams } from "react-router";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   CheckCircle,
   ArrowRight,
@@ -56,6 +56,7 @@ import { getProject } from "../../api/projects";
 import { fetchEmployees } from "../../api/employees";
 import { fetchSuppliers } from "../../api/suppliers";
 import { getMaterials, createMaterialRequest } from "../../api/materials";
+import { listConstructionSettings } from "../../api/construction-settings";
 import { getTasks } from "../../api/tasks";
 import { getClusters } from "../../api/clusters";
 import { getEquipment } from "../../api/equipment";
@@ -329,6 +330,51 @@ export function ProjectSetupPage() {
     string[]
   >([]);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
+  /**
+   * The project type taxonomy shown in this wizard.
+   *
+   * Sectors and categories were compiled-in constants (`SECTORS` here,
+   * `SECTOR_CATEGORIES` in types.ts) while Settings → Project Types edited a
+   * copy on the server. Three independent copies of the same list meant adding
+   * or renaming a sector in Settings changed nothing here, so the two screens
+   * disagreed as soon as anyone configured anything. The constants are now only
+   * the fallback for when nothing has been configured yet.
+   */
+  const [configuredTypes, setConfiguredTypes] = useState<
+    { sector: string; categories: string[] }[] | null
+  >(null);
+
+  useEffect(() => {
+    listConstructionSettings()
+      .then((rows) => {
+        const types = rows?.[0]?.projectTypes;
+        if (Array.isArray(types) && types.length > 0) {
+          setConfiguredTypes(types as { sector: string; categories: string[] }[]);
+        }
+      })
+      .catch(() => {
+        // Fall back to the built-in taxonomy; the wizard must still work.
+      });
+  }, []);
+
+  const sectorOptions = useMemo<Sector[]>(
+    () =>
+      configuredTypes
+        ? (configuredTypes.map((t) => t.sector) as Sector[])
+        : SECTORS,
+    [configuredTypes],
+  );
+
+  const categoriesForSector = useCallback(
+    (sector: string): string[] => {
+      if (configuredTypes) {
+        return configuredTypes.find((t) => t.sector === sector)?.categories ?? [];
+      }
+      return SECTOR_CATEGORIES[sector as Sector] ?? [];
+    },
+    [configuredTypes],
+  );
+
   const [procurementQuery, setProcurementQuery] = useState("");
   // The quantity and notes inputs had no bindings and Submit Request only
   // raised an alert — nothing was ever sent to procurement.
@@ -1360,9 +1406,7 @@ export function ProjectSetupPage() {
 
   // Step 1 — Project Type Classification
   const renderProjectType = () => {
-    const categories = projectSector
-      ? SECTOR_CATEGORIES[projectSector as Sector]
-      : [];
+    const categories = projectSector ? categoriesForSector(projectSector) : [];
     return (
       <div
         className="rounded-xl border p-6 space-y-6"
@@ -1387,7 +1431,7 @@ export function ProjectSetupPage() {
             Level 1 — Sector
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {SECTORS.map((s) => {
+            {sectorOptions.map((s) => {
               const selected = projectSector === s;
               return (
                 <button

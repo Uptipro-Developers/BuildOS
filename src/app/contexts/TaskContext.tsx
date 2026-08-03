@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import {
   createContext,
   useContext,
@@ -81,19 +82,45 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           prev.map((t) => (t.id === tempId ? (saved as AppTask) : t)),
         );
       })
-      .catch(() => {});
+      // The optimistic row used to stay on screen after a failed save, so a
+      // task that was never stored looked created until the next reload.
+      .catch((err) => {
+        setTasks((prev) => prev.filter((t) => t.id !== tempId));
+        toast.error(
+          err instanceof Error ? err.message : "Could not create the task.",
+        );
+      });
   }, []);
 
   const updateTask = useCallback((id: string, updates: Partial<AppTask>) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, ...updates } : t)),
-    );
-    updateAppTask(id, updates as Record<string, any>).catch(() => {});
+    let previous: AppTask | undefined;
+    setTasks((prev) => {
+      previous = prev.find((t) => t.id === id);
+      return prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
+    });
+    updateAppTask(id, updates as Record<string, any>).catch((err) => {
+      if (previous) {
+        setTasks((prev) => prev.map((t) => (t.id === id ? previous! : t)));
+      }
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the task.",
+      );
+    });
   }, []);
 
   const deleteTask = useCallback((id: string) => {
-    setTasks((prev) => prev.filter((t) => t.id !== id));
-    deleteAppTask(id).catch(() => {});
+    let removed: AppTask | undefined;
+    setTasks((prev) => {
+      removed = prev.find((t) => t.id === id);
+      return prev.filter((t) => t.id !== id);
+    });
+    deleteAppTask(id).catch((err) => {
+      // Put it back rather than showing it gone until the next reload.
+      if (removed) setTasks((prev) => [...prev, removed!]);
+      toast.error(
+        err instanceof Error ? err.message : "Could not delete the task.",
+      );
+    });
   }, []);
 
   const getTasksByApp = useCallback(

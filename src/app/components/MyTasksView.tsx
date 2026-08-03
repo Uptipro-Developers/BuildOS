@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import type { ReactNode } from "react";
 import {
   CalendarDays,
@@ -239,7 +240,11 @@ export function MyTasksView({
       prev.map((t) => (t.id === id ? { ...t, ...updates } : t)),
     );
     updateAppTask(id, updates as Record<string, any>)
-      .catch(() => {})
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Could not update the task.",
+        );
+      })
       .finally(() => setLoadingTaskId(null));
   }
 

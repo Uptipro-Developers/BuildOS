@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { ShieldCheck, Plus, Edit, Trash2, X, Search } from "lucide-react";
 import {
   getComplianceDocuments,
@@ -260,7 +261,13 @@ export function SupplierCompliancePage() {
             ),
           ),
         )
-        .catch(() => {});
+        .catch((err) =>
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Could not update the requirement.",
+          ),
+        );
     } else {
       createComplianceDocument({
         name: data.name,
@@ -278,7 +285,13 @@ export function SupplierCompliancePage() {
             },
           ]),
         )
-        .catch(() => {});
+        .catch((err) =>
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Could not add the requirement.",
+          ),
+        );
     }
   }
 
@@ -446,8 +459,17 @@ export function SupplierCompliancePage() {
         <DeleteModal
           name={deleting.name}
           onConfirm={() => {
-            deleteComplianceDocument(deleting.id).catch(() => {});
-            setDocs((prev) => prev.filter((d) => d.id !== deleting.id));
+            // Removed the row before knowing the delete succeeded.
+            const target = deleting;
+            deleteComplianceDocument(target.id).catch((err) => {
+              setDocs((prev) => [...prev, target as any]);
+              toast.error(
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete the requirement.",
+              );
+            });
+            setDocs((prev) => prev.filter((d) => d.id !== target.id));
             setDeleting(null);
           }}
           onClose={() => setDeleting(null)}

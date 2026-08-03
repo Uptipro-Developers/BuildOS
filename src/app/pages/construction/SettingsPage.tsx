@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Settings,
   Save,
@@ -249,11 +250,20 @@ export function SettingsPage() {
           return saved;
         });
     request
-      .catch(() => {})
-      .finally(() => {
-        setIsSaving(false);
+      .then(() => {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+        toast.success("Settings saved.");
+      })
+      // Swallowed the error and showed "Saved" regardless, so a save that never
+      // reached the server was indistinguishable from one that did.
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Could not save the settings.",
+        );
+      })
+      .finally(() => {
+        setIsSaving(false);
       });
   }
 

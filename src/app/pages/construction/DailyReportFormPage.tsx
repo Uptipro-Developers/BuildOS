@@ -582,22 +582,31 @@ export function DailyReportFormPage() {
       expenses: expenseRows,
       communicationLog: commLogRows,
     };
-    setTimeout(() => {
-      setSaving(false);
-      showToast(
-        status === "draft"
-          ? "Report saved as draft"
-          : effectiveStatus === "pending-review"
-            ? "Report submitted for review"
-            : "Report submitted successfully",
-      );
-      setTimeout(() => navigate(".."), 1200);
-    }, 600);
-
+    // Success was announced on a 600ms timer and the user navigated away, while
+    // the save ran separately and swallowed its failure — so a report that never
+    // reached the server reported "submitted successfully" every time.
     const { id: _omitId, ...payload } = report;
     createDailyReport(
       payload as unknown as Parameters<typeof createDailyReport>[0],
-    ).catch(() => {});
+    )
+      .then(() => {
+        showToast(
+          status === "draft"
+            ? "Report saved as draft"
+            : effectiveStatus === "pending-review"
+              ? "Report submitted for review"
+              : "Report submitted successfully",
+        );
+        setTimeout(() => navigate(".."), 1200);
+      })
+      .catch((err) => {
+        showToast(
+          err instanceof Error
+            ? err.message
+            : "Could not save the report. Nothing has been submitted.",
+        );
+      })
+      .finally(() => setSaving(false));
   }
 
   const progressPct = safePercent(step + 1, ALL_STEPS.length);
