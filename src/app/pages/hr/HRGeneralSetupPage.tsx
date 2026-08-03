@@ -69,7 +69,12 @@ function Field({
   );
 }
 
-export function HRGeneralSetupPage() {
+/**
+ * `embedded` hides the page-level heading so this can be rendered as a tab panel
+ * inside HR Settings, which supplies its own header. Standalone routes are
+ * unchanged.
+ */
+export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({
     // Drives whether a self-service clock-in is recorded as present or late.
@@ -122,6 +127,7 @@ export function HRGeneralSetupPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
+        {!embedded && (
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
             General Setup
@@ -130,6 +136,8 @@ export function HRGeneralSetupPage() {
             Configure core HR parameters and policies
           </p>
         </div>
+        )}
+
         <button
           onClick={save}
           className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${saved ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}

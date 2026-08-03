@@ -53,7 +53,12 @@ const EMPTY = {
   gender: "all" as LeaveGender,
 };
 
-export function LeaveTypeSetupPage() {
+/**
+ * `embedded` hides the page-level heading so this can be rendered as a tab panel
+ * inside HR Settings, which supplies its own header. Standalone routes are
+ * unchanged.
+ */
+export function LeaveTypeSetupPage({ embedded }: { embedded?: boolean } = {}) {
   type UILeaveType = Omit<ApiLeaveType, "approvalsRequired" | "gender"> & {
     approvalsRequired: 1 | 2;
     gender: LeaveGender;
@@ -145,6 +150,7 @@ export function LeaveTypeSetupPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
+        {!embedded && (
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
             Leave Type Setup
@@ -154,6 +160,8 @@ export function LeaveTypeSetupPage() {
             carry-over rules
           </p>
         </div>
+        )}
+
         <button
           onClick={() => {
             setShowForm(true);

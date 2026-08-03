@@ -15,7 +15,8 @@ import {
   type StoreThresholdRecord,
 } from "../../api/admin-extras";
 
-const TABS = ["numbering", "thresholds", "approvals"] as const;
+// Order follows the design: Numbering, Approvals, Thresholds.
+const TABS = ["numbering", "approvals", "thresholds"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {

@@ -18,7 +18,6 @@ import {
   Landmark,
   Calendar,
   CheckSquare,
-  CreditCard,
   ListTodo,
   User,
   Layers,
@@ -189,22 +188,12 @@ const sidebarSections = [
   {
     label: "Settings",
     items: [
+      // General, Leave Types, Claim Types and Numbering are tabs within Settings,
+      // as in the design; they were four sidebar entries to four full pages.
       {
         label: "Settings",
-        href: "/apps/hr/hr-general-setup",
+        href: "/apps/hr/settings",
         icon: <Settings2 className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Leave Type Setup",
-        href: "/apps/hr/leave-type-setup",
-        icon: <CalendarDays className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Claim Type Setup",
-        href: "/apps/hr/claim-type-setup",
-        icon: <CreditCard className="w-4 h-4" />,
         end: true,
       },
       {

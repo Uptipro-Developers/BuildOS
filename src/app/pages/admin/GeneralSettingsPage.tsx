@@ -27,6 +27,7 @@ import {
   updateIssueType,
 } from "../../api/admin-extras";
 import { toast } from "sonner";
+import { EmailConfigPage } from "./EmailConfigPage";
 
 // ── Issue Types ──────────────────────────────────────────────────────────────
 const IT_COLORS = [
@@ -269,7 +270,7 @@ type CurrencyOption = (typeof defaultCurrencyOptions)[number];
 export function GeneralSettingsPage() {
   // ── Tab state ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<
-    "general" | "issue_types" | "change_categories"
+    "general" | "issue_types" | "change_categories" | "email"
   >("general");
 
   // ── General settings state ───────────────────────────────────────────────
@@ -558,6 +559,9 @@ export function GeneralSettingsPage() {
     { key: "general" as const, label: "General Settings" },
     { key: "issue_types" as const, label: "Issue Types" },
     { key: "change_categories" as const, label: "Change Categories" },
+    // The design carries Email as a tab here; it existed only as a separate
+    // /admin/email-config route, so this tab was missing entirely.
+    { key: "email" as const, label: "Email" },
   ];
 
   return (
@@ -1237,6 +1241,8 @@ export function GeneralSettingsPage() {
           )}
         </div>
       )}
+
+      {activeTab === "email" && <EmailConfigPage embedded />}
     </div>
   );
 }

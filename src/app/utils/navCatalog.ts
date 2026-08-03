@@ -95,9 +95,7 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/hr/salary-structure", label: "Salary Structure", section: "Payroll Setup" },
     { id: "/apps/hr/approvals", label: "Approvals", section: "Approvals" },
     { id: "/apps/hr/reports", label: "HR Reports", section: "Reports" },
-    { id: "/apps/hr/hr-general-setup", label: "Settings", section: "Settings" },
-    { id: "/apps/hr/leave-type-setup", label: "Leave Type Setup", section: "Settings" },
-    { id: "/apps/hr/claim-type-setup", label: "Claim Type Setup", section: "Settings" },
+    { id: "/apps/hr/settings", label: "Settings", section: "Settings" },
     { id: "/apps/hr/base-calendar", label: "Base Calendar", section: "Settings" },
   ],
   procurement: [

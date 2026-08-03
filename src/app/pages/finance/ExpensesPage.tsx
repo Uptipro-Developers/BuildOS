@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Search, Filter, Plus } from "lucide-react";
 import {
@@ -30,7 +31,13 @@ const statusColors = {
 };
 
 export function ExpensesPage() {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
+  // New Expense and Filters were both inert.
+  const [statusFilter, setStatusFilter] = useState<
+    "All" | "Pending" | "Approved" | "Rejected"
+  >("All");
+  const [showFilters, setShowFilters] = useState(false);
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [approvalNotes, setApprovalNotes] = useState("");
@@ -58,8 +65,10 @@ export function ExpensesPage() {
       .catch(console.error);
   }, []);
 
-  const filteredExpenses = expenses.filter((expense) =>
-    expense.description.toLowerCase().includes(searchTerm.toLowerCase()),
+  const filteredExpenses = expenses.filter(
+    (expense) =>
+      expense.description.toLowerCase().includes(searchTerm.toLowerCase()) &&
+      (statusFilter === "All" || expense.status === statusFilter),
   );
 
   const totalPending = expenses
@@ -79,7 +88,10 @@ export function ExpensesPage() {
             Manage and approve expense requests
           </p>
         </div>
-        <button className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors">
+        <button
+          onClick={() => navigate("/apps/finance/expenses")}
+          className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors"
+        >
           <Plus className="w-4 h-4" />
           New Expense
         </button>
@@ -117,11 +129,36 @@ export function ExpensesPage() {
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
           />
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+        <button
+          onClick={() => setShowFilters((v) => !v)}
+          className={`flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-gray-50 ${
+            showFilters || statusFilter !== "All"
+              ? "border-green-600 text-green-700"
+              : "border-gray-300"
+          }`}
+        >
           <Filter className="w-4 h-4" />
           Filters
         </button>
       </div>
+
+      {showFilters && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {(["All", "Pending", "Approved", "Rejected"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                statusFilter === s
+                  ? "bg-green-600 text-white"
+                  : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {s === "All" ? "All Status" : s}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         <table className="w-full">

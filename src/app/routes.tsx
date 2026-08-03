@@ -120,6 +120,7 @@ const BankNamesPage = lazyPage(() => import("./pages/hr/BankNamesPage").then((m)
 const LeaveTypeSetupPage = lazyPage(() => import("./pages/hr/LeaveTypeSetupPage").then((m) => ({ default: m.LeaveTypeSetupPage })));
 const ClaimTypeSetupPage = lazyPage(() => import("./pages/hr/ClaimTypeSetupPage").then((m) => ({ default: m.ClaimTypeSetupPage })));
 const BaseCalendarPage = lazyPage(() => import("./pages/hr/BaseCalendarPage").then((m) => ({ default: m.BaseCalendarPage })));
+const HRSettingsPage = lazyPage(() => import("./pages/hr/HRSettingsPage").then((m) => ({ default: m.HRSettingsPage })));
 
 // ESS App (pages lazy-loaded)
 import { ESSLayout } from "./pages/ess/ESSLayout";
@@ -401,6 +402,7 @@ export const router = createBrowserRouter([
               { path: "leave-type-setup", Component: LeaveTypeSetupPage },
               { path: "claim-type-setup", Component: ClaimTypeSetupPage },
               { path: "base-calendar", Component: BaseCalendarPage },
+              { path: "settings", Component: HRSettingsPage },
               { path: "approvals", Component: HRApprovalsPage },
               { path: "hr-tasks", Component: HRTasksPage },
               { path: "my-tasks", Component: HRMyTasksPage },

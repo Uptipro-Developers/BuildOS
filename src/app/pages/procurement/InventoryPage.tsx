@@ -3,8 +3,11 @@ import { toast } from "sonner";
 import {
   getMaterials,
   createMaterial,
+  updateMaterial,
+  deleteMaterial,
   Material as ApiMaterial,
 } from "../../api/materials";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useClickOutside } from "../../utils/useClickOutside";
 import {
   getCurrencySymbol,
@@ -188,13 +191,34 @@ function AddMaterialModal({
   onClose,
   knownCategories,
   saving,
+  initial,
 }: {
   onSave: (payload: Partial<ApiMaterial>) => void;
   onClose: () => void;
   knownCategories: string[];
   saving: boolean;
+  /** Seeds the form for editing; absent when adding. */
+  initial?: ApiMaterial;
 }) {
-  const [form, setForm] = useState<AddMaterialForm>({ ...emptyMaterialForm });
+  const [form, setForm] = useState<AddMaterialForm>(() =>
+    initial
+      ? {
+          name: initial.name ?? "",
+          category: initial.category ?? "",
+          unit: initial.unit ?? "",
+          materialType: initial.materialType ?? "Consumable",
+          totalQty: String(initial.totalQty ?? ""),
+          availableQty: String(initial.availableQty ?? ""),
+          reservedQty: String(initial.reservedQty ?? ""),
+          unitCost: String(initial.unitCost ?? ""),
+          reorderLevel: String(initial.reorderLevel ?? ""),
+          allocationStatus: initial.allocationStatus ?? "Available",
+          allocatedTo: initial.allocatedTo ?? "",
+          allocatedProject: initial.allocatedProject ?? "",
+          condition: initial.condition ?? "Good",
+        }
+      : { ...emptyMaterialForm },
+  );
   const [errors, setErrors] = useState<MaterialFormErrors>({});
   const [submitted, setSubmitted] = useState(false);
 
@@ -244,7 +268,9 @@ function AddMaterialModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Add Material</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            {initial ? "Edit Material" : "Add Material"}
+          </h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
@@ -459,12 +485,22 @@ export function InventoryPage() {
   const [activeCategory, setActiveCategory] = useState("All");
 
   const [showAddMaterial, setShowAddMaterial] = useState(false);
+  // Edit and Archive on the row menu had no handlers at all.
+  const [editingMaterial, setEditingMaterial] = useState<ApiMaterial | null>(
+    null,
+  );
+  const [archiveTarget, setArchiveTarget] = useState<LocalMaterial | null>(
+    null,
+  );
+  const [apiMaterials, setApiMaterials] = useState<ApiMaterial[]>([]);
   const [saving, setSaving] = useState(false);
 
   function loadMaterials() {
-    return getMaterials().then((data) =>
-      setMaterials(data.map(fromApiMaterial)),
-    );
+    return getMaterials().then((data) => {
+      // The row model drops most fields; Edit needs the full record.
+      setApiMaterials(data);
+      setMaterials(data.map(fromApiMaterial));
+    });
   }
 
   useEffect(() => {
@@ -534,6 +570,40 @@ export function InventoryPage() {
     [materials],
   );
   const categories = ["All", ...knownCategories];
+
+  async function handleUpdateMaterial(payload: Partial<ApiMaterial>) {
+    if (!editingMaterial) return;
+    setSaving(true);
+    try {
+      await updateMaterial(editingMaterial.id, payload);
+      await loadMaterials();
+      setEditingMaterial(null);
+      toast.success("Material updated");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update material",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleArchiveMaterial() {
+    if (!archiveTarget) return;
+    setSaving(true);
+    try {
+      await deleteMaterial(archiveTarget.id);
+      await loadMaterials();
+      setArchiveTarget(null);
+      toast.success("Material archived");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to archive material",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleCreateMaterial(payload: Partial<ApiMaterial>) {
     setSaving(true);
@@ -808,10 +878,25 @@ export function InventoryPage() {
                     </button>
                     {menuOpen === m.id && (
                       <div className="absolute right-8 top-2 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1 min-w-[140px]">
-                        <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                        <button
+                          onClick={() => {
+                            setMenuOpen(null);
+                            const full = apiMaterials.find(
+                              (x) => x.id === m.id,
+                            );
+                            if (full) setEditingMaterial(full);
+                          }}
+                          className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
                           <Edit className="w-3.5 h-3.5" /> Edit
                         </button>
-                        <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50">
+                        <button
+                          onClick={() => {
+                            setMenuOpen(null);
+                            setArchiveTarget(m);
+                          }}
+                          className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                        >
                           <Archive className="w-3.5 h-3.5" /> Archive
                         </button>
                       </div>
@@ -836,6 +921,30 @@ export function InventoryPage() {
           saving={saving}
           onSave={handleCreateMaterial}
           onClose={() => setShowAddMaterial(false)}
+        />
+      )}
+
+      {editingMaterial && (
+        <AddMaterialModal
+          key={editingMaterial.id}
+          initial={editingMaterial}
+          knownCategories={knownCategories}
+          saving={saving}
+          onSave={handleUpdateMaterial}
+          onClose={() => setEditingMaterial(null)}
+        />
+      )}
+
+      {archiveTarget && (
+        <ConfirmationModal
+          isOpen
+          isDangerous
+          isLoading={saving}
+          title="Archive material"
+          description={`Archive "${archiveTarget.name}"? It will no longer be selectable on requests.`}
+          confirmLabel="Archive"
+          onConfirm={handleArchiveMaterial}
+          onCancel={() => setArchiveTarget(null)}
         />
       )}
     </div>

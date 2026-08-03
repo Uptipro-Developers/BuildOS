@@ -9,6 +9,13 @@ import {
 export function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  // The search box had no value/onChange and Filters had no handler, so
+  // neither control did anything.
+  const [searchTerm, setSearchTerm] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"All" | "Income" | "Expense">(
+    "All",
+  );
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     getTransactions()
@@ -24,6 +31,16 @@ export function TransactionsPage() {
     .filter((t) => t.type === "Expense")
     .reduce((s, t) => s + t.amount, 0);
   const net = income - expense;
+
+  const q = searchTerm.trim().toLowerCase();
+  const filteredTransactions = transactions.filter(
+    (t) =>
+      (!q ||
+        t.description.toLowerCase().includes(q) ||
+        (t.reference ?? "").toLowerCase().includes(q) ||
+        (t.category ?? "").toLowerCase().includes(q)) &&
+      (typeFilter === "All" || t.type === typeFilter),
+  );
 
   const currency = transactions[0]?.currency ?? "";
   const fmt = (n: number) =>
@@ -59,14 +76,41 @@ export function TransactionsPage() {
           <input
             type="text"
             placeholder="Search transactions..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
           />
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+        <button
+          onClick={() => setShowFilters((v) => !v)}
+          className={`flex items-center gap-2 px-4 py-2 border rounded-md hover:bg-gray-50 ${
+            showFilters || typeFilter !== "All"
+              ? "border-green-600 text-green-700"
+              : "border-gray-300"
+          }`}
+        >
           <Filter className="w-4 h-4" />
           Filters
         </button>
       </div>
+
+      {showFilters && (
+        <div className="flex items-center gap-2 flex-wrap mb-6">
+          {(["All", "Income", "Expense"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(t)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                typeFilter === t
+                  ? "bg-green-600 text-white"
+                  : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              {t === "All" ? "All Types" : t}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         {loading ? (
@@ -93,7 +137,7 @@ export function TransactionsPage() {
               </tr>
             </thead>
             <tbody>
-              {transactions.map((t) => (
+              {filteredTransactions.map((t) => (
                 <tr
                   key={t.id}
                   className="border-b border-gray-100 hover:bg-gray-50"

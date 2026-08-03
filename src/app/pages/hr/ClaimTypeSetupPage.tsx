@@ -12,7 +12,12 @@ import { ConfirmationModal } from "../../components/ConfirmationModal";
 
 const EMPTY = { name: "", description: "", isProjectBased: false };
 
-export function ClaimTypeSetupPage() {
+/**
+ * `embedded` hides the page-level heading so this can be rendered as a tab panel
+ * inside HR Settings, which supplies its own header. Standalone routes are
+ * unchanged.
+ */
+export function ClaimTypeSetupPage({ embedded }: { embedded?: boolean } = {}) {
   const [claimTypes, setClaimTypes] = useState<ClaimType[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -74,6 +79,7 @@ export function ClaimTypeSetupPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
+        {!embedded && (
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
             Claim Type Setup
@@ -83,6 +89,8 @@ export function ClaimTypeSetupPage() {
             claims require project selection at submission.
           </p>
         </div>
+        )}
+
         <button
           onClick={() => {
             setShowForm(true);

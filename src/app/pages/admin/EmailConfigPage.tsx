@@ -172,7 +172,11 @@ const BLANK_FORM: Omit<EmailConfig, "id"> = {
   enabled: true,
 };
 
-export function EmailConfigPage() {
+/**
+ * `embedded` hides the page heading so this renders as the Email tab inside
+ * Admin Settings, which the design shows as a tab rather than a separate page.
+ */
+export function EmailConfigPage({ embedded }: { embedded?: boolean } = {}) {
   const [configs, setConfigs] = useState<EmailConfig[]>([]);
   const [showModal, setShowModal] = useState(false);
 
@@ -301,6 +305,7 @@ export function EmailConfigPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
+        {!embedded && (
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
             Email Configuration
@@ -309,6 +314,8 @@ export function EmailConfigPage() {
             Configure automated emails triggered by system events
           </p>
         </div>
+        )}
+
         <button
           onClick={openAdd}
           className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 text-white text-sm px-4 py-2 rounded-xl"
