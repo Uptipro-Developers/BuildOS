@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { getChartAccounts, getTransactions } from "../../api/finance-extras";
@@ -873,7 +874,7 @@ export function PostingEnginePage() {
           })),
         );
       })
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("chart of accounts", err));
   }, []);
   const [activeCategory, setActiveCategory] = useState<ProcessCategory | null>(
     null,

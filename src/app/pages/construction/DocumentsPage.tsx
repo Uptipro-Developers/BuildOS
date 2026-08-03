@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Folder,
@@ -64,7 +65,6 @@ export function DocumentsPage() {
   const [newFolderName, setNewFolderName] = useState("");
   const [localFolders, setLocalFolders] = useState(documentFolders);
   const [localFiles, setLocalFiles] = useState(documentFiles);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
@@ -130,9 +130,14 @@ export function DocumentsPage() {
     (f) => !search || f.name.toLowerCase().includes(search.toLowerCase()),
   );
 
+  /**
+   * Delegates to the app-wide toaster. This used to render a bespoke
+   * bottom-right box that showed failures in the same neutral style as
+   * successes, and sat in a different corner from every other toast in
+   * the app.
+   */
   function showToast(msg: string) {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    toast.success(msg);
   }
 
   function toggleExpand(folderId: string) {
@@ -257,7 +262,7 @@ export function DocumentsPage() {
     if (!renamingFileId) return;
     const name = renamingFileName.trim();
     if (!name) {
-      showToast("Enter a file name.");
+      toast.error("Enter a file name.");
       return;
     }
     setLocalFiles((prev) =>
@@ -402,11 +407,6 @@ export function DocumentsPage() {
         className="hidden"
         onChange={handleFileUpload}
       />
-      {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
-          {toastMsg}
-        </div>
-      )}
 
       <div className="flex items-center justify-between">
         <div>
@@ -426,7 +426,7 @@ export function DocumentsPage() {
             onClick={() =>
               selectedFolderId
                 ? fileRef.current?.click()
-                : showToast("Select a folder first")
+                : toast.error("Select a folder first")
             }
             className="flex items-center gap-1.5 px-3 py-2 bg-orange-600 text-white rounded-md text-sm font-medium hover:bg-orange-700"
           >

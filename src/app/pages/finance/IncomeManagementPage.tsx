@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -87,7 +88,7 @@ export function IncomeManagementPage() {
           ),
         );
       })
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("chart of accounts", err));
   }, []);
   const [statusFilter, setStatusFilter] = useState<IncomeStatus | "All">("All");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -114,7 +115,7 @@ export function IncomeManagementPage() {
     })
       .then((created: any) => {
         logChange({ module: "Finance", action: "Created", entityType: "Income", entityId: created?.id ?? "", summary: `Income ${created?.id ?? ""} created — ${form.description}`, performedBy: "Current User" });
-        fetchIncome().then(setIncomes).catch(console.error);
+        fetchIncome().then(setIncomes).catch((err) => notifyLoadFailure("income", err));
         setShowAddModal(false);
         setForm(emptyForm);
         toast.success("Income record created.");

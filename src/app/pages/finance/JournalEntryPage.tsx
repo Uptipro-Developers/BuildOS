@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -11,10 +12,12 @@ import {
   createJournalEntry,
   updateJournalEntry,
   deleteJournalEntry,
+  reverseJournalEntry,
   getChartAccounts,
   JournalEntry as ApiJournalEntry,
 } from "../../api/finance-extras";
-import { Plus, Search, Eye, Edit, Trash2, X } from "lucide-react";
+import { peekNumbering } from "../../api/numbering";
+import { Plus, Search, Eye, Edit, Trash2, X, Undo2 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -39,6 +42,10 @@ interface JournalEntry {
   status: EntryStatus;
   createdBy: string;
   lines: JournalLine[];
+  /** Set once reversed. */
+  reversedAt?: string;
+  /** On a reversing entry, the id of the entry it reverses. */
+  reversalOfId?: string;
 }
 
 const blankLine = (): JournalLine => ({
@@ -66,6 +73,8 @@ function mapApiEntry(e: ApiJournalEntry): JournalEntry {
       ? e.status
       : "Draft") as EntryStatus,
     createdBy: e.createdBy ?? "",
+    reversedAt: e.reversedAt,
+    reversalOfId: e.reversalOfId,
     lines: (e.lines ?? []).map((l) => ({
       id: l.id ?? `ln-${Date.now()}-${Math.random()}`,
       account: l.accountName ?? "",
@@ -101,8 +110,19 @@ export function JournalEntryPage() {
   useEffect(() => {
     getJournalEntries()
       .then((data: ApiJournalEntry[]) => setEntries(data.map(mapApiEntry)))
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("journal entries", err));
   }, []);
+  /**
+   * Shows what the next reference will be. Peeking rather than allocating: the
+   * sequence must only advance when an entry is actually saved, or opening the
+   * modal and closing it again would burn a reference and leave a gap.
+   */
+  function refreshNextReference() {
+    peekNumbering("JournalEntry")
+      .then((r) => setNextReference(r.reference))
+      .catch(() => setNextReference(""));
+  }
+  useEffect(refreshNextReference, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<EntryStatus | "All">("All");
   const [modalOpen, setModalOpen] = useState(false);
@@ -110,6 +130,10 @@ export function JournalEntryPage() {
   const [viewEntry, setViewEntry] = useState<JournalEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<JournalEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [reverseTarget, setReverseTarget] = useState<JournalEntry | null>(null);
+  const [reversing, setReversing] = useState(false);
+  /** The reference the next entry will take, from Settings → Numbering. */
+  const [nextReference, setNextReference] = useState("");
   /** Which save is in flight, so both buttons disable and the active one shows
       progress — a second click was otherwise able to post a duplicate entry. */
   const [savingEntry, setSavingEntry] = useState<EntryStatus | null>(null);
@@ -215,7 +239,9 @@ export function JournalEntryPage() {
       } else {
         const created = mapApiEntry(await createJournalEntry(payload));
         setEntries((prev) => [created, ...prev]);
-        logChange({ module: "Finance", action: "Created", entityType: "JournalEntry", entityId: created.id, summary: `Journal Entry ${created.id}: ${form.description} [${status}]`, performedBy: "Current User" });
+        // The sequence has advanced; the preview must follow it.
+        refreshNextReference();
+        logChange({ module: "Finance", action: "Created", entityType: "JournalEntry", entityId: created.id, summary: `Journal Entry ${created.reference}: ${form.description} [${status}]`, performedBy: "Current User" });
       }
       setModalOpen(false);
       toast.success(
@@ -229,6 +255,33 @@ export function JournalEntryPage() {
       toast.error(err instanceof Error ? err.message : "Failed to save journal entry");
     } finally {
       setSavingEntry(null);
+    }
+  }
+
+  async function reverseEntry() {
+    if (!reverseTarget) return;
+    const target = reverseTarget;
+    setReversing(true);
+    try {
+      const { original, reversal } = await reverseJournalEntry(target.id);
+      const reversedOriginal = mapApiEntry(original);
+      const contra = mapApiEntry(reversal);
+      setEntries((prev) => [
+        contra,
+        ...prev.map((e) => (e.id === target.id ? reversedOriginal : e)),
+      ]);
+      logChange({ module: "Finance", action: "Reversed", entityType: "JournalEntry", entityId: target.id, summary: `Journal Entry ${target.reference} reversed by ${contra.reference}`, performedBy: getAuthUserName() || "Current User" });
+      setReverseTarget(null);
+      // Keep the details modal honest if it is the entry being viewed.
+      setViewEntry((v) => (v && v.id === target.id ? reversedOriginal : v));
+      refreshNextReference();
+      toast.success(`Reversed — contra entry ${contra.reference} posted.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to reverse journal entry",
+      );
+    } finally {
+      setReversing(false);
     }
   }
 
@@ -299,6 +352,9 @@ export function JournalEntryPage() {
       <div className="flex items-center justify-end gap-1">
         <button onClick={() => setViewEntry(e)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"><Eye className="w-3.5 h-3.5" /></button>
         {e.status === "Draft" && <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-emerald-50 rounded-lg text-gray-400 hover:text-emerald-600"><Edit className="w-3.5 h-3.5" /></button>}
+        {/* Only a posted entry can be reversed: a draft is edited or deleted,
+            and an already-reversed one has its contra on the ledger. */}
+        {e.status === "Posted" && <button title="Reverse entry" onClick={() => setReverseTarget(e)} className="p-1.5 hover:bg-amber-50 rounded-lg text-gray-400 hover:text-amber-600"><Undo2 className="w-3.5 h-3.5" /></button>}
         {e.status === "Draft" && <button onClick={() => setDeleteTarget(e)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>}
       </div>
     ), sortable: false, filterable: false, className: "text-right", headerClassName: "text-right" },
@@ -437,14 +493,20 @@ export function JournalEntryPage() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">
                     Reference
                   </label>
-                  <input
-                    value={form.reference}
-                    onChange={(e) =>
-                      setForm({ ...form, reference: e.target.value })
-                    }
-                    placeholder="e.g. REF-EXP-0042"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
+                  {/* Read-only: the reference comes from the JournalEntry
+                      sequence in Settings → Numbering. This was a free-text
+                      input whose value was never sent — whatever was typed was
+                      discarded and the server issued its own reference. */}
+                  <div className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-600 font-mono">
+                    {editId
+                      ? form.reference || "—"
+                      : nextReference || "Auto-generated"}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {editId
+                      ? "References cannot be changed after creation."
+                      : "Assigned on save from Settings → Numbering."}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">
@@ -681,6 +743,46 @@ export function JournalEntryPage() {
                   {viewEntry.description}
                 </p>
               </div>
+              {/* Both sides of a reversal are navigable from either entry, so a
+                  Reversed badge is never a dead end. */}
+              {viewEntry.status === "Reversed" && (() => {
+                const contra = entries.find((e) => e.reversalOfId === viewEntry.id);
+                return (
+                  <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2">
+                    <p className="text-xs text-red-700">
+                      Reversed{viewEntry.reversedAt ? ` on ${viewEntry.reversedAt.slice(0, 10)}` : ""}
+                      {contra ? " by contra entry " : "."}
+                      {contra && (
+                        <button
+                          onClick={() => setViewEntry(contra)}
+                          className="font-semibold underline hover:no-underline"
+                        >
+                          {contra.reference}
+                        </button>
+                      )}
+                    </p>
+                  </div>
+                );
+              })()}
+              {viewEntry.reversalOfId && (() => {
+                const source = entries.find((e) => e.id === viewEntry.reversalOfId);
+                return (
+                  <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+                    <p className="text-xs text-amber-700">
+                      This is a contra entry
+                      {source ? " reversing " : "."}
+                      {source && (
+                        <button
+                          onClick={() => setViewEntry(source)}
+                          className="font-semibold underline hover:no-underline"
+                        >
+                          {source.reference}
+                        </button>
+                      )}
+                    </p>
+                  </div>
+                );
+              })()}
               <table className="w-full text-sm rounded-lg overflow-hidden border border-gray-200">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
@@ -724,9 +826,39 @@ export function JournalEntryPage() {
                 </tbody>
               </table>
             </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+              {viewEntry.status === "Posted" && (
+                <button
+                  onClick={() => setReverseTarget(viewEntry)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50"
+                >
+                  <Undo2 className="w-3.5 h-3.5" /> Reverse Entry
+                </button>
+              )}
+              <button
+                onClick={() => setViewEntry(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={reverseTarget !== null}
+        title="Reverse Journal Entry?"
+        description={
+          reverseTarget
+            ? `This posts a new contra entry that mirrors ${reverseTarget.reference} with its debits and credits swapped, and marks the original as Reversed. The original entry is not edited or deleted.`
+            : ""
+        }
+        confirmLabel="Reverse Entry"
+        isLoading={reversing}
+        onConfirm={reverseEntry}
+        onCancel={() => setReverseTarget(null)}
+      />
 
       <ConfirmationModal
         isOpen={deleteTarget !== null}

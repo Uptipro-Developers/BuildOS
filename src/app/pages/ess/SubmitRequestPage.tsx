@@ -31,10 +31,11 @@ import { AttachmentsSection } from "../../components/AttachmentsSection";
 import { ApprovalPipeline } from "../../components/ApprovalPipeline";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
-  getWorkflows,
   getPipelineForRequest,
   type PipelineStep,
 } from "../../store/workflowConfig";
+import { getProcessWorkflows, type ProcessWorkflow } from "../../api/admin-extras";
+import { allocateNumber } from "../../api/numbering";
 import { useHRConfig } from "../../store/hrConfig";
 import { createExpense } from "../../api/expenses";
 import { createLeaveRequest } from "../../api/leave-requests";
@@ -253,7 +254,9 @@ function MaterialCreationForm({
     materialName: "",
     description: "",
     estimatedQty: "",
-    unit: "pcs",
+    // Blank for the same reason as the Material Request form: "pcs" was not a
+    // configured unit.
+    unit: "",
     notes: "",
   });
   // The unit list was hardcoded here while Storefront configures units of
@@ -508,7 +511,11 @@ function MaterialForm({
     project: "",
     material: "",
     quantity: "",
-    unit: "pcs",
+    // Blank, not "pcs". That default was not a configured unit of measurement,
+    // and because the select merges the current value into its options it looked
+    // like a valid choice, so a request submitted without touching the field
+    // carried a unit the store does not stock.
+    unit: "",
     neededDate: "",
     priority: "medium",
     comments: "",
@@ -531,6 +538,9 @@ function MaterialForm({
       if (!formState.material) e.material = "Required";
       if (!formState.quantity || Number(formState.quantity) <= 0)
         e.quantity = "Enter a valid quantity";
+      // Now that the unit starts blank it has to be chosen, or the request goes
+      // out with no unit at all.
+      if (!formState.unit) e.unit = "Required";
       if (!formState.neededDate) e.neededDate = "Required";
     } else {
       if (!formState.serviceType) e.serviceType = "Required";
@@ -562,8 +572,14 @@ function MaterialForm({
     }
     setSubmitting(true);
     try {
+      // The reference comes from the MaterialRequest sequence in Settings →
+      // Numbering ("MR-{N:4}"). `"MR-" + Date.now()` ignored that configuration
+      // and produced references like MR-1754212800000. The server honours a
+      // supplied reference, so allocating here is what makes the configured
+      // convention land on the record.
+      const { reference } = await allocateNumber("MaterialRequest");
       const created: any = await createMaterialRequest({
-        reference: "MR-" + Date.now(),
+        reference,
         materialName: formState.material,
         unit: formState.unit,
         qty: Number(formState.quantity),
@@ -769,7 +785,7 @@ function MaterialForm({
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Unit
+                      Unit<span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
                       <select
@@ -777,9 +793,11 @@ function MaterialForm({
                         onChange={(e) => field("unit", e.target.value)}
                         className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
                       >
-                        {unitOptions.length === 0 && !formState.unit && (
-                          <option value="">No units configured</option>
-                        )}
+                        <option value="">
+                          {unitOptions.length === 0
+                            ? "No units configured"
+                            : "Select unit…"}
+                        </option>
                         {Array.from(
                           new Set(
                             [...unitOptions, formState.unit].filter(Boolean),
@@ -790,6 +808,9 @@ function MaterialForm({
                       </select>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                     </div>
+                    {errors.unit && (
+                      <p className="text-xs text-red-500 mt-1">{errors.unit}</p>
+                    )}
                   </div>
                 </div>
 
@@ -1452,6 +1473,18 @@ export function SubmitRequestPage() {
     type: string;
     id: string;
   } | null>(null);
+  /** The configured approval workflows, which drive the submitted-request
+      pipeline. Loaded up front so the pipeline is ready the moment a request
+      is submitted. */
+  const [workflows, setWorkflows] = useState<ProcessWorkflow[]>([]);
+
+  useEffect(() => {
+    getProcessWorkflows()
+      .then((rows) => setWorkflows(Array.isArray(rows) ? rows : []))
+      // An unreachable config endpoint yields the generic pipeline rather than
+      // an invented one.
+      .catch(() => setWorkflows([]));
+  }, []);
 
   useEffect(() => {
     fetchProjects()
@@ -1484,7 +1517,7 @@ export function SubmitRequestPage() {
               : successState.type === "Change Request"
                 ? "change"
                 : "material";
-    const pipelineSteps = getPipelineForRequest(tabKey, getWorkflows());
+    const pipelineSteps = getPipelineForRequest(tabKey, workflows);
     return (
       <SuccessCard
         title={`${successState.type} Submitted`}

@@ -1,22 +1,4 @@
-import { useState, useEffect } from "react";
-
-export type ApprovalType = "single" | "group" | "tier";
-
-export interface TierLevel {
-  level: number;
-  approver: string;
-  condition: string;
-}
-
-export interface ProcessWorkflow {
-  id: string;
-  process: string;
-  app: string;
-  workflowType: ApprovalType;
-  approver?: string;
-  groupApprovers?: string[];
-  tierLevels?: TierLevel[];
-}
+import type { ProcessWorkflow } from "../api/admin-extras";
 
 export interface PipelineStep {
   label: string;
@@ -26,155 +8,107 @@ export interface PipelineStep {
   note?: string;
 }
 
-interface WorkflowConfig {
-  workflows: ProcessWorkflow[];
-}
+/**
+ * ESS request type → the process id its approval workflow is configured under.
+ *
+ * This module used to hold its own in-memory `workflows` array that nothing ever
+ * populated, so `getWorkflows()` always returned `[]` and every submitted
+ * request fell through to `defaultPipeline()` — a fixed list of invented steps.
+ * Whatever an admin configured under Workflow Approval was never consulted.
+ *
+ * It also matched on old action-grained labels ("Request Leave", "Submit
+ * Expense"). The process catalogue is entity-grained now, so those labels match
+ * nothing even against real data; matching is by process id, with the label kept
+ * only as a fallback for a workflow saved before ids were stored.
+ */
+const PROCESS_FOR_REQUEST: Record<string, { id: string; label: string }> = {
+  material: { id: "p_material_requests", label: "Material Requests" },
+  finance: { id: "p_expenses", label: "Expenses" },
+  leave: { id: "p_leave_requests", label: "Leave Requests" },
+  issue: { id: "p_ess_issues", label: "Logged Issues" },
+  change: { id: "p_change_requests", label: "Change Requests" },
+};
 
-const DEFAULT_PROCESSES: {
-  label: string;
-  app: string;
-  requiresApproval: boolean;
-}[] = [
-  { label: "Request Material", app: "ESS", requiresApproval: true },
-  { label: "Submit Expense", app: "ESS", requiresApproval: true },
-  { label: "Request Leave", app: "ESS", requiresApproval: true },
-  { label: "Report Issue", app: "ESS", requiresApproval: true },
-  { label: "Request Change", app: "ESS", requiresApproval: true },
-];
-
+/**
+ * The approval pipeline shown after a request is submitted, built from the
+ * workflow an admin configured for that process.
+ *
+ * `workflows` must be the persisted set from `/admin/process-workflows`; passing
+ * an empty array yields the generic two-step pipeline rather than a fabricated
+ * module-specific one, so an unconfigured process reads as unconfigured.
+ */
 export function getPipelineForRequest(
   requestType: string,
   workflows: ProcessWorkflow[],
 ): PipelineStep[] {
-  const processLabel = {
-    finance: "Submit Expense",
-    leave: "Request Leave",
-    issue: "Report Issue",
-    change: "Request Change",
-    material: "Request Material",
-  }[requestType];
+  const process = PROCESS_FOR_REQUEST[requestType];
+  if (!process) return genericPipeline();
 
-  if (!processLabel) return [];
+  const wf = workflows.find(
+    (w) => w.processId === process.id || w.process === process.label,
+  );
+  if (!wf) return genericPipeline();
 
-  const wf = workflows.find((w) => w.process === processLabel);
-  if (!wf) return defaultPipeline(processLabel);
+  const submitted: PipelineStep = {
+    label: "Submit Request",
+    actor: "You",
+    status: "completed",
+  };
 
   if (wf.workflowType === "single" && wf.approver) {
     return [
-      { label: "Submit Request", actor: "You", status: "completed" },
+      submitted,
       { label: "Approval", actor: wf.approver, status: "active" },
       { label: "Complete", status: "pending" },
     ];
   }
 
-  if (wf.workflowType === "tier" && wf.tierLevels) {
-    const steps: PipelineStep[] = [
-      { label: "Submit Request", actor: "You", status: "completed" },
+  if (wf.workflowType === "tier" && wf.tierLevels?.length) {
+    return [
+      submitted,
+      ...[...wf.tierLevels]
+        .sort((a, b) => a.level - b.level)
+        .map((tl, i) => ({
+          label: `Level ${tl.level} Approval`,
+          actor: tl.approver,
+          status: (i === 0 ? "active" : "pending") as PipelineStep["status"],
+          note: tl.condition || undefined,
+        })),
+      { label: "Complete", status: "pending" },
     ];
-    wf.tierLevels.forEach((tl, i) => {
-      steps.push({
-        label: `Level ${tl.level} Approval`,
-        actor: tl.approver,
-        status: i === 0 ? "active" : "pending",
-        note: tl.condition || undefined,
-      });
-    });
-    steps.push({ label: "Complete", status: "pending" });
-    return steps;
   }
 
-  if (wf.workflowType === "group" && wf.groupApprovers) {
+  if (wf.workflowType === "group" && wf.groupApprovers?.length) {
     return [
-      { label: "Submit Request", actor: "You", status: "completed" },
+      submitted,
       {
         label: "Group Review",
         actor: wf.groupApprovers.join(", "),
         status: "active",
+        // An "all" group needs every approver; "any" clears on the first one.
+        // Showing the same step for both misrepresented how many sign-offs the
+        // request still needs.
+        note:
+          wf.groupApprovalMode === "all"
+            ? "All approvers must approve"
+            : "Any one approver may approve",
       },
       { label: "Complete", status: "pending" },
     ];
   }
 
-  return defaultPipeline(processLabel);
+  return genericPipeline();
 }
 
-function defaultPipeline(processLabel: string): PipelineStep[] {
-  const steps: Record<string, PipelineStep[]> = {
-    "Request Material": [
-      { label: "Request Submitted", actor: "You", status: "completed" },
-      { label: "Team Lead Review", status: "active" },
-      { label: "Store Manager", status: "pending" },
-      { label: "Material Issued", status: "pending" },
-    ],
-    "Submit Expense": [
-      { label: "Request Submitted", actor: "You", status: "completed" },
-      { label: "Finance Review", status: "active" },
-      { label: "CFO Approval", status: "pending" },
-      { label: "Paid", status: "pending" },
-    ],
-    "Request Leave": [
-      { label: "Request Submitted", actor: "You", status: "completed" },
-      { label: "Line Manager", status: "active" },
-      { label: "HR Review", status: "pending" },
-      { label: "Approved", status: "pending" },
-    ],
-    "Report Issue": [
-      { label: "Issue Reported", actor: "You", status: "completed" },
-      { label: "Initial Review", status: "active" },
-      { label: "Resolution", status: "pending" },
-      { label: "Closed", status: "pending" },
-    ],
-    "Request Change": [
-      { label: "Change Requested", actor: "You", status: "completed" },
-      { label: "Impact Assessment", status: "active" },
-      { label: "Change Board Review", status: "pending" },
-      { label: "Implemented", status: "pending" },
-    ],
-  };
-  return (
-    steps[processLabel] ?? [
-      { label: "Submitted", actor: "You", status: "completed" },
-      { label: "Pending Review", status: "active" },
-      { label: "Approved", status: "pending" },
-    ]
-  );
+/**
+ * The pipeline for a process with no configured workflow. Deliberately generic:
+ * the previous per-process step lists ("Team Lead Review", "Store Manager",
+ * "CFO Approval") named approvers that no configuration had ever set.
+ */
+function genericPipeline(): PipelineStep[] {
+  return [
+    { label: "Submitted", actor: "You", status: "completed" },
+    { label: "Pending Review", status: "active" },
+    { label: "Approved", status: "pending" },
+  ];
 }
-
-let _config: WorkflowConfig = {
-  workflows: [],
-};
-
-const _listeners = new Set<() => void>();
-
-function notify() {
-  _listeners.forEach((l) => l());
-}
-
-export function getWorkflows(): ProcessWorkflow[] {
-  return _config.workflows;
-}
-
-export function setWorkflows(workflows: ProcessWorkflow[]) {
-  _config = { workflows };
-  notify();
-}
-
-export function addWorkflow(wf: ProcessWorkflow) {
-  setWorkflows([..._config.workflows, wf]);
-}
-
-export function useWorkflows(): { workflows: ProcessWorkflow[] } {
-  const [, forceUpdate] = useState(0);
-
-  useEffect(() => {
-    const listener = () => forceUpdate((n) => n + 1);
-    _listeners.add(listener);
-    return () => {
-      _listeners.delete(listener);
-    };
-  }, []);
-
-  return { workflows: _config.workflows };
-}
-
-export { DEFAULT_PROCESSES };

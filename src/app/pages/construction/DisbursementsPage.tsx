@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { safePercent } from "../../utils/number";
 import { useState, useMemo, useEffect } from "react";
 import { getCurrencySymbol } from "../../utils/generalSettings";
@@ -104,8 +105,19 @@ export function DisbursementsPage() {
     };
     const { id: _omit, ...payload } = newEntry;
     createDisbursement(payload)
-      .then((saved) => setAllDisbursements((prev) => [...prev, saved]))
-      .catch(() => setAllDisbursements((prev) => [...prev, newEntry]));
+      .then((saved) => {
+        setAllDisbursements((prev) => [...prev, saved]);
+        toast.success("Disbursement recorded.");
+      })
+      // The unsaved entry used to be pushed into the list on failure, so a
+      // disbursement that never persisted still showed as recorded.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not record the disbursement.",
+        ),
+      );
     setShowForm(false);
     setForm(emptyForm);
   }

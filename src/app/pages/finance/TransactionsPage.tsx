@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { Search, Filter, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { getTransactions, Transaction } from "../../api/finance-extras";
@@ -20,7 +21,7 @@ export function TransactionsPage() {
   useEffect(() => {
     getTransactions()
       .then(setTransactions)
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("transactions", err))
       .finally(() => setLoading(false));
   }, []);
 

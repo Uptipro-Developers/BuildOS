@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { getConstructionApprovals } from "../../api/construction-extras";
@@ -107,7 +108,7 @@ export function ApprovalsPage() {
   useEffect(() => {
     getConstructionApprovals()
       .then((data) => setItems(data.map(fromApiApproval)))
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("construction approvals", err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -120,9 +121,10 @@ export function ApprovalsPage() {
   function approve(id: string) {
     approveItem(id)
       .then(() => {
+        toast.success("Approved.");
         getConstructionApprovals()
           .then((data) => setItems(data.map(fromApiApproval)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("construction approvals", err));
       })
       .catch((err) => {
         toast.error("Failed to approve. Please try again.");
@@ -132,9 +134,10 @@ export function ApprovalsPage() {
   function reject(id: string) {
     rejectItem(id)
       .then(() => {
+        toast.success("Rejected.");
         getConstructionApprovals()
           .then((data) => setItems(data.map(fromApiApproval)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("construction approvals", err));
       })
       .catch((err) => {
         toast.error("Failed to reject. Please try again.");

@@ -14,6 +14,10 @@ export interface JournalEntry {
     id: string; reference: string; date: string; description?: string;
     status: string; lines: JournalLine[]; createdBy?: string;
     postedAt?: string; createdAt: string;
+    /** Set once the entry has been reversed. */
+    reversedAt?: string;
+    /** On a reversing entry, the id of the entry it reverses. */
+    reversalOfId?: string;
 }
 export interface ChartAccount {
     id: string; code: string; name: string; type: string;
@@ -56,6 +60,16 @@ export const updateJournalEntry = (id: string, data: Partial<JournalEntry>) =>
     apiFetch<JournalEntry>(`/journal-entries/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteJournalEntry = (id: string) =>
     apiFetch<void>(`/journal-entries/${id}`, { method: 'DELETE' });
+/**
+ * Reverses a posted entry. The server marks the original Reversed and returns
+ * it alongside the newly posted mirror entry, so callers can fold both into the
+ * list without refetching.
+ */
+export const reverseJournalEntry = (id: string, data?: { date?: string; createdBy?: string }) =>
+    apiFetch<{ original: JournalEntry; reversal: JournalEntry }>(
+        `/journal-entries/${id}/reverse`,
+        { method: 'POST', body: JSON.stringify(data ?? {}) },
+    );
 
 // Chart of Accounts
 export const getChartAccounts = (type?: string) =>

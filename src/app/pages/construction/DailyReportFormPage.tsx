@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router";
+import { toast } from "sonner";
 import { safePercent } from "../../utils/number";
 import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import { useState, useEffect, useMemo } from "react";
@@ -389,7 +390,6 @@ export function DailyReportFormPage() {
   );
 
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   // Role-based section access
   const { roles } = useRoles();
@@ -464,17 +464,6 @@ export function DailyReportFormPage() {
     if (idx > 0) {
       setStep(accessibleIndices[idx - 1]);
     }
-  }
-
-  useEffect(() => {
-    if (toast) {
-      const t = setTimeout(() => setToast(null), 3000);
-      return () => clearTimeout(t);
-    }
-  }, [toast]);
-
-  function showToast(msg: string) {
-    setToast(msg);
   }
 
   const getVendorName = (id: string) =>
@@ -614,17 +603,20 @@ export function DailyReportFormPage() {
       payload as unknown as Parameters<typeof createDailyReport>[0],
     )
       .then(() => {
-        showToast(
+        toast.success(
           status === "draft"
-            ? "Report saved as draft"
+            ? "Report saved as draft."
             : effectiveStatus === "pending-review"
-              ? "Report submitted for review"
-              : "Report submitted successfully",
+              ? "Report submitted for review."
+              : "Report submitted successfully.",
         );
         setTimeout(() => navigate(".."), 1200);
       })
+      // Was a bespoke bottom-right box that rendered failures in the same
+      // neutral style as successes, so "Could not save the report" looked like
+      // a confirmation.
       .catch((err) => {
-        showToast(
+        toast.error(
           err instanceof Error
             ? err.message
             : "Could not save the report. Nothing has been submitted.",
@@ -637,12 +629,6 @@ export function DailyReportFormPage() {
 
   return (
     <div className="space-y-6" style={{ backgroundColor: "#F7F8FA" }}>
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm px-5 py-3 rounded-lg shadow-lg flex items-center gap-2">
-          {toast}
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

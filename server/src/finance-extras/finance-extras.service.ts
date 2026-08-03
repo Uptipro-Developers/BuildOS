@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NumberingService } from '../numbering/numbering.service';
 
 const FINANCE_CONFIG_KEY = 'finance-config';
 const SCHEDULED_POSTINGS_KEY = 'finance-scheduled-postings';
@@ -8,7 +9,10 @@ const PROCESS_MAPPINGS_KEY = 'finance-process-mappings';
 
 @Injectable()
 export class FinanceExtrasService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private numbering: NumberingService,
+    ) { }
 
     // ── Transactions ──
     findAllTransactions(type?: string, status?: string) {
@@ -47,17 +51,84 @@ export class FinanceExtrasService {
             include: { lines: true },
         });
     }
-    createJournal(data: any) {
-        const { lines, ...rest } = data;
-        const ref = `JRN-${Date.now()}`;
+    async createJournal(data: any) {
+        const { lines, reference: _ignored, ...rest } = data;
+        // References come from the sequence an admin configured in Settings →
+        // Numbering ("JE-{N:3}" by default). This used to be `JRN-${Date.now()}`,
+        // which ignored that configuration entirely and produced references like
+        // JRN-1754212800000 that matched no convention and could not be cited.
+        const { reference } = await this.numbering.allocate('JournalEntry');
         return this.prisma.journalEntry.create({
             data: {
                 ...rest,
-                reference: ref,
+                reference,
                 lines: lines ? { create: lines } : undefined,
             },
             include: { lines: true },
         });
+    }
+
+    /**
+     * Reverses a posted journal entry.
+     *
+     * Posts a mirror entry with every debit and credit swapped rather than
+     * editing or deleting the original: a posted entry is a permanent record,
+     * and the ledger has to show both the original and its contra. The original
+     * is marked Reversed and linked to the entry that reversed it.
+     */
+    async reverseJournal(id: string, body: { date?: string; createdBy?: string } = {}) {
+        const original = await this.prisma.journalEntry.findUniqueOrThrow({
+            where: { id },
+            include: { lines: true },
+        });
+
+        if (original.status === 'Reversed') {
+            throw new BadRequestException('This journal entry has already been reversed.');
+        }
+        if (original.status !== 'Posted') {
+            throw new BadRequestException('Only a posted journal entry can be reversed.');
+        }
+
+        const when = body.date ? new Date(body.date) : new Date();
+        if (Number.isNaN(when.getTime())) {
+            throw new BadRequestException('The reversal date is not a valid date.');
+        }
+
+        const { reference } = await this.numbering.allocate('JournalEntry');
+
+        // Both writes land together: an original marked Reversed with no contra
+        // entry — or a contra with the original still Posted — would double-count
+        // in the trial balance.
+        const [, reversal] = await this.prisma.$transaction([
+            this.prisma.journalEntry.update({
+                where: { id },
+                data: { status: 'Reversed', reversedAt: when },
+            }),
+            this.prisma.journalEntry.create({
+                data: {
+                    reference,
+                    date: when,
+                    description: `Reversal of ${original.reference} — ${original.description}`,
+                    status: 'Posted',
+                    postedAt: when,
+                    createdBy: body.createdBy || original.createdBy || 'System',
+                    reversalOfId: original.id,
+                    lines: {
+                        create: original.lines.map((l) => ({
+                            accountCode: l.accountCode,
+                            accountName: l.accountName,
+                            // The swap is the reversal.
+                            debit: l.credit,
+                            credit: l.debit,
+                            description: l.description ?? undefined,
+                        })),
+                    },
+                },
+                include: { lines: true },
+            }),
+        ]);
+
+        return { original: await this.findJournal(id), reversal };
     }
     updateJournal(id: string, data: any) {
         const { lines, ...rest } = data;
@@ -100,7 +171,7 @@ export class FinanceExtrasService {
     /** Whitelist ChartAccount columns; clients may send extra UI-only fields. */
     private sanitizeAccount(data: any, isCreate = false) {
         const out: any = {};
-        for (const key of ['code', 'name', 'type', 'category', 'balance', 'isActive', 'parentId']) {
+        for (const key of ['code', 'name', 'type', 'category', 'description', 'balance', 'isActive', 'parentId']) {
             if (data?.[key] !== undefined) out[key] = data[key];
         }
         if (isCreate && out.category === undefined) out.category = String(data?.type ?? 'General');

@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { useState, useMemo, useEffect } from "react";
 import {
   MessageSquare,
@@ -120,8 +121,19 @@ export function CommunicationLogPage() {
     };
     const { id: _omit, ...payload } = newEntry;
     createCommunication(payload)
-      .then((saved) => setAllComms((prev) => [...prev, saved]))
-      .catch(() => setAllComms((prev) => [...prev, newEntry]));
+      .then((saved) => {
+        setAllComms((prev) => [...prev, saved]);
+        toast.success("Communication logged.");
+      })
+      // The unsaved entry used to be pushed into the list on failure, so a log
+      // that never persisted still appeared in the record.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not log the communication.",
+        ),
+      );
     setShowForm(false);
     setForm(emptyForm);
   }

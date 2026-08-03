@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -435,7 +436,7 @@ export function SentRequestsPage() {
   useEffect(() => {
     getSentRFQs()
       .then((data) => setRequests(data.map(fromApi)))
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("sent rf qs", err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -754,9 +755,14 @@ export function SentRequestsPage() {
                 notes: rfq.notes,
               });
               setRequests((prev) => [fromApi(created), ...prev]);
+              toast.success(`RFQ sent to ${rfq.vendor}.`);
             } catch (e) {
-              console.error(e);
-              setRequests((prev) => [rfq, ...prev]);
+              // The unsaved RFQ used to be pushed into the list on failure, so
+              // an RFQ no supplier ever received showed as sent.
+              toast.error(
+                e instanceof Error ? e.message : "Could not send the RFQ.",
+              );
+              return;
             }
             setShowNewRFQ(false);
           }}

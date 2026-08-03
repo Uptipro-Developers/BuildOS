@@ -522,6 +522,7 @@ export function ProjectsListPage() {
                   })) as Project;
                   setProjectList((prev) => [...prev, created]);
                   upsertProjectCache(created);
+                  toast.success(`Project "${created.name}" created.`);
                   setShowCreate(false);
                   setForm(DEFAULT_FORM);
                 } catch (err) {

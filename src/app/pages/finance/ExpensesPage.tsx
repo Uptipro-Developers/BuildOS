@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -62,7 +63,7 @@ export function ExpensesPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("currency symbol", err));
   }, []);
 
   const filteredExpenses = expenses.filter(
@@ -344,7 +345,7 @@ export function ExpensesPage() {
                             })),
                           ),
                         )
-                        .catch(console.error);
+                        .catch((err) => notifyLoadFailure("expenses", err));
                       setShowApproveModal(false);
                       setSelectedExpense(null);
                       setApprovalNotes("");
@@ -392,7 +393,7 @@ export function ExpensesPage() {
                             })),
                           ),
                         )
-                        .catch(console.error);
+                        .catch((err) => notifyLoadFailure("expenses", err));
                       setShowApproveModal(false);
                       setSelectedExpense(null);
                       setApprovalNotes("");

@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -111,7 +112,7 @@ export function ChartOfAccountsPage() {
   }
 
   useEffect(() => {
-    loadAccounts().catch(console.error);
+    loadAccounts().catch((err) => notifyLoadFailure("accounts", err));
   }, []);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<AccountType | "All">("All");

@@ -261,6 +261,7 @@ export function SupplierCompliancePage() {
             ),
           ),
         )
+        .then(() => toast.success(`"${data.name}" updated.`))
         .catch((err) =>
           toast.error(
             err instanceof Error
@@ -285,6 +286,7 @@ export function SupplierCompliancePage() {
             },
           ]),
         )
+        .then(() => toast.success(`"${data.name}" added.`))
         .catch((err) =>
           toast.error(
             err instanceof Error
@@ -461,14 +463,16 @@ export function SupplierCompliancePage() {
           onConfirm={() => {
             // Removed the row before knowing the delete succeeded.
             const target = deleting;
-            deleteComplianceDocument(target.id).catch((err) => {
-              setDocs((prev) => [...prev, target as any]);
-              toast.error(
-                err instanceof Error
-                  ? err.message
-                  : "Could not delete the requirement.",
-              );
-            });
+            deleteComplianceDocument(target.id)
+              .then(() => toast.success(`"${target.name}" deleted.`))
+              .catch((err) => {
+                setDocs((prev) => [...prev, target as any]);
+                toast.error(
+                  err instanceof Error
+                    ? err.message
+                    : "Could not delete the requirement.",
+                );
+              });
             setDocs((prev) => prev.filter((d) => d.id !== target.id));
             setDeleting(null);
           }}

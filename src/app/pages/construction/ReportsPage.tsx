@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
 import { safePercent } from "../../utils/number";
 import { DeployedReports } from "../../components/DeployedReports";
 import { useEffect, useState } from "react";
@@ -184,7 +185,6 @@ export function ReportsPage() {
   const navigate = useNavigate();
   const [generatedIds, setGeneratedIds] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [projects, setProjects] = useState(mockProjects);
 
   useEffect(() => {
@@ -199,9 +199,14 @@ export function ReportsPage() {
       });
   }, []);
 
+  /**
+   * Delegates to the app-wide toaster. This used to render a bespoke
+   * bottom-right box that showed failures in the same neutral style as
+   * successes, and sat in a different corner from every other toast in
+   * the app.
+   */
   function showToast(msg: string) {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    toast.success(msg);
   }
 
   function handleGenerate(id: string) {
@@ -219,11 +224,6 @@ export function ReportsPage() {
       style={{ backgroundColor: "#F7F8FA" }}
       className="min-h-screen p-6 space-y-5"
     >
-      {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
-          {toastMsg}
-        </div>
-      )}
 
       <div className="flex items-center justify-between">
         <div>

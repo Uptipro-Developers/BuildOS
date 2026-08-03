@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Plus, Edit, Trash2, X, Search, RefreshCw } from "lucide-react";
 import {
   getChangeCategories,
@@ -165,14 +166,24 @@ export function ChangeCategoriesPage() {
   );
 
   async function save(data: Omit<ChangeCategory, "id"> & { id?: string }) {
-    if (data.id) {
-      const updated = await updateChangeCategory(data.id, data);
-      setCategories((prev) =>
-        prev.map((c) => (c.id === data.id ? updated : c)),
+    try {
+      if (data.id) {
+        const updated = await updateChangeCategory(data.id, data);
+        setCategories((prev) =>
+          prev.map((c) => (c.id === data.id ? updated : c)),
+        );
+        toast.success(`"${updated.name}" updated.`);
+      } else {
+        const created = await createChangeCategory(data);
+        setCategories((prev) => [...prev, created]);
+        toast.success(`"${created.name}" created.`);
+      }
+    } catch (err) {
+      // Previously unhandled: the promise rejected into nothing, the modal
+      // closed, and the category silently failed to save.
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the category.",
       );
-    } else {
-      const created = await createChangeCategory(data);
-      setCategories((prev) => [...prev, created]);
     }
   }
 
@@ -294,8 +305,17 @@ export function ChangeCategoriesPage() {
         <DeleteModal
           name={deleting.name}
           onConfirm={async () => {
-            await deleteChangeCategory(deleting.id);
-            setCategories((prev) => prev.filter((c) => c.id !== deleting.id));
+            try {
+              await deleteChangeCategory(deleting.id);
+              setCategories((prev) => prev.filter((c) => c.id !== deleting.id));
+              toast.success(`"${deleting.name}" deleted.`);
+            } catch (err) {
+              toast.error(
+                err instanceof Error
+                  ? err.message
+                  : "Could not delete the category.",
+              );
+            }
           }}
           onClose={() => setDeleting(null)}
         />

@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect, useCallback } from "react";
 import { safePercent } from "../../utils/number";
 import { toast } from "sonner";
@@ -81,7 +82,7 @@ export function StockLevelsPage() {
 
   useEffect(() => {
     loadStock()
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("stock", err))
       .finally(() => setLoading(false));
   }, [loadStock]);
 

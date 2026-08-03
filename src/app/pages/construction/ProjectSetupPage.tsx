@@ -547,7 +547,16 @@ export function ProjectSetupPage() {
     if (projectId) {
       saveProjectSetup(projectId, buildSetupPayload())
         .then(() => lockProjectSetup(projectId))
-        .catch((err) => console.error("Failed to lock project setup", err));
+        .then(() => toast.success("Baseline locked."))
+        // Only console.error before, while the UI had already flipped to
+        // "locked" and written a lock entry into the audit log — so a failed
+        // lock was indistinguishable from a successful one.
+        .catch((err) => {
+          setBaselineLocked(false);
+          toast.error(
+            err instanceof Error ? err.message : "Could not lock the baseline.",
+          );
+        });
     }
   };
   const performUnlock = () => {

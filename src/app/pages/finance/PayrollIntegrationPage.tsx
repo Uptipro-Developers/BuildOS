@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -111,7 +112,7 @@ export function PayrollIntegrationPage() {
         setPayrolls(mapped);
         if (mapped.length > 0) setActiveRun(mapped[0]);
       })
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("payroll runs", err));
   }, []);
 
   useEffect(() => {

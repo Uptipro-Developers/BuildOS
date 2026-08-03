@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../utils/loadFailure";
 import {
   createContext,
   useContext,
@@ -80,8 +81,8 @@ export function HRConfigProvider({ children }: { children: ReactNode }) {
           })),
         ),
       )
-      .catch(console.error);
-    fetchClaimTypes().then(setClaimTypes).catch(console.error);
+      .catch((err) => notifyLoadFailure("leave types", err));
+    fetchClaimTypes().then(setClaimTypes).catch((err) => notifyLoadFailure("claim types", err));
   }, []);
 
   return (

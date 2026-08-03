@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -151,7 +152,7 @@ export function BudgetManagementPage() {
         logChange({ module: "Finance", action: "Created", entityType: "Budget", entityId: created?.id ?? form.name, summary: `Budget ${form.name} created`, performedBy: "Current User" });
         fetchBudgets()
           .then((items) => setBudgets(items.map(toBudgetLine)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("budgets", err));
         setShowAddModal(false);
         setForm(emptyForm);
         toast.success("Budget created.");

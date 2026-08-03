@@ -38,6 +38,8 @@ export class FinanceExtrasController {
     createJournal(@Body() body: any) { return this.svc.createJournal(body); }
     @Put('journal-entries/:id')
     updateJournal(@Param('id') id: string, @Body() body: any) { return this.svc.updateJournal(id, body); }
+    @Post('journal-entries/:id/reverse')
+    reverseJournal(@Param('id') id: string, @Body() body: any) { return this.svc.reverseJournal(id, body ?? {}); }
     @Delete('journal-entries/:id')
     deleteJournal(@Param('id') id: string) { return this.svc.deleteJournal(id); }
 

@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { Download, FileText, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -91,7 +92,7 @@ export function PayslipHistoryPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("payslips", err));
   }, []);
 
   const sortedSlips = [...payslips].sort((a, b) =>

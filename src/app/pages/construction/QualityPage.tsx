@@ -258,8 +258,18 @@ function NCRModal({
     };
     const { id: _omit, ...payload } = newNcr;
     createQualityNcr(payload)
-      .then((saved) => onClose(saved))
-      .catch(() => onClose(newNcr));
+      .then((saved) => {
+        toast.success("NCR raised.");
+        onClose(saved);
+      })
+      // The unsaved NCR used to be handed back to the list on failure, so a
+      // non-conformance that was never recorded still showed as raised. The
+      // modal stays open so the entry is not lost.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error ? err.message : "Could not raise the NCR.",
+        ),
+      );
   }
   return (
     <div

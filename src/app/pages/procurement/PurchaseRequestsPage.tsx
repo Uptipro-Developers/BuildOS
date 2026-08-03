@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import {
@@ -669,7 +670,7 @@ export function PurchaseRequestsPage() {
   useEffect(() => {
     getPurchaseRequests()
       .then((data) => setPrList(data.map(fromApi)))
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("purchase requests", err))
       .finally(() => setLoading(false));
   }, []);
   const [activeTab, setActiveTab] = useState<PRStatus | "all">("all");
@@ -686,6 +687,19 @@ export function PurchaseRequestsPage() {
   const authUser = useAuthUser();
   /** Purchase Requests process id from the backend process catalog. */
   const mayApprovePRs = canApprove("p_purchase_requests");
+
+  /**
+   * Whether the signed-in user raised this request. Matched on name or email,
+   * the same two identities the server compares `requestedBy` against.
+   */
+  const raisedByMe = (pr: PurchaseRequest) => {
+    const raised = String(pr.raisedBy ?? "").trim().toLowerCase();
+    if (!raised) return false;
+    return [authUser.name, authUser.email]
+      .map((v) => String(v ?? "").trim().toLowerCase())
+      .filter(Boolean)
+      .includes(raised);
+  };
 
   /** Deletes the request, then re-reads so the table reflects the database. */
   async function confirmDelete() {
@@ -812,7 +826,31 @@ export function PurchaseRequestsPage() {
           >
             <Eye className="w-4 h-4" />
           </button>
+          {pr.status === "draft" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                submitPRForApproval(pr.id);
+              }}
+              title="Submit this request for approval"
+              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Submit for Approval
+            </button>
+          )}
+          {/* A requester may not decide their own request — the server enforces
+              this and returns 403. Surfaced here so the button is not offered
+              only to fail on click. */}
+          {pr.status === "pending_approval" && mayApprovePRs && raisedByMe(pr) && (
+            <span
+              className="px-2 py-1 text-xs text-gray-400 italic"
+              title="You raised this request, so it must be approved by someone else."
+            >
+              Awaiting another approver
+            </span>
+          )}
           {pr.status === "pending_approval" &&
+            !raisedByMe(pr) &&
             (mayApprovePRs ? (
               <>
                 <button
@@ -930,6 +968,41 @@ export function PurchaseRequestsPage() {
 
   function rejectPR(id: string) {
     void decidePR(id, "cancelled", "rejected");
+  }
+
+  /**
+   * Submits a draft request for approval.
+   *
+   * `pending_approval` was referenced by the status config, the tab filter and
+   * the Approve/Reject gate, but nothing ever assigned it: requests are created
+   * as Draft (the column default) and there was no action anywhere that moved
+   * one out of Draft. So every request sat in Draft forever and the Approve
+   * button — which only renders for `pending_approval` — could never appear.
+   */
+  async function submitPRForApproval(id: string) {
+    const previous = prList;
+    setPrList((prev) =>
+      prev.map((pr) => (pr.id === id ? { ...pr, status: "pending_approval" } : pr)),
+    );
+    try {
+      await updatePurchaseRequest(id, { status: "pending_approval" });
+      logChange({
+        module: "procurement",
+        action: "submitted",
+        entityType: "purchase_request",
+        entityId: id,
+        summary: `Submitted PR ${id} for approval`,
+        performedBy: authUser.name || "Unknown",
+      });
+      toast.success("Purchase request submitted for approval.");
+    } catch (err) {
+      setPrList(previous);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not submit the request. Please try again.",
+      );
+    }
   }
 
   function sendToSuppliers(id: string) {

@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import {
   Users,
@@ -26,9 +27,9 @@ export function AdminDashboardPage() {
   const [showAllActivity, setShowAllActivity] = useState(false);
 
   useEffect(() => {
-    getAdminSystemSummary().then(setSummary).catch(console.error);
-    getAdminActivityLog().then(setActivityLog).catch(console.error);
-    getUsers().then(setAllUsers).catch(console.error);
+    getAdminSystemSummary().then(setSummary).catch((err) => notifyLoadFailure("admin system summary", err));
+    getAdminActivityLog().then(setActivityLog).catch((err) => notifyLoadFailure("admin activity log", err));
+    getUsers().then(setAllUsers).catch((err) => notifyLoadFailure("users", err));
   }, []);
 
   const fmt = (n: number | null) => (n === null ? "…" : String(n));

@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Search, Calendar, MapPin, CheckCircle2 } from "lucide-react";
@@ -13,7 +14,7 @@ export function CompletedProjectsPage() {
   useEffect(() => {
     fetchProjects({ status: "Completed" })
       .then(setCompletedProjects)
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("projects", err));
   }, []);
 
   const years = [

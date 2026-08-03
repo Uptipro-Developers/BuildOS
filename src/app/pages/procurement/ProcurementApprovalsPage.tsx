@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect, type ReactNode } from "react";
 import { toast } from "sonner";
 import { getCurrencySymbol } from "../../utils/generalSettings";
@@ -112,7 +113,7 @@ export function ProcurementApprovalsPage() {
   useEffect(() => {
     getApprovals("procurement")
       .then((data) => setApprovals(data.map(fromApiApproval)))
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("approvals", err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -122,9 +123,10 @@ export function ProcurementApprovalsPage() {
   function approve(id: string) {
     approveItem(id)
       .then(() => {
+        toast.success("Approved.");
         getApprovals("procurement")
           .then((data) => setApprovals(data.map(fromApiApproval)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("approvals", err));
       })
       .catch((err) => {
         toast.error("Failed to approve. Please try again.");
@@ -134,9 +136,10 @@ export function ProcurementApprovalsPage() {
   function reject(id: string) {
     rejectItem(id)
       .then(() => {
+        toast.success("Rejected.");
         getApprovals("procurement")
           .then((data) => setApprovals(data.map(fromApiApproval)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("approvals", err));
       })
       .catch((err) => {
         toast.error("Failed to reject. Please try again.");

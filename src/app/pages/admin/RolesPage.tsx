@@ -1249,6 +1249,7 @@ export function RolesPage() {
                 navAccess,
               },
             ]);
+            toast.success(`Role "${created.name}" created.`);
           }}
           onClose={() => setShowAddRole(false)}
         />

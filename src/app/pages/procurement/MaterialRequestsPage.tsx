@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useApprovalRights } from "../../utils/useApprovalRights";
@@ -1021,7 +1022,7 @@ export function MaterialRequestsPage() {
   function loadRequests() {
     return getMaterialRequests()
       .then((data) => setReqList(groupApiRequests(data)))
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("material requests", err));
   }
 
   useEffect(() => {

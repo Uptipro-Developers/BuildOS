@@ -202,8 +202,15 @@ export function IssuesPage() {
       const { id: _omit, ...payload } = newIssue;
       const saved = await createIssue(payload);
       setIssues((prev) => [...prev, saved]);
-    } catch {
-      setIssues((prev) => [...prev, newIssue]);
+      toast.success("Issue logged.");
+    } catch (err) {
+      // The unsaved issue used to be pushed into the list anyway, so a failed
+      // save looked identical to a successful one until the page was reloaded
+      // and the issue was gone.
+      toast.error(
+        err instanceof Error ? err.message : "Could not log the issue.",
+      );
+      return;
     }
     setShowLogModal(false);
     setForm(emptyForm);

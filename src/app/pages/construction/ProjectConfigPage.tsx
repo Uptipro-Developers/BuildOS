@@ -64,12 +64,20 @@ function ProjectTypesPanel() {
     const next = editing
       ? types.map((t) => (t.id === editing.id ? { ...t, ...form } : t))
       : [...types, { id: String(Date.now()), ...form }];
+    const previous = types;
     setTypes(next);
-    saveProjectTypes(next).catch((err) =>
-      toast.error(
-        err instanceof Error ? err.message : "Could not save the project types.",
-      ),
-    );
+    // Local state was updated first and never rolled back, so a failed save
+    // left the new type on screen as though it had been stored.
+    saveProjectTypes(next)
+      .then(() => toast.success("Project types saved."))
+      .catch((err) => {
+        setTypes(previous);
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not save the project types.",
+        );
+      });
     setShowModal(false);
   }
 
@@ -206,13 +214,21 @@ function ProjectTypesPanel() {
               </button>
               <button
                 onClick={() => {
+                  const previous = types;
                   const next = types.filter((t) => t.id !== deleteTarget.id);
                   setTypes(next);
-                  saveProjectTypes(next).catch((err) =>
-      toast.error(
-        err instanceof Error ? err.message : "Could not save the project types.",
-      ),
-    );
+                  saveProjectTypes(next)
+                    .then(() =>
+                      toast.success(`"${deleteTarget.name}" deleted.`),
+                    )
+                    .catch((err) => {
+                      setTypes(previous);
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Could not delete the project type.",
+                      );
+                    });
                   setDeleteTarget(null);
                 }}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
@@ -258,14 +274,18 @@ function ProjectStatusesPanel() {
     const next = editing
       ? statuses.map((s) => (s.id === editing.id ? { ...s, ...form } : s))
       : [...statuses, { id: String(Date.now()), sequence: maxSeq + 1, ...form }];
+    const previous = statuses;
     setStatuses(next);
-    saveProjectStatuses(next).catch((err) =>
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Could not save the project statuses.",
-      ),
-    );
+    saveProjectStatuses(next)
+      .then(() => toast.success("Project statuses saved."))
+      .catch((err) => {
+        setStatuses(previous);
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not save the project statuses.",
+        );
+      });
     setShowModal(false);
   }
 
@@ -435,15 +455,21 @@ function ProjectStatusesPanel() {
               </button>
               <button
                 onClick={() => {
+                  const previous = statuses;
                   const next = statuses.filter((s) => s.id !== deleteTarget.id);
                   setStatuses(next);
-                  saveProjectStatuses(next).catch((err) =>
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Could not save the project statuses.",
-      ),
-    );
+                  saveProjectStatuses(next)
+                    .then(() =>
+                      toast.success(`"${deleteTarget.name}" deleted.`),
+                    )
+                    .catch((err) => {
+                      setStatuses(previous);
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : "Could not delete the project status.",
+                      );
+                    });
                   setDeleteTarget(null);
                 }}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"

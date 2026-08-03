@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { safePercent } from "../../utils/number";
 import { useNavigate } from "react-router";
@@ -29,7 +30,7 @@ export function ActiveProjectsPage() {
           ),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("projects", err));
   }, []);
 
   const contractors = [

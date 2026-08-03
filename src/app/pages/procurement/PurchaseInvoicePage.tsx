@@ -1,4 +1,6 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Plus, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -124,7 +126,7 @@ export function PurchaseInvoicePage() {
   useEffect(() => {
     getPurchaseInvoices()
       .then((data) => setInvoices(data.map(fromApi)))
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("purchase invoices", err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -174,8 +176,14 @@ export function PurchaseInvoicePage() {
       });
       setInvoices((prev) => [fromApi(created), ...prev]);
       logChange({ module: "Procurement", action: "Created", entityType: "PurchaseInvoice", entityId: created.id, summary: `Invoice ${form.invoiceNo} created — ${form.supplier}`, performedBy: "Current User" });
+      toast.success(`Invoice ${form.invoiceNo} created.`);
     } catch (e) {
-      console.error(e);
+      // Only console.error before: the modal closed on failure and the invoice
+      // was simply absent from the list.
+      toast.error(
+        e instanceof Error ? e.message : "Could not create the invoice.",
+      );
+      return;
     }
     setShowModal(false);
     setForm({ ...BLANK_FORM, lines: [BLANK_LINE()] });

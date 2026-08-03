@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { getChartAccounts } from "../../api/finance-extras";
@@ -360,7 +361,7 @@ export function ScheduledPostingPage() {
       .then((accounts) =>
         setAccountOptions(accounts.map((a) => `${a.code} ${a.name}`)),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("chart accounts", err));
   }, []);
 
   useEffect(() => {

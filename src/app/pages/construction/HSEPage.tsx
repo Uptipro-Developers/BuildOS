@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { toast } from "sonner";
 import { useState, useEffect } from "react";
 import {
   AlertTriangle,
@@ -510,20 +511,20 @@ export function HSEPage() {
       expiryDate: compForm.expiryDate,
       status: compForm.status,
     };
-    // Allocated up front so the offline fallback below can use it without
-    // awaiting inside a .catch callback.
-    const fallbackId = await allocate("HSERecord");
     createHseRecord(record as any)
-      .then((saved) => setLocalMatrix((prev) => [...prev, saved]))
-      .catch(() =>
-        setLocalMatrix((prev) => [
-          ...prev,
-          {
-            id: fallbackId,
-            ...record,
-            status: compForm.status as any,
-          },
-        ]),
+      .then((saved) => {
+        setLocalMatrix((prev) => [...prev, saved]);
+        toast.success("Competency record added.");
+      })
+      // A locally-invented record used to be pushed into the matrix on failure,
+      // so an unsaved competency read as certified — the worst thing to get
+      // wrong on an HSE matrix.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not add the competency record.",
+        ),
       );
     setShowCompetencyModal(false);
     setCompForm({

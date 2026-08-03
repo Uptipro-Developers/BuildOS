@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import {
   Star,
@@ -71,7 +72,7 @@ export function AppraisalPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("appraisals", err));
   }, []);
 
   function toggleExpand(id: string) {

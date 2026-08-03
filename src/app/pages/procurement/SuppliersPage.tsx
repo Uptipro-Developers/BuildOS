@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -148,7 +149,7 @@ export function SuppliersPage() {
     }
     fetchPurchaseOrders({ supplierId: profileTarget.id })
       .then(setProfileOrders)
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("purchase orders", err));
   }, [profileTarget]);
 
   function handleDocUpload(

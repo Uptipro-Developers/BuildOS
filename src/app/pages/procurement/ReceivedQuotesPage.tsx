@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -1175,7 +1176,7 @@ export function ReceivedQuotesPage() {
   useEffect(() => {
     getReceivedQuotes()
       .then((data) => setDocs(data.map(fromApi)))
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("received quotes", err))
       .finally(() => setLoading(false));
   }, []);
   const [statusFilter, setStatusFilter] = useState<DocStatus | "all">("all");

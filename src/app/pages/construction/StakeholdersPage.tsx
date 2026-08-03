@@ -292,8 +292,16 @@ export function StakeholdersPage() {
     };
     const { id: _omit, ...payload } = newSh;
     createStakeholder(payload)
-      .then((saved) => setLocalStakeholders((prev) => [...prev, saved]))
-      .catch(() => setLocalStakeholders((prev) => [...prev, newSh]));
+      .then((saved) => {
+        setLocalStakeholders((prev) => [...prev, saved]);
+        toast.success(`${saved.name || "Stakeholder"} added.`);
+      })
+      // The unsaved stakeholder used to be pushed into the list on failure.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error ? err.message : "Could not add the stakeholder.",
+        ),
+      );
     setShowAddStakeholder(false);
     setAddForm({
       name: "",
@@ -312,8 +320,13 @@ export function StakeholdersPage() {
     try {
       const created = await createVisitorLog({ projectId: id, ...visitorForm });
       setVisitorLog((prev) => [created, ...prev]);
-    } catch {
-      /* leave the list unchanged on failure */
+      toast.success("Visitor logged.");
+    } catch (err) {
+      // The list was correctly left unchanged, but silently — the visitor
+      // simply never appeared and nothing said why.
+      toast.error(
+        err instanceof Error ? err.message : "Could not log the visitor.",
+      );
     }
     setShowAddVisitor(false);
     setVisitorForm({

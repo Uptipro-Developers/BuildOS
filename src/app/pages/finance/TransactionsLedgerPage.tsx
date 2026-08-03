@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -284,7 +285,7 @@ export function TransactionsLedgerPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("transactions", err));
   }, []);
 
   const totalInflow = allTransactions

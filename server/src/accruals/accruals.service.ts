@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { NumberingService } from '../numbering/numbering.service';
 
 /** Columns accepted from clients; everything else is dropped. */
 const ACCRUAL_FIELDS = [
@@ -44,7 +44,10 @@ function sanitizeLines(lines: unknown): AccrualLineInput[] {
 
 @Injectable()
 export class AccrualsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private numbering: NumberingService,
+    ) { }
 
     findAll(status?: string, fiscalYearId?: string) {
         return this.prisma.accrual.findMany({
@@ -72,7 +75,7 @@ export class AccrualsService {
         this.assertBalanced(lines);
 
         const suppliedReference = String(clean.reference ?? '').trim();
-        clean.reference = suppliedReference || this.generateReference();
+        clean.reference = suppliedReference || (await this.numbering.allocate('Accrual')).reference;
         clean.createdBy = clean.createdBy ?? 'System';
         // Trust the sum of the lines over a client-supplied total.
         clean.amount = lines.reduce((sum, l) => sum + (l.debit ?? 0), 0) || clean.amount || 0;
@@ -96,10 +99,6 @@ export class AccrualsService {
             }
             throw error;
         }
-    }
-
-    private generateReference() {
-        return `ACC-${Date.now()}-${randomUUID().slice(0, 8)}`;
     }
 
     async update(id: string, data: any) {

@@ -160,27 +160,33 @@ export function UnitsOfMeasurementPage() {
       conversionFactor: formData.conversionFactor,
     };
 
+    // On failure these used to apply the edit — or insert a unit with a
+    // `Date.now()` id — into local state anyway, so a unit that never reached
+    // the server looked configured until the page was reloaded. Units drive the
+    // pickers in Procurement and ESS, so a phantom one is worse than none.
     if (editingUnit) {
       try {
         const updated = await updateUnit(editingUnit.id, payload);
         setUnits((prev) =>
           prev.map((u) => (u.id === editingUnit.id ? (updated as Unit) : u)),
         );
-      } catch {
-        setUnits((prev) =>
-          prev.map((u) => (u.id === editingUnit.id ? { ...u, ...payload } : u)),
+        toast.success(`"${payload.name}" updated.`);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not update the unit.",
         );
+        return;
       }
     } else {
       try {
         const created = await createUnit(payload);
         setUnits((prev) => [created as Unit, ...prev]);
-      } catch {
-        const newUnit: Unit = {
-          id: Date.now().toString(),
-          ...payload,
-        };
-        setUnits((prev) => [newUnit, ...prev]);
+        toast.success(`"${payload.name}" added.`);
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Could not add the unit.",
+        );
+        return;
       }
     }
     handleCloseModal();

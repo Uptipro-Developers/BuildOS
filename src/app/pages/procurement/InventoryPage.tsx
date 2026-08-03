@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import {
@@ -505,7 +506,7 @@ export function InventoryPage() {
 
   useEffect(() => {
     loadMaterials()
-      .catch(console.error)
+      .catch((err) => notifyLoadFailure("materials", err))
       .finally(() => setLoading(false));
   }, []);
   const [statusFilter, setStatusFilter] = useState("All");

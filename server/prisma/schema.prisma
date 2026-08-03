@@ -1044,6 +1044,13 @@ model JournalEntry {
   status      String        @default("Draft")
   createdBy   String
   postedAt    DateTime?
+  reversedAt  DateTime?
+  // Set on the reversing entry, pointing back at the entry it reverses. The
+  // inverse side gives the original entry a link to its reversal, which is what
+  // the Reversed badge in the UI resolves to.
+  reversalOfId String?
+  reversalOf   JournalEntry?  @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversedBy   JournalEntry[] @relation("JournalReversal")
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   lines       JournalLine[]
@@ -1062,18 +1069,19 @@ model JournalLine {
 }
 
 model ChartAccount {
-  id        String        @id @default(cuid())
-  code      String        @unique
-  name      String
-  type      String
-  category  String
-  balance   Float         @default(0)
-  isActive  Boolean       @default(true)
-  parentId  String?
-  parent    ChartAccount? @relation("AccountTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children  ChartAccount[] @relation("AccountTree")
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id          String      @id @default(cuid())
+  code        String      @unique
+  name        String
+  type        String
+  category    String
+  description String?
+  balance     Float       @default(0)
+  isActive    Boolean     @default(true)
+  parentId    String?
+  parent      ChartAccount?  @relation("AccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    ChartAccount[] @relation("AccountTree")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 }
 
 model BankAccount {

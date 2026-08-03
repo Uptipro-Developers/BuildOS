@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -131,7 +132,7 @@ export function ClaimsManagementPage() {
         logChange({ module: "Finance", action: "Approved", entityType: "Claim", entityId: id, summary: `Claim ${id} approved`, performedBy: "Current User" });
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("claims", err));
         toast.success("Claim approved.");
       })
       .catch((err) => {
@@ -150,7 +151,7 @@ export function ClaimsManagementPage() {
         logChange({ module: "Finance", action: "Rejected", entityType: "Claim", entityId: rejectState.id, summary: `Claim ${rejectState.id} rejected`, performedBy: "Current User" });
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("claims", err));
         toast.success("Claim rejected.");
       })
       .catch((err) => {
@@ -169,7 +170,7 @@ export function ClaimsManagementPage() {
         logChange({ module: "Finance", action: "Paid", entityType: "Claim", entityId: id, summary: `Claim ${id} paid`, performedBy: "Current User" });
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("claims", err));
         toast.success("Claim marked as paid.");
       })
       .catch((err) => {
@@ -187,7 +188,7 @@ export function ClaimsManagementPage() {
         logChange({ module: "Finance", action: "Updated", entityType: "Claim", entityId: id, summary: `Claim ${id} moved to Under Review`, performedBy: "Current User" });
         fetchClaims()
           .then((items) => setClaims(items.map(toClaim)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("claims", err));
         toast.success("Claim moved to Under Review.");
       })
       .catch((err) => {

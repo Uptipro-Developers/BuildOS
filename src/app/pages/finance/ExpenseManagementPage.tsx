@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
@@ -158,7 +159,7 @@ export function ExpenseManagementPage() {
           ),
         );
       })
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("chart of accounts", err));
   }, []);
   const [statusFilter, setStatusFilter] = useState<ExpenseStatus | "All">(
     "All",
@@ -361,7 +362,7 @@ export function ExpenseManagementPage() {
         logChange({ module: "Finance", action: "Approved", entityType: "Expense", entityId: id, summary: `Expense ${id} approved`, performedBy: "Current User" });
         fetchExpenses()
           .then((items) => setExpenses(items.map(toExpense)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("expenses", err));
         toast.success("Expense approved.");
       })
       .catch((err) => {
@@ -380,7 +381,7 @@ export function ExpenseManagementPage() {
         logChange({ module: "Finance", action: "Rejected", entityType: "Expense", entityId: rejectState.id, summary: `Expense ${rejectState.id} rejected`, performedBy: "Current User" });
         fetchExpenses()
           .then((items) => setExpenses(items.map(toExpense)))
-          .catch(console.error);
+          .catch((err) => notifyLoadFailure("expenses", err));
         toast.success("Expense rejected.");
       })
       .catch((err) => {

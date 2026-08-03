@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
 import {
   Users,
   Briefcase,
@@ -65,7 +66,6 @@ export function StakeholdersOverviewPage() {
     };
   }, []);
   const [showModal, setShowModal] = useState(false);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>("All");
   const [roleFilter, setRoleFilter] = useState<string>("All");
   const [showFilters, setShowFilters] = useState(false);
@@ -171,9 +171,14 @@ export function StakeholdersOverviewPage() {
     sortDir,
   ]);
 
+  /**
+   * Delegates to the app-wide toaster. This used to render a bespoke
+   * bottom-right box that showed failures in the same neutral style as
+   * successes, and sat in a different corner from every other toast in
+   * the app.
+   */
   function showToast(msg: string) {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    toast.success(msg);
   }
 
   async function handleCreate() {
@@ -220,11 +225,6 @@ export function StakeholdersOverviewPage() {
       style={{ backgroundColor: "#F7F8FA" }}
       className="min-h-screen p-6 space-y-6"
     >
-      {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
-          {toastMsg}
-        </div>
-      )}
 
       <div className="flex items-center justify-between">
         <div>

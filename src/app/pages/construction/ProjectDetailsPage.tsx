@@ -1,4 +1,6 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { safePercent } from "../../utils/number";
 import { useParams, useNavigate } from "react-router";
 import {
@@ -1041,11 +1043,15 @@ function DocumentsTab() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [docList, setDocList] = useState(docs);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
+  /**
+   * Delegates to the app-wide toaster. This used to render a bespoke
+   * bottom-right box that showed failures in the same neutral style as
+   * successes, and sat in a different corner from every other toast in
+   * the app.
+   */
   function showToast(msg: string) {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+    toast.success(msg);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1078,11 +1084,6 @@ function DocumentsTab() {
         className="hidden"
         onChange={handleFileChange}
       />
-      {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
-          {toastMsg}
-        </div>
-      )}
       <div className="flex items-center justify-between gap-3">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1288,7 +1289,7 @@ export function ProjectDetailsPage() {
             : null,
         );
       })
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("projects", err));
 
     // Load project-specific data
     Promise.all([
@@ -1323,7 +1324,7 @@ export function ProjectDetailsPage() {
               })),
           ),
         )
-        .catch(console.error),
+        .catch((err) => notifyLoadFailure("tasks", err)),
       getWorkforceAllocations()
         .then((items) =>
           setProjectWorkers(
@@ -1342,7 +1343,7 @@ export function ProjectDetailsPage() {
               })),
           ),
         )
-        .catch(console.error),
+        .catch((err) => notifyLoadFailure("workforce allocations", err)),
       fetchExpenses({ projectId: id })
         .then((items) =>
           setProjectExpenses(
@@ -1361,12 +1362,12 @@ export function ProjectDetailsPage() {
             })),
           ),
         )
-        .catch(console.error),
+        .catch((err) => notifyLoadFailure("expenses", err)),
       getResourcePlans()
         .then((items) =>
           setProjectResources(items.filter((r: any) => r.projectId === id)),
         )
-        .catch(console.error),
+        .catch((err) => notifyLoadFailure("resource plans", err)),
     ]);
   }, [id]);
 

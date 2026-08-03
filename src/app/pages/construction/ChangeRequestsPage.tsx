@@ -175,8 +175,19 @@ export function ChangeRequestsPage() {
     };
     const { id: _omit, ...payload } = newCR;
     createChangeRequest(payload)
-      .then((saved) => setProjectCRs((prev) => [...prev, saved]))
-      .catch(() => setProjectCRs((prev) => [...prev, newCR]));
+      .then((saved) => {
+        setProjectCRs((prev) => [...prev, saved]);
+        toast.success("Change request raised.");
+      })
+      // The unsaved change request used to be pushed into the list on failure,
+      // so a change that was never submitted still showed as raised.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not raise the change request.",
+        ),
+      );
     setShowCreateModal(false);
     setForm({ ...emptyForm });
   }

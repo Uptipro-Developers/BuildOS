@@ -1,3 +1,4 @@
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -148,7 +149,7 @@ export function FinanceConfigPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("bank accounts", err));
     getTaxConfigs()
       .then((data) =>
         setTaxEntries(
@@ -163,7 +164,7 @@ export function FinanceConfigPage() {
           })),
         ),
       )
-      .catch(console.error);
+      .catch((err) => notifyLoadFailure("tax configuration", err));
     apiFetch<any>("/config")
       .then((cfg) => {
         if (cfg?.currency) setCurrency(cfg.currency);
@@ -172,7 +173,7 @@ export function FinanceConfigPage() {
           setApprovalThreshold(String(cfg.approvalThreshold));
       })
       .catch(() => {});
-    getPaymentMethods().then(setPaymentMethods).catch(console.error);
+    getPaymentMethods().then(setPaymentMethods).catch((err) => notifyLoadFailure("payment methods", err));
   }, []);
 
   // Tax state

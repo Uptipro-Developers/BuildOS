@@ -313,7 +313,15 @@ export function FinancialConfigurationPage() {
           prev.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m)),
         );
       })
-      .catch(console.error);
+      // A mutation, not a load: the toggle silently did nothing on failure and
+      // the switch stayed where the user left it, implying it had taken effect.
+      .catch((err) =>
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not change the payment method.",
+        ),
+      );
   }
 
   const accountTypeColors: Record<string, string> = {
