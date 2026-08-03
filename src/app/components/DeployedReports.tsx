@@ -62,6 +62,11 @@ export function DeployedReports({
   const [ranTemplate, setRanTemplate] = useState<DeployedReportTemplate | null>(
     null,
   );
+  // Reporting period. The `dateRange` prop existed but no page ever passed
+  // one and there was no control anywhere, so every report always ran over
+  // all time. Defaults to all time; the last six months are offered, which is
+  // the range the HR module asked for.
+  const [period, setPeriod] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -80,10 +85,44 @@ export function DeployedReports({
     };
   }, [app]);
 
+  /** The last six months, newest first, as {value: "YYYY-MM", label}. */
+  const monthOptions = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return {
+        value,
+        label: d.toLocaleString(undefined, { month: "long", year: "numeric" }),
+      };
+    });
+  }, []);
+
+  /**
+   * The range to apply: the page's prop when given, otherwise the selected
+   * month. The field is detected per template, since each one selects its own.
+   */
+  function rangeFor(tpl: DeployedReportTemplate): ReportDateRange | undefined {
+    if (dateRange?.field) return dateRange;
+    if (!period) return undefined;
+    const field = (tpl.selectedFields ?? [])
+      .map((f) => f.key)
+      .find((k) => /date|_at$|createdAt|updatedAt/i.test(k));
+    if (!field) return undefined;
+    const [y, m] = period.split("-").map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return {
+      field,
+      from: `${period}-01`,
+      to: `${period}-${String(last).padStart(2, "0")}`,
+    };
+  }
+
   /** The template's own filters plus the page's date range, when one applies. */
-  const filtersFor = useMemo(
-    () => (tpl: DeployedReportTemplate) => {
+  const filtersFor = (tpl: DeployedReportTemplate) => {
+    {
       const own = (tpl.filters ?? []).filter((f) => f.field);
+      const dateRange = rangeFor(tpl);
       if (!dateRange?.field || (!dateRange.from && !dateRange.to)) return own;
 
       // Only applied when the template actually selected that field — otherwise
@@ -111,9 +150,8 @@ export function DeployedReports({
           value: dateRange.from || dateRange.to || "",
         },
       ];
-    },
-    [dateRange],
-  );
+    }
+  };
 
   async function generate(tpl: DeployedReportTemplate) {
     if (runningId) return;
@@ -180,12 +218,33 @@ export function DeployedReports({
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold text-gray-900">Deployed Reports</h2>
-        <p className="text-xs text-gray-500 mt-0.5">
-          Built and deployed from Report Builder. Generating one runs its saved
-          configuration against the current filters.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">
+            Deployed Reports
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Built and deployed from Report Builder. Generating one runs its
+            saved configuration against the current filters.
+          </p>
+        </div>
+        {!dateRange?.field && (
+          <label className="flex items-center gap-2 text-xs text-gray-600">
+            Period
+            <select
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              <option value="">All time</option>
+              {monthOptions.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

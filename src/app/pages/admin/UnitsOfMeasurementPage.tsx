@@ -9,6 +9,7 @@ import {
   updateUnit,
   deleteUnit,
 } from "../../api/admin-extras";
+import { toast } from "sonner";
 
 interface Unit {
   id: string;
@@ -412,15 +413,23 @@ export function UnitsOfMeasurementPage() {
               </button>
               <button
                 onClick={async () => {
+                  // A failed delete used to be swallowed and the row removed
+                  // locally anyway, so it silently came back on reload.
                   try {
                     await deleteUnit(deleteTarget.id);
-                  } catch {
-                    // Fallback to local deletion when backend mutation is unavailable.
+                  } catch (err) {
+                    toast.error(
+                      err instanceof Error
+                        ? err.message
+                        : "Could not delete the unit.",
+                    );
+                    return;
                   }
                   setUnits((prev) =>
                     prev.filter((u) => u.id !== deleteTarget.id),
                   );
                   setDeleteTarget(null);
+                  toast.success("Unit deleted.");
                 }}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
               >
