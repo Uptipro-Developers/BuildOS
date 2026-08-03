@@ -16,6 +16,7 @@ import type { EmailPayload } from '../email/email.service';
 import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 import { PermissionsService } from '../permissions/permissions.service';
 import { EmailTemplateService, type ComposedEmail } from '../email/email-template.service';
+import { WebhookService } from '../integrations/webhook.service';
 
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
@@ -97,6 +98,7 @@ export class AdminExtrasService {
         private serviceKeys: ServiceKeyService,
         private permissions: PermissionsService,
         private emailTemplates: EmailTemplateService,
+        private webhooks: WebhookService,
     ) { }
 
     private settingsFilePath = path.join(process.cwd(), 'data', 'admin-settings.json');
@@ -2713,28 +2715,55 @@ export class AdminExtrasService {
     }
 
     // ── Webhooks ──
-    async findWebhooks() {
-        const settings = await this.readAdminSettings();
-        return settings.webhooks;
-    }
-    async createWebhook(data: any) {
-        const settings = await this.readAdminSettings();
-        const created = {
-            id: `wh-${Date.now()}`,
-            name: String(data?.name ?? '').trim() || 'New Webhook',
-            url: String(data?.url ?? '').trim(),
-            events: Array.isArray(data?.events) ? data.events : [],
-            status: 'active',
-            createdAt: new Date().toISOString(),
+    /**
+     * Webhook management for the Integrations screen.
+     *
+     * These used to read and write `admin-settings.webhooks`, a JSON blob that
+     * nothing ever delivered from: WebhookService.triggerWebhook reads the
+     * `Webhook` table. So a webhook added in the UI was never called, a webhook
+     * that did receive events could not be seen or edited, and the UI's rows
+     * carried no signing secret because this never generated one. They operate
+     * on the real table now.
+     *
+     * The UI models events as a list while the table stores a single event
+     * pattern ('*' for all), so the two are mapped here rather than changing
+     * either shape.
+     */
+    private presentWebhook(row: any) {
+        return {
+            id: row.id,
+            name: row.name ?? row.url,
+            url: row.url,
+            events: row.event === '*' ? ['*'] : [row.event],
+            status: row.isActive === false ? 'inactive' : 'active',
+            secret: row.secret ?? undefined,
+            createdAt: row.createdAt,
         };
-        settings.webhooks.unshift(created);
-        await this.writeAdminSettings(settings);
-        return created;
     }
+
+    async findWebhooks() {
+        const rows = await this.webhooks.getWebhooks();
+        return rows.map((row: any) => this.presentWebhook(row));
+    }
+
+    async createWebhook(data: any) {
+        const events = Array.isArray(data?.events)
+            ? data.events.map((e: unknown) => String(e).trim()).filter(Boolean)
+            : [];
+        // One row carries one pattern. Several named events therefore register
+        // as '*' rather than silently dropping all but the first.
+        const event = events.length === 1 ? events[0] : '*';
+
+        const created = await this.webhooks.registerWebhook({
+            url: String(data?.url ?? '').trim(),
+            event,
+            isActive: true,
+        });
+        return { ...this.presentWebhook(created), name: String(data?.name ?? '').trim() || created.url };
+    }
+
     async deleteWebhook(id: string) {
-        const settings = await this.readAdminSettings();
-        settings.webhooks = settings.webhooks.filter((item: any) => item.id !== id);
-        await this.writeAdminSettings(settings);
+        await this.webhooks.deleteWebhook(id);
         return { id, deleted: true };
     }
 

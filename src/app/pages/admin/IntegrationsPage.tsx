@@ -35,6 +35,23 @@ type WebhookConfig = {
   secret?: string;
 };
 
+/**
+ * The events BuildOS actually emits, so the picker cannot offer one that will
+ * never fire. The field was free text with a placeholder naming
+ * `project.updated` and `approval.submitted`, neither of which exists.
+ *
+ * Delivery matches a single stored pattern — one exact event, or `*` for all —
+ * so this is a single choice rather than a list.
+ */
+const WEBHOOK_EVENTS = [
+  { value: "*", label: "All events (*)" },
+  { value: "rfq.sent", label: "rfq.sent — an RFQ was sent to a vendor" },
+  {
+    value: "purchase-request.created",
+    label: "purchase-request.created — a purchase request was raised",
+  },
+] as const;
+
 export function IntegrationsPage() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
@@ -52,7 +69,7 @@ export function IntegrationsPage() {
   const [webhookModalOpen, setWebhookModalOpen] = useState(false);
   const [webhookName, setWebhookName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookEvents, setWebhookEvents] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState("*");
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
     type: "key" | "webhook";
@@ -116,7 +133,7 @@ export function IntegrationsPage() {
   const openWebhookModal = () => {
     setWebhookName("");
     setWebhookUrl("");
-    setWebhookEvents("");
+    setWebhookEvents("*");
     setWebhookModalOpen(true);
   };
 
@@ -586,15 +603,22 @@ export function IntegrationsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Events (comma-separated)
+                Event
               </label>
-              <input
-                type="text"
+              <select
                 value={webhookEvents}
                 onChange={(e) => setWebhookEvents(e.target.value)}
-                placeholder="project.updated, approval.submitted"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
-              />
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-400"
+              >
+                {WEBHOOK_EVENTS.map((e) => (
+                  <option key={e.value} value={e.value}>
+                    {e.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                A webhook listens for one event, or all of them.
+              </p>
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <button
