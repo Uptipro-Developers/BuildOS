@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from '../integrations/webhook.service';
+import { MailQueueService } from '../queue/mail-queue.service';
 
 @Injectable()
 export class ProcurementRequestsService {
     constructor(
         private prisma: PrismaService,
         private webhookService: WebhookService,
+        private mailQueue: MailQueueService,
     ) {}
 
     // ── Purchase Requests ──
@@ -66,8 +68,21 @@ export class ProcurementRequestsService {
     }
     createRFQ(data: any) {
         const rfqRef = `RFQ-${Date.now()}`;
-        return this.prisma.sentRFQ.create({ data: { ...data, rfqRef } }).then((rfq) => {
+        return this.prisma.sentRFQ.create({ data: { ...data, rfqRef } }).then(async (rfq) => {
             this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => {});
+            // Email the supplier directly so they are notified even without a
+            // webhook or SabiQuot account.
+            if (data.supplierId) {
+                const supplier = await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null);
+                if (supplier?.email) {
+                    this.mailQueue.enqueueEmail({
+                        to: supplier.email,
+                        subject: `New RFQ from BuildOS — ${rfqRef}`,
+                        text: `Dear ${supplier.contactPerson || supplier.name},\n\nYou have received a new Request for Quotation (${rfqRef}) from BuildOS.\n\nPlease log in to the supplier portal or contact the procurement team to review and respond.\n\nRef: ${rfqRef}`,
+                        html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>You have received a new <strong>Request for Quotation</strong> (<code>${rfqRef}</code>) from BuildOS.</p><p>Please log in to the supplier portal or contact the procurement team to review and respond.</p><p style="color:#6b7280;font-size:12px;">Ref: ${rfqRef}</p>`,
+                    }).catch(() => {});
+                }
+            }
             return rfq;
         });
     }
