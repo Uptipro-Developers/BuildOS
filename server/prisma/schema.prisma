@@ -1062,15 +1062,18 @@ model JournalLine {
 }
 
 model ChartAccount {
-  id        String   @id @default(cuid())
-  code      String   @unique
+  id        String        @id @default(cuid())
+  code      String        @unique
   name      String
   type      String
   category  String
-  balance   Float    @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  balance   Float         @default(0)
+  isActive  Boolean       @default(true)
+  parentId  String?
+  parent    ChartAccount? @relation("AccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  ChartAccount[] @relation("AccountTree")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 }
 
 model BankAccount {

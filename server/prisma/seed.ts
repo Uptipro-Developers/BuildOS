@@ -465,13 +465,57 @@ async function main() {
     },
   });
 
-  await prisma.chartAccount.createMany({
-    data: [
-      { code: '1000', name: 'Cash and Bank', type: 'Asset', category: 'Current Asset', balance: 0 },
-      { code: '2000', name: 'Accounts Payable', type: 'Liability', category: 'Current Liability', balance: 0 },
-      { code: '4000', name: 'Project Revenue', type: 'Income', category: 'Operating Income', balance: 0 },
-    ],
-  });
+  // Full chart of accounts matching the design — upsert by code so the seed is
+  // safe to re-run; parentId is wired in a second pass once all IDs are known.
+  const coaRows = [
+    // Root accounts
+    { code: '1000', name: 'Assets',              type: 'Assets',      description: 'All asset accounts' },
+    { code: '2000', name: 'Liabilities',         type: 'Liabilities', description: 'All liability accounts' },
+    { code: '3000', name: 'Equity',              type: 'Equity',      description: "Owner's equity" },
+    { code: '4000', name: 'Income',              type: 'Income',      description: 'All income accounts' },
+    { code: '5000', name: 'Expenses',            type: 'Expenses',    description: 'All expense accounts' },
+    // Assets — level 1
+    { code: '1100', name: 'Current Assets',      type: 'Assets',      description: 'Short-term assets',              parentCode: '1000' },
+    { code: '1200', name: 'Fixed Assets',        type: 'Assets',      description: 'Long-term physical assets',       parentCode: '1000' },
+    // Assets — level 2
+    { code: '1110', name: 'Cash & Bank',         type: 'Assets',      description: 'Cash on hand and bank balances',  parentCode: '1100' },
+    { code: '1120', name: 'Accounts Receivable', type: 'Assets',      description: 'Amounts owed by customers',       parentCode: '1100' },
+    { code: '1210', name: 'Plant & Equipment',   type: 'Assets',      description: 'Machinery and equipment',         parentCode: '1200' },
+    // Liabilities — level 1
+    { code: '2100', name: 'Current Liabilities', type: 'Liabilities', description: 'Short-term obligations',          parentCode: '2000' },
+    // Liabilities — level 2
+    { code: '2110', name: 'Accounts Payable',    type: 'Liabilities', description: 'Amounts owed to suppliers',       parentCode: '2100' },
+    { code: '2120', name: 'Accrued Expenses',    type: 'Liabilities', description: 'Expenses incurred but not yet paid', parentCode: '2100' },
+    // Equity — level 1
+    { code: '3100', name: 'Retained Earnings',   type: 'Equity',      description: 'Accumulated profits',             parentCode: '3000' },
+    // Income — level 1
+    { code: '4100', name: 'Contract Revenue',    type: 'Income',      description: 'Revenue from construction contracts', parentCode: '4000' },
+    { code: '4200', name: 'Service Income',      type: 'Income',      description: 'Revenue from services rendered',  parentCode: '4000' },
+    // Expenses — level 1
+    { code: '5100', name: 'Labour Costs',        type: 'Expenses',    description: 'Wages and salaries',              parentCode: '5000' },
+    { code: '5200', name: 'Material Costs',      type: 'Expenses',    description: 'Raw materials and supplies',      parentCode: '5000' },
+    { code: '5300', name: 'Equipment Costs',     type: 'Expenses',    description: 'Equipment hire and maintenance',  parentCode: '5000' },
+    { code: '5400', name: 'Overhead',            type: 'Expenses',    description: 'General overhead costs',          parentCode: '5000' },
+  ];
+
+  // First pass: upsert all rows without parentId so every record exists.
+  for (const { parentCode: _pc, ...row } of coaRows) {
+    await prisma.chartAccount.upsert({
+      where: { code: row.code },
+      create: { ...row, category: row.type },
+      update: { name: row.name, type: row.type, category: row.type },
+    });
+  }
+  // Second pass: wire parentId now that all IDs exist.
+  const allAccounts = await prisma.chartAccount.findMany({ select: { id: true, code: true } });
+  const codeToId = new Map(allAccounts.map((a) => [a.code, a.id]));
+  for (const { code, parentCode } of coaRows) {
+    if (!parentCode) continue;
+    const parentId = codeToId.get(parentCode);
+    if (parentId) {
+      await prisma.chartAccount.update({ where: { code }, data: { parentId } });
+    }
+  }
 
   const report = await prisma.reportDefinition.create({
     data: {

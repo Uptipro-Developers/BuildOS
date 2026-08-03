@@ -100,10 +100,12 @@ export class FinanceExtrasService {
     /** Whitelist ChartAccount columns; clients may send extra UI-only fields. */
     private sanitizeAccount(data: any, isCreate = false) {
         const out: any = {};
-        for (const key of ['code', 'name', 'type', 'category', 'balance', 'isActive']) {
+        for (const key of ['code', 'name', 'type', 'category', 'balance', 'isActive', 'parentId']) {
             if (data?.[key] !== undefined) out[key] = data[key];
         }
         if (isCreate && out.category === undefined) out.category = String(data?.type ?? 'General');
+        // null clears the parent; undefined means caller did not mention it.
+        if (out.parentId === '') out.parentId = null;
         return out;
     }
     deleteAccount(id: string) {
