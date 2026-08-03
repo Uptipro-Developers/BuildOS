@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Plus, Edit, Trash2, FolderCog } from "lucide-react";
 import {
   getProjectTypes,
@@ -64,7 +65,11 @@ function ProjectTypesPanel() {
       ? types.map((t) => (t.id === editing.id ? { ...t, ...form } : t))
       : [...types, { id: String(Date.now()), ...form }];
     setTypes(next);
-    saveProjectTypes(next).catch(() => {});
+    saveProjectTypes(next).catch((err) =>
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the project types.",
+      ),
+    );
     setShowModal(false);
   }
 
@@ -203,7 +208,11 @@ function ProjectTypesPanel() {
                 onClick={() => {
                   const next = types.filter((t) => t.id !== deleteTarget.id);
                   setTypes(next);
-                  saveProjectTypes(next).catch(() => {});
+                  saveProjectTypes(next).catch((err) =>
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the project types.",
+      ),
+    );
                   setDeleteTarget(null);
                 }}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
@@ -250,7 +259,13 @@ function ProjectStatusesPanel() {
       ? statuses.map((s) => (s.id === editing.id ? { ...s, ...form } : s))
       : [...statuses, { id: String(Date.now()), sequence: maxSeq + 1, ...form }];
     setStatuses(next);
-    saveProjectStatuses(next).catch(() => {});
+    saveProjectStatuses(next).catch((err) =>
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not save the project statuses.",
+      ),
+    );
     setShowModal(false);
   }
 
@@ -422,7 +437,13 @@ function ProjectStatusesPanel() {
                 onClick={() => {
                   const next = statuses.filter((s) => s.id !== deleteTarget.id);
                   setStatuses(next);
-                  saveProjectStatuses(next).catch(() => {});
+                  saveProjectStatuses(next).catch((err) =>
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not save the project statuses.",
+      ),
+    );
                   setDeleteTarget(null);
                 }}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl"
