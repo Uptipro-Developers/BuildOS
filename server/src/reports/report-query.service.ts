@@ -530,6 +530,12 @@ const SOURCE_KEY_SEPARATOR = ':';
 interface SourceRelation {
     /** Relation field on the root model, e.g. `project` on Income. */
     field: string;
+    /**
+     * Full chain of relation fields from the root to the target, e.g.
+     * `['purchaseOrder', 'supplier']` to reach Supplier from a PO line. A direct
+     * relation is a one-element path, so `field` stays the first hop.
+     */
+    path: string[];
 }
 
 /** DMMF model whose delegate name (lowercased) matches `model`. */
@@ -553,7 +559,49 @@ export function findToOneRelation(fromModel: string, toModel: string): SourceRel
     const field = from.fields.find(
         (f) => f.kind === 'object' && !f.isList && f.type === to.name,
     );
-    return field ? { field: field.name } : null;
+    return field ? { field: field.name, path: [field.name] } : null;
+}
+
+/** How many foreign keys we will follow before giving up on a join. */
+const MAX_JOIN_DEPTH = 3;
+
+/**
+ * The shortest chain of to-one relations leading from `fromModel` to `toModel`.
+ *
+ * Only direct relations were considered before, so two tables related through a
+ * third — a purchase order line and a supplier, joined via the order — had no
+ * root that reached both and fell back to being stacked as disjoint blocks. This
+ * walks the foreign keys breadth-first so the shortest path wins, and stays
+ * to-one throughout: following a list would multiply the root's rows.
+ */
+export function findToOnePath(fromModel: string, toModel: string): SourceRelation | null {
+    const from = dmmfModelFor(fromModel);
+    const target = dmmfModelFor(toModel);
+    if (!from || !target) return null;
+    if (from.name === target.name) return null;
+
+    const queue: Array<{ model: string; path: string[] }> = [{ model: from.name, path: [] }];
+    const seen = new Set<string>([from.name]);
+
+    while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current.path.length >= MAX_JOIN_DEPTH) continue;
+
+        const model = dmmfModelFor(current.model);
+        if (!model) continue;
+
+        for (const field of model.fields) {
+            if (field.kind !== 'object' || field.isList) continue;
+            const nextPath = [...current.path, field.name];
+            if (field.type === target.name) {
+                return { field: nextPath[0], path: nextPath };
+            }
+            if (seen.has(field.type)) continue;
+            seen.add(field.type);
+            queue.push({ model: field.type, path: nextPath });
+        }
+    }
+    return null;
 }
 
 export function namespacedFieldKey(sourceValue: string, fieldKey: string): string {
@@ -791,7 +839,7 @@ export class ReportQueryService {
             const found = new Map<string, SourceRelation>();
             const reachesAll = sources.every((other) => {
                 if (other.value === candidate.value) return true;
-                const relation = findToOneRelation(candidate.model, other.model);
+                const relation = findToOnePath(candidate.model, other.model);
                 if (!relation) return false;
                 found.set(other.value, relation);
                 return true;
@@ -843,7 +891,22 @@ export class ReportQueryService {
                 }
             }
             if (Object.keys(nested).length === 0) nested.id = true;
-            select[relation.field] = { select: nested };
+
+            // Nest the select one level per hop, merging with anything an
+            // earlier source already requested along a shared prefix.
+            let cursor = select;
+            relation.path.forEach((hop, index) => {
+                const last = index === relation.path.length - 1;
+                const existing = cursor[hop];
+                if (last) {
+                    cursor[hop] = existing?.select
+                        ? { select: { ...existing.select, ...nested } }
+                        : { select: nested };
+                    return;
+                }
+                if (!existing?.select) cursor[hop] = { select: {} };
+                cursor = cursor[hop].select;
+            });
         }
         if (Object.keys(select).length === 0) select.id = true;
 
@@ -913,7 +976,12 @@ export class ReportQueryService {
             }
             for (const [sourceValue, fields] of relatedFields) {
                 const relation = rootRelations.get(sourceValue)!;
-                const nested = record[relation.field] ?? null;
+                // Walk the relation chain; a null anywhere along it leaves the
+                // joined columns blank for this row rather than throwing.
+                const nested = relation.path.reduce<any>(
+                    (node, hop) => (node == null ? null : (node[hop] ?? null)),
+                    record,
+                );
                 for (const field of fields) {
                     row[namespacedFieldKey(sourceValue, field.key)] = nested
                         ? field.derive
