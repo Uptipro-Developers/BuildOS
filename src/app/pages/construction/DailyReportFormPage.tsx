@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from "react-router";
 import { safePercent } from "../../utils/number";
+import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import { useState, useEffect, useMemo } from "react";
 import {
   getCurrencySymbol,
@@ -139,7 +140,7 @@ const units = [
 const ownershipOptions = ["Company-owned", "Hired", "Client-supplied"];
 const maintStatusOptions = ["Usable", "Under Repair", "Unusable"];
 
-const weatherOptions: {
+const WEATHER_ICONS: {
   value: Weather;
   label: string;
   icon: React.ReactNode;
@@ -165,6 +166,24 @@ const weatherOptions: {
     icon: <CloudRain className="w-4 h-4 text-blue-600" />,
   },
 ];
+
+/**
+ * Settings → Weather chooses which conditions are offered and what they are
+ * called; this list only supplies the icons and the fallback when nothing has
+ * been configured. It used to be the sole source, so the Weather section of
+ * Settings had no effect on this form.
+ */
+function weatherChoices(
+  configured: { value: string; label: string; enabled: boolean }[],
+) {
+  const enabled = configured.filter((w) => w.enabled);
+  if (enabled.length === 0) return WEATHER_ICONS;
+  return enabled.map((w) => ({
+    value: w.value as Weather,
+    label: w.label,
+    icon: WEATHER_ICONS.find((o) => o.value === w.value)?.icon ?? null,
+  }));
+}
 
 let rowCounter = 0;
 function nextId(prefix: string) {
@@ -332,6 +351,11 @@ export function DailyReportFormPage() {
   const [step, setStep] = useState(0);
   const [reportDate, setReportDate] = useState(
     existingDraft?.reportDate || todayStr,
+  );
+  const constructionConfig = useConstructionSettings();
+  const weatherOptions = useMemo(
+    () => weatherChoices(constructionConfig.weatherConfig),
+    [constructionConfig.weatherConfig],
   );
   const [weather, setWeather] = useState<Weather>(
     existingDraft?.weather || "Sunny",

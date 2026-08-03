@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
@@ -28,7 +29,6 @@ import {
   hrEmployees as mockHrEmployees,
   stubMaterials as mockStubMaterials,
   stubEquipment as mockStubEquipment,
-  tradeTypes,
 } from "./mockData";
 import { fetchConstructionProjects } from "../../api/projects";
 import { fetchEmployees } from "../../api/employees";
@@ -66,6 +66,9 @@ const contractTypes = [
 ];
 
 export function ResourcesOverviewPage() {
+  // Trade types are configured in Construction Settings; these pickers
+  // read a static list, so configuring them changed nothing here.
+  const { tradeTypes } = useConstructionSettings();
   const navigate = useNavigate();
   const {
     contractors,

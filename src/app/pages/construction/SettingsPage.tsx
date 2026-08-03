@@ -187,6 +187,9 @@ export function SettingsPage() {
         if (s.weatherConfig?.length) setWeatherConfig(s.weatherConfig);
         if (s.projectTypes?.length)
           setProjectTypes(s.projectTypes as typeof defaultProjectTypes);
+        if (s.tradeTypes?.length) setTradeTypes(s.tradeTypes);
+        if (s.reportSettings?.length)
+          setReportSettings(s.reportSettings as ReportSetting[]);
       })
       .catch(() => {});
   }, []);
@@ -242,7 +245,13 @@ export function SettingsPage() {
 
   function handleSave() {
     setIsSaving(true);
-    const payload = { scheduleLevels, weatherConfig, projectTypes };
+    const payload = {
+      scheduleLevels,
+      weatherConfig,
+      projectTypes,
+      tradeTypes,
+      reportSettings,
+    };
     const request = settingsId
       ? updateConstructionSetting(settingsId, payload)
       : createConstructionSetting(payload).then((saved) => {

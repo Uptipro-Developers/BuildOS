@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router";
+import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import { useState, useEffect } from "react";
 import {
   getCurrencySymbol,
@@ -24,7 +25,6 @@ import {
   hrEmployees as mockHrEmployees,
   stubMaterials as mockStubMaterials,
   stubEquipment as mockStubEquipment,
-  tradeTypes,
 } from "./mockData";
 import { fetchEmployees } from "../../api/employees";
 import { listMaterialResources } from "../../api/material-resources";
@@ -64,6 +64,9 @@ type ResourceTab = "human" | "material" | "equipment";
 type HumanSubTab = "employees" | "contractors" | "vendors";
 
 export function ProjectResourcesPage() {
+  // Trade types are configured in Construction Settings; these pickers
+  // read a static list, so configuring them changed nothing here.
+  const { tradeTypes } = useConstructionSettings();
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const project = getProjectById(projectId!);

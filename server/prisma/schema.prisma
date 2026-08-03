@@ -1878,6 +1878,8 @@ model ConstructionSetting {
   scheduleLevels Json     @default("[]")
   weatherConfig  Json     @default("[]")
   projectTypes   Json     @default("[]")
+  tradeTypes     Json     @default("[]")
+  reportSettings Json     @default("[]")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }

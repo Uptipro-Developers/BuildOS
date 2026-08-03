@@ -22,9 +22,7 @@ import {
   Upload,
 } from "lucide-react";
 import {
-  tradeTypes,
   fmtDate,
-  defaultScheduleLevels,
 } from "./mockData";
 import {
   getCurrencySymbol,
@@ -57,6 +55,7 @@ import { fetchEmployees } from "../../api/employees";
 import { fetchSuppliers } from "../../api/suppliers";
 import { getMaterials, createMaterialRequest } from "../../api/materials";
 import { listConstructionSettings } from "../../api/construction-settings";
+import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import { getTasks } from "../../api/tasks";
 import { getClusters } from "../../api/clusters";
 import { getEquipment } from "../../api/equipment";
@@ -93,12 +92,20 @@ const SECTORS: Sector[] = [
   "Other",
 ];
 
-const LEVEL_NAMES: Record<number, string> = {};
-const LEVEL_PREFIX: Record<number, string> = {};
-defaultScheduleLevels.forEach((l) => {
-  LEVEL_NAMES[l.level] = l.name;
-  LEVEL_PREFIX[l.level] = l.prefix;
-});
+/**
+ * Schedule level names and prefixes were built once at module scope from the
+ * built-in list, so Settings → Schedule had no effect here. These are derived
+ * from the configured levels inside the component instead.
+ */
+function levelMaps(levels: { level: number; name: string; prefix: string }[]) {
+  const names: Record<number, string> = {};
+  const prefixes: Record<number, string> = {};
+  levels.forEach((l) => {
+    names[l.level] = l.name;
+    prefixes[l.level] = l.prefix;
+  });
+  return { names, prefixes };
+}
 
 export function ProjectSetupPage() {
   const { id: projectId } = useParams<{ id: string }>();
@@ -340,6 +347,14 @@ export function ProjectSetupPage() {
    * disagreed as soon as anyone configured anything. The constants are now only
    * the fallback for when nothing has been configured yet.
    */
+  const constructionConfig = useConstructionSettings();
+  const { names: LEVEL_NAMES, prefixes: LEVEL_PREFIX } = useMemo(
+    () => levelMaps(constructionConfig.scheduleLevels),
+    [constructionConfig.scheduleLevels],
+  );
+  // Trade types are configured in Settings; this read a static import.
+  const tradeTypeOptions = constructionConfig.tradeTypes;
+
   const [configuredTypes, setConfiguredTypes] = useState<
     { sector: string; categories: string[] }[] | null
   >(null);
@@ -3265,7 +3280,7 @@ export function ProjectSetupPage() {
                     style={{ borderColor: "#E2E8F0", backgroundColor: "white" }}
                   >
                     <option value="">Select trade</option>
-                    {tradeTypes.map((t) => (
+                    {tradeTypeOptions.map((t) => (
                       <option key={t} value={t}>
                         {t}
                       </option>

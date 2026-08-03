@@ -968,6 +968,12 @@ export interface ConstructionSetting {
   scheduleLevels: ScheduleLevelConfig[];
   weatherConfig: WeatherConfig[];
   projectTypes: { sector: string; categories: string[] }[];
+  /**
+   * Both sections were editable in Settings but were absent from the saved
+   * payload and had no column, so every edit was discarded on reload.
+   */
+  tradeTypes?: string[];
+  reportSettings?: { id: string; key: string; label: string; enabled: boolean }[];
 }
 
 // ── Daily Expense ───────────────────────────────────────────
