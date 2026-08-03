@@ -232,19 +232,10 @@ export function ChartOfAccountsPage() {
     { key: "code", label: "Code", render: a => <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{a.code}</span>, sortable: true, filterable: true },
     { key: "name", label: "Account Name", render: a => {
       const depth = getDepth(a.id);
-      // A ledger that has children is a parent (control) account and is marked
-      // as such. Indentation alone did not distinguish a parent from a
-      // top-level leaf, so parent ledgers were not identifiable in the table.
-      const isParent = accounts.some((c) => c.parentId === a.id);
       return (
         <div className="flex items-center" style={{ paddingLeft: `${depth * 24}px` }}>
           {depth > 0 && <ChevronRight className="w-3.5 h-3.5 text-gray-400 mr-1 shrink-0" />}
-          <span className={`text-sm ${isParent ? "font-semibold" : ""} text-gray-900`}>{a.name}</span>
-          {isParent && (
-            <span className="ml-2 shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Parent
-            </span>
-          )}
+          <span className={`text-sm ${depth === 0 ? "font-semibold" : ""} text-gray-900`}>{a.name}</span>
         </div>
       );
     }, sortable: true, filterable: true, minWidth: 200 },

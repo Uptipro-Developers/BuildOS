@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { WebhookService } from '../integrations/webhook.service';
 
 @Injectable()
 export class PurchaseOrdersService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private webhookService: WebhookService,
+    ) { }
 
     findAll(status?: string, supplierId?: string) {
         return this.prisma.purchaseOrder.findMany({
@@ -31,6 +35,9 @@ export class PurchaseOrdersService {
                 ...(items ? { items: { create: items } } : {}),
             },
             include: { supplier: true, items: true },
+        }).then((po) => {
+            this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => {});
+            return po;
         });
     }
 
