@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import type {
   Task,
+  Vendor,
 } from "./types";
 import { calcFloat, generateWBS } from "./types";
 import {
@@ -39,9 +40,14 @@ import {
   baselines as mockBaselines,
   calendars as mockCalendars,
   resourceAllocations,
-  vendors,
 } from "./mockData";
-import { listConstructionTasks } from "../../api/construction-tasks";
+import {
+  listConstructionTasks,
+  createConstructionTask,
+  updateConstructionTask,
+} from "../../api/construction-tasks";
+import { listVendors } from "../../api/vendors";
+import { toast } from "sonner";
 import { listConstructionBaselines } from "../../api/construction-baselines";
 import { listConstructionCalendars } from "../../api/construction-calendars";
 
@@ -122,6 +128,15 @@ export function SchedulePage() {
   const [tasks, setTasks] = useState<Task[]>(() => calcFloat(rawTasks));
   const [baselines, setBaselines] = useState(mockBaselines);
   const [calendars, setCalendars] = useState(mockCalendars);
+  // The Resource view read the mock vendor array, which is empty, so it was
+  // blank for every project regardless of who was assigned.
+  const [projectVendors, setProjectVendors] = useState<Vendor[]>([]);
+
+  useEffect(() => {
+    listVendors(projectId)
+      .then(setProjectVendors)
+      .catch(() => setProjectVendors([]));
+  }, [projectId]);
 
   useEffect(() => {
     listConstructionTasks(projectId)
@@ -207,15 +222,97 @@ export function SchedulePage() {
     });
   }
 
+  /**
+   * Drops fields the API does not accept. `expanded` is view state, and the
+   * timestamps are server-owned; Prisma rejects the write if they are sent.
+   */
+  function toTaskPayload(task: Partial<Task>): Partial<Task> {
+    const {
+      expanded: _expanded,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      ...rest
+    } = task as Partial<Task> & {
+      createdAt?: unknown;
+      updatedAt?: unknown;
+    };
+    return rest;
+  }
+
+  /**
+   * Persists a task change. Every edit on this page — add, edit, inline edit,
+   * indent/outdent, drag-reorder — only ever touched local state, so the whole
+   * schedule reset on reload while the CRUD endpoints went unused. On failure the
+   * server copy is reloaded so the grid never keeps a change that was not saved.
+   */
+  function persistTask(id: string, patch: Partial<Task>) {
+    updateConstructionTask(id, toTaskPayload(patch)).catch((err) => {
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the task.",
+      );
+      listConstructionTasks(projectId)
+        .then((data) => setTasks(calcFloat(data as Task[])))
+        .catch(() => undefined);
+    });
+  }
+
+  /** Fields a task cannot be saved without, plus the start/end ordering. */
+  function taskProblems(task: Partial<Task>): string[] {
+    const missing: string[] = [];
+    if (!task.name?.trim()) missing.push("a name");
+    if (!task.plannedStart) missing.push("a planned start");
+    if (!task.plannedEnd) missing.push("a planned end");
+    if (
+      task.plannedStart &&
+      task.plannedEnd &&
+      task.plannedEnd < task.plannedStart
+    ) {
+      missing.push("an end date on or after the start");
+    }
+    return missing;
+  }
+
   function handleSaveTask(updated: Task) {
+    const problems = taskProblems(updated);
+    if (problems.length > 0) {
+      toast.error(`This task needs ${problems.join(", ")}.`);
+      return;
+    }
     const next = tasks.map((t) => (t.id === updated.id ? updated : t));
     setTasks(calcFloat(next));
     setSelectedTask(null);
+    persistTask(updated.id, updated);
+    toast.success("Task updated.");
   }
 
   function handleAddTask(newTask: Task) {
+    const problems = taskProblems(newTask);
+    if (problems.length > 0) {
+      toast.error(`The new task needs ${problems.join(", ")}.`);
+      return;
+    }
     const next = [...tasks, newTask];
     setTasks(calcFloat(next));
+    createConstructionTask({
+      ...toTaskPayload(newTask),
+      id: undefined,
+      projectId,
+    })
+      .then((created) => {
+        // Adopt the server-issued id so later edits address the real record.
+        setTasks((prev) =>
+          calcFloat(
+            prev.map((t) => (t.id === newTask.id ? { ...t, ...created } : t)),
+          ),
+        );
+        toast.success("Task added.");
+      })
+      .catch((err) => {
+        setTasks((prev) => calcFloat(prev.filter((t) => t.id !== newTask.id)));
+        toast.error(
+          err instanceof Error ? err.message : "Could not add the task.",
+        );
+      });
     setExpanded((prev) => {
       const n = new Set(prev);
       n.add(newTask.id);
@@ -292,16 +389,14 @@ export function SchedulePage() {
           t.id !== selectedTask.id,
       );
     if (!prevSibling) return;
+    const level = Math.min(selectedTask.level + 1, 4) as 1 | 2 | 3 | 4;
     const next = tasks.map((t) =>
       t.id === selectedTask.id
-        ? {
-            ...t,
-            parentTaskId: prevSibling.id,
-            level: Math.min(t.level + 1, 4) as 1 | 2 | 3 | 4,
-          }
+        ? { ...t, parentTaskId: prevSibling.id, level }
         : t,
     );
     setTasks(calcFloat(next));
+    persistTask(selectedTask.id, { parentTaskId: prevSibling.id, level });
   }
 
   function handleOutdent() {
@@ -317,16 +412,14 @@ export function SchedulePage() {
         newLevel = parent.level as 1 | 2 | 3 | 4;
       }
     }
+    const level = Math.max(newLevel, 1) as 1 | 2 | 3 | 4;
     const next = tasks.map((t) =>
       t.id === selectedTask.id
-        ? {
-            ...t,
-            parentTaskId: newParentId,
-            level: Math.max(newLevel, 1) as 1 | 2 | 3 | 4,
-          }
+        ? { ...t, parentTaskId: newParentId, level }
         : t,
     );
     setTasks(calcFloat(next));
+    persistTask(selectedTask.id, { parentTaskId: newParentId, level });
   }
 
   function handleDrop(draggedId: string, targetId: string) {
@@ -349,6 +442,10 @@ export function SchedulePage() {
       ...reordered.slice(insertAt),
     ];
     setTasks(calcFloat(renumberWbs(result)));
+    persistTask(draggedId, {
+      parentTaskId: target.parentTaskId,
+      level: target.level,
+    });
     setDropTarget(null);
     setDropPosition(null);
   }
@@ -385,13 +482,21 @@ export function SchedulePage() {
 
   function saveInlineEdit() {
     if (!editingTaskId) return;
+    const current = tasks.find((t) => t.id === editingTaskId);
+    const problems = taskProblems({ ...current, ...editingValues });
+    if (problems.length > 0) {
+      toast.error(`This task needs ${problems.join(", ")}.`);
+      return;
+    }
     setTasks((prev) =>
       prev.map((t) =>
         t.id === editingTaskId ? { ...t, ...editingValues } : t,
       ),
     );
+    persistTask(editingTaskId, editingValues);
     setEditingTaskId(null);
     setEditingValues({});
+    toast.success("Task updated.");
   }
 
   function cancelInlineEdit() {
@@ -932,11 +1037,23 @@ export function SchedulePage() {
   }
 
   function renderResourceView() {
-    const projectVendors = vendors.filter((v) => v.projectId === projectId);
     const projResources = resourceAllocations.filter((r) =>
       projectVendors.some((v) => v.id === r.vendorId),
     );
     const weeks = [...new Set(projResources.map((r) => r.weekStart))].sort();
+
+    if (projectVendors.length === 0) {
+      return (
+        <div className="bg-white rounded-lg border border-[#E2E8F0] p-10 text-center">
+          <p className="text-sm font-medium text-gray-900">
+            No resources assigned to this project
+          </p>
+          <p className="mt-1 text-sm text-gray-500">
+            Assign vendors in Project Setup to see their weekly loading here.
+          </p>
+        </div>
+      );
+    }
 
     return (
       <div className="bg-white rounded-lg border border-[#E2E8F0] overflow-hidden">

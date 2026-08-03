@@ -17,7 +17,9 @@ import {
 import { useState, useEffect } from "react";
 import { getReportsByProject, getProjectById, fmtDate } from "./mockData";
 import type { DailyReport } from "./types";
-import { listDailyReports } from "../../api/daily-reports";
+import { listDailyReports, updateDailyReport } from "../../api/daily-reports";
+import { getAuthUserName } from "../../utils/useAuthUser";
+import { toast } from "sonner";
 
 const weatherIcon = (w: string) => {
   switch (w) {
@@ -69,37 +71,62 @@ export function DailyReportsPage() {
     };
   }, [projectId]);
 
-  const approveReport = (reportId: string) => {
+  /**
+   * Approve / reject both only updated local state, so a review decision was
+   * gone on the next reload and never reached anyone else. They persist now, and
+   * the row is rolled back if the write fails rather than showing a decision
+   * that was not recorded.
+   */
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const applyReview = async (
+    reportId: string,
+    status: "submitted" | "draft",
+    reviewNotes?: string,
+  ) => {
+    const previous = localReports;
+    const review = {
+      status,
+      reviewedBy: getAuthUserName() || "Unknown reviewer",
+      reviewedAt: new Date().toISOString(),
+      reviewNotes,
+    };
     setLocalReports((prev) =>
-      prev.map((r) =>
-        r.id === reportId
-          ? {
-              ...r,
-              status: "submitted" as const,
-              reviewedBy: "Project Manager",
-              reviewedAt: new Date().toISOString(),
-              reviewNotes: undefined,
-            }
-          : r,
-      ),
+      prev.map((r) => (r.id === reportId ? { ...r, ...review } : r)),
     );
+    try {
+      await updateDailyReport(reportId, review);
+      toast.success(
+        status === "submitted" ? "Report approved." : "Report sent back.",
+      );
+    } catch (err) {
+      setLocalReports(previous);
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the review.",
+      );
+    }
   };
+
+  const approveReport = (reportId: string) => {
+    void applyReview(reportId, "submitted");
+  };
+
+  // Rejecting opens the modal below; a reason is required before it can be sent.
   const rejectReport = (reportId: string) => {
-    const reason = prompt("Reason for rejection:");
-    if (!reason) return;
-    setLocalReports((prev) =>
-      prev.map((r) =>
-        r.id === reportId
-          ? {
-              ...r,
-              status: "draft" as const,
-              reviewedBy: "Project Manager",
-              reviewedAt: new Date().toISOString(),
-              reviewNotes: reason,
-            }
-          : r,
-      ),
-    );
+    setRejecting(reportId);
+    setRejectReason("");
+  };
+
+  const confirmReject = () => {
+    if (!rejecting) return;
+    if (!rejectReason.trim()) {
+      toast.error("Enter a reason for sending this report back.");
+      return;
+    }
+    void applyReview(rejecting, "draft", rejectReason.trim());
+    setRejecting(null);
+    setRejectReason("");
   };
 
   const filtered = reports.filter((r) => {
@@ -368,6 +395,41 @@ export function DailyReportsPage() {
           </tbody>
         </table>
       </div>
+
+      {rejecting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Send report back
+            </h3>
+            <p className="mt-1 text-sm text-gray-500">
+              The reason is shown to whoever submitted the report.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={4}
+              autoFocus
+              placeholder="Reason for rejection"
+              className="mt-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setRejecting(null)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmReject}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Send back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

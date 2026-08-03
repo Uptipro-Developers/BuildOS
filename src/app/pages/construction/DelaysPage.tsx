@@ -6,9 +6,10 @@ import {
   Search,
   Eye,
 } from "lucide-react";
-import { getProjectById, delays, fmtDate } from "./mockData";
+import { getProjectById, fmtDate } from "./mockData";
 import type { Delay } from "./types";
-import { listDelays } from "../../api/delays";
+import { listDelays, updateDelay as persistDelay } from "../../api/delays";
+import { toast } from "sonner";
 
 function calcDaysDelayed(plannedEndDate: string): number {
   return Math.max(
@@ -63,11 +64,33 @@ export function DelaysPage() {
     return delayStates[d.id] ?? d;
   }
 
+  /**
+   * Applies an edit optimistically and persists it.
+   *
+   * This only ever wrote to local state, so every change on this tab was lost on
+   * reload — the API's updateDelay was never called. It also resolved the base
+   * record from the mock `delays` array with a non-null assertion; that array is
+   * empty now, so the lookup returned undefined and the spread produced a
+   * malformed record. The base comes from the loaded list instead.
+   */
   function updateDelay(id: string, updates: Partial<Delay>) {
-    setDelayStates((s) => ({
-      ...s,
-      [id]: { ...getD(delays.find((d) => d.id === id)!), ...updates },
-    }));
+    const base = projectDelays.find((d) => d.id === id);
+    if (!base) return;
+    const previous = delayStates[id];
+    setDelayStates((s) => ({ ...s, [id]: { ...getD(base), ...updates } }));
+
+    persistDelay(id, updates).catch((err) => {
+      // Put the previous value back rather than showing an edit that was not saved.
+      setDelayStates((s) => {
+        const next = { ...s };
+        if (previous) next[id] = previous;
+        else delete next[id];
+        return next;
+      });
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the delay update.",
+      );
+    });
   }
 
   function startEdit(delayId: string, field: string, currentValue: string) {
@@ -77,9 +100,16 @@ export function DelaysPage() {
 
   function saveEdit() {
     if (!editingField) return;
-    updateDelay(editingField.id, { [editingField.field]: editValue });
+    // A delay's root cause and recovery plan are the record's whole point;
+    // saving them blank silently was the same as not editing at all.
+    if (!editValue.trim()) {
+      toast.error("Enter a value before saving.");
+      return;
+    }
+    updateDelay(editingField.id, { [editingField.field]: editValue.trim() });
     setEditingField(null);
     setEditValue("");
+    toast.success("Delay updated.");
   }
 
   function cancelEdit() {

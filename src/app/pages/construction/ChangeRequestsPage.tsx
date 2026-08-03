@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import {
   getProjectById,
-  changeRequests,
   fmtDate,
   fmtCurrency,
 } from "./mockData";
@@ -22,6 +21,7 @@ import { getCurrencySymbol } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   listChangeRequests,
+  updateChangeRequest,
   createChangeRequest,
 } from "../../api/change-requests";
 import { useNumbering } from "../../stores/numberingStore";
@@ -102,15 +102,35 @@ export function ChangeRequestsPage() {
     return crStates[cr.id] ?? cr;
   }
 
-  function updateCR(id: string, updates: Partial<ChangeRequest>) {
-    setCrStates((s) => ({
-      ...s,
-      [id]: { ...getCR(changeRequests.find((c) => c.id === id)!), ...updates },
-    }));
+  /**
+   * Applies a change-request edit optimistically and persists it. This wrote
+   * only to local state, so approvals and status changes never left the browser,
+   * and it resolved the base record from the mock array with a non-null
+   * assertion — that array is empty now, so the spread produced a broken record.
+   */
+  function updateCR(crId: string, updates: Partial<ChangeRequest>) {
+    const base = projectCRs.find((c) => c.id === crId);
+    if (!base) return;
+    const previous = crStates[crId];
+    setCrStates((s) => ({ ...s, [crId]: { ...getCR(base), ...updates } }));
+
+    updateChangeRequest(crId, updates).catch((err) => {
+      setCrStates((s) => {
+        const next = { ...s };
+        if (previous) next[crId] = previous;
+        else delete next[crId];
+        return next;
+      });
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the change request.",
+      );
+    });
   }
 
+  // Numbered off the loaded list; reading the emptied mock array made every new
+  // change request come out as CR-0001.
   function nextCrNumber(): string {
-    const nums = changeRequests
+    const nums = projectCRs
       .map((cr) => parseInt(cr.crNumber.replace("CR-", ""), 10))
       .filter((n) => !isNaN(n));
     const max = nums.length ? Math.max(...nums) : 0;

@@ -59,6 +59,7 @@ import { getMaterials } from "../../api/materials";
 import { getTasks } from "../../api/tasks";
 import { getClusters } from "../../api/clusters";
 import { getEquipment } from "../../api/equipment";
+import { toast } from "sonner";
 import {
   getProjectSetup,
   saveProjectSetup,
@@ -536,14 +537,63 @@ export function ProjectSetupPage() {
     auditLog: setupAuditLog,
   });
 
-  const saveSetup = async () => {
-    if (!projectId) return;
+  /**
+   * Persists the wizard. A failure here used to be swallowed into console.error,
+   * so a save that never reached the server looked identical to one that did.
+   */
+  const saveSetup = async (options?: { notify?: boolean }) => {
+    if (!projectId) return false;
     try {
       await saveProjectSetup(projectId, buildSetupPayload());
+      if (options?.notify) toast.success("Project setup saved.");
+      return true;
     } catch (err) {
-      console.error("Failed to save project setup", err);
+      toast.error(
+        err instanceof Error ? err.message : "Could not save the project setup.",
+      );
+      return false;
     }
   };
+
+  /**
+   * Required fields per step. The wizard marked every step complete and advanced
+   * regardless of what was filled in, so a project could be set up entirely
+   * blank and the saved payload carried nothing usable downstream.
+   */
+  function validateStep(step: number): string[] {
+    const missing: string[] = [];
+    switch (STEPS[step]?.id) {
+      case "basic": {
+        if (!basicInfo.name?.trim()) missing.push("project name");
+        if (!basicInfo.client?.trim()) missing.push("client");
+        if (!basicInfo.projectManager?.trim()) missing.push("project manager");
+        if (!basicInfo.plannedStartDate) missing.push("planned start date");
+        if (!basicInfo.plannedEndDate) missing.push("planned end date");
+        if (
+          basicInfo.plannedStartDate &&
+          basicInfo.plannedEndDate &&
+          basicInfo.plannedEndDate < basicInfo.plannedStartDate
+        ) {
+          missing.push("an end date on or after the start date");
+        }
+        break;
+      }
+      case "project-type": {
+        if (!projectSector) missing.push("sector");
+        if (!projectCategory) missing.push("category");
+        break;
+      }
+      case "human-resources": {
+        if (projectStaff.length === 0 && projectContractors.length === 0) {
+          missing.push("at least one staff member or contractor");
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    return missing;
+  }
 
   useEffect(() => {
     if (!projectId) return;
@@ -1166,9 +1216,15 @@ export function ProjectSetupPage() {
 
   // Navigation
   const goNext = () => {
+    const missing = validateStep(currentStep);
+    if (missing.length > 0) {
+      toast.error(`${STEPS[currentStep].label} needs ${missing.join(", ")}.`);
+      return;
+    }
     setCompletedSteps((prev) => new Set([...prev, currentStep]));
+    const isLast = currentStep === STEPS.length - 1;
     setCurrentStep((prev) => Math.min(prev + 1, STEPS.length - 1));
-    void saveSetup();
+    void saveSetup({ notify: isLast });
   };
 
   const goBack = () => {

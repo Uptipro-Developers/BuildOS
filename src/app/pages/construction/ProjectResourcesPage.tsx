@@ -13,7 +13,6 @@ import {
   X,
   Eye,
   Download,
-  Edit,
   ExternalLink,
   Building2,
   UserCheck,
@@ -723,12 +722,6 @@ export function ProjectResourcesPage() {
                               title="View details"
                             >
                               <Eye className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-                              title="Edit"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>

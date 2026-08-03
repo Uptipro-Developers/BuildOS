@@ -114,6 +114,33 @@ type SectionId =
   | "report-settings"
   | "project-roles";
 
+/**
+ * Settings is a tabbed module in the prototype. This page rendered every section
+ * as a collapsible card on one long scrolling column instead, which is why it
+ * did not match: the navigation model was different, not just the styling.
+ *
+ * Resources carries roles, HR classification and trade types together, as the
+ * prototype's ResourcesPanel does.
+ */
+const TABS = [
+  "projects",
+  "schedule",
+  "weather",
+  "resources",
+  "reports",
+  "numbering",
+] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_LABELS: Record<Tab, string> = {
+  projects: "Project Types",
+  schedule: "Schedule",
+  weather: "Weather",
+  resources: "Resources",
+  reports: "Reports",
+  numbering: "Numbering",
+};
+
 export function SettingsPage() {
   const { roles, addRole, updateRole, deleteRole } = useRoles();
   const [editingRole, setEditingRole] = useState<string | null>(null);
@@ -134,6 +161,7 @@ export function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<SectionId>>(new Set());
+  const [tab, setTab] = useState<Tab>("projects");
 
   const [scheduleLevels, setScheduleLevels] = useState<ScheduleLevelConfig[]>(
     defaultScheduleLevels,
@@ -438,7 +466,20 @@ export function SettingsPage() {
         </button>
       </div>
 
+      <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap ${tab === t ? "border-orange-600 text-orange-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+          >
+            {TAB_LABELS[t]}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 gap-5">
+        {tab === "projects" && (
         <Section
           id="project-types"
           icon={<Tags className="w-4 h-4 text-gray-400" />}
@@ -555,7 +596,9 @@ export function SettingsPage() {
             </button>
           </div>
         </Section>
+        )}
 
+        {tab === "schedule" && (
         <Section
           id="schedule-levels"
           icon={<Layers className="w-4 h-4 text-gray-400" />}
@@ -637,7 +680,9 @@ export function SettingsPage() {
             <Plus className="w-3.5 h-3.5" /> Add Level
           </button>
         </Section>
+        )}
 
+        {tab === "weather" && (
         <Section
           id="weather"
           icon={<Sun className="w-4 h-4 text-gray-400" />}
@@ -687,7 +732,9 @@ export function SettingsPage() {
             </button>
           </div>
         </Section>
+        )}
 
+        {tab === "resources" && (
         <Section
           id="hr-classification"
           icon={<Users className="w-4 h-4 text-indigo-600" />}
@@ -762,7 +809,9 @@ export function SettingsPage() {
             </div>
           </div>
         </Section>
+        )}
 
+        {tab === "resources" && (
         <Section
           id="project-roles"
           icon={<Shield className="w-4 h-4 text-orange-500" />}
@@ -927,7 +976,9 @@ export function SettingsPage() {
             </div>
           </div>
         </Section>
+        )}
 
+        {tab === "resources" && (
         <Section
           id="trade-types"
           icon={<Settings className="w-4 h-4 text-gray-400" />}
@@ -967,7 +1018,9 @@ export function SettingsPage() {
             </button>
           </div>
         </Section>
+        )}
 
+        {tab === "reports" && (
         <Section
           id="report-settings"
           icon={<Settings className="w-4 h-4 text-gray-400" />}
@@ -1001,6 +1054,7 @@ export function SettingsPage() {
             ))}
           </div>
         </Section>
+        )}
 
         {/* Module numbering.
 
@@ -1011,7 +1065,9 @@ export function SettingsPage() {
             — so the list rendered empty and nothing could be configured. The shared
             panel selects by the `app` a sequence belongs to, and persists to the
             server. */}
-        <NumberingConfigPanel app="construction" accent="orange" />
+        {tab === "numbering" && (
+          <NumberingConfigPanel app="construction" accent="orange" />
+        )}
 
         <div className="flex justify-end">
           <button
