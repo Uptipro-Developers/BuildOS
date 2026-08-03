@@ -26,6 +26,13 @@ type WebhookConfig = {
   url: string;
   events: string[];
   status?: string;
+  /**
+   * HMAC signing secret. The receiving service needs this to verify the
+   * X-BuildOS-Signature header, and the API has always returned it, but nothing
+   * ever displayed it — so there was no way to obtain it short of reading the
+   * database.
+   */
+  secret?: string;
 };
 
 export function IntegrationsPage() {
@@ -34,6 +41,10 @@ export function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
 
   const [newKey, setNewKey] = useState<NewApiKey | null>(null);
+  const [newSecret, setNewSecret] = useState<{
+    name: string;
+    secret: string;
+  } | null>(null);
 
   // Modal state
   const [keyModalOpen, setKeyModalOpen] = useState(false);
@@ -136,6 +147,7 @@ export function IntegrationsPage() {
       .then((created) => {
         setWebhooks((prev) => [created, ...prev]);
         setWebhookModalOpen(false);
+        if (created.secret) setNewSecret({ name, secret: created.secret });
         toast.success("Webhook added");
       })
       .catch((err) => {
@@ -319,6 +331,20 @@ export function IntegrationsPage() {
                     {webhook.url}
                   </p>
 
+                  {webhook.secret && (
+                    <button
+                      onClick={() =>
+                        setNewSecret({
+                          name: webhook.name,
+                          secret: webhook.secret as string,
+                        })
+                      }
+                      className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 mb-2"
+                    >
+                      <Key className="w-3.5 h-3.5" /> Show signing secret
+                    </button>
+                  )}
+
                   <div className="flex flex-wrap gap-2">
                     {webhook.events.map((event, idx) => (
                       <span
@@ -374,6 +400,55 @@ export function IntegrationsPage() {
           ))}
         </div>
       </div>
+
+      {/* Signing secret for a newly created webhook */}
+      {newSecret && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Webhook signing secret
+              </h3>
+              <button
+                onClick={() => setNewSecret(null)}
+                className="p-1 text-gray-500 hover:text-gray-900"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600">
+              The service receiving{" "}
+              <span className="font-medium">{newSecret.name}</span> needs this to
+              verify the <code>X-BuildOS-Signature</code> header. Set it as that
+              service's webhook secret — for SabiQuot,{" "}
+              <code>BUILDOS_WEBHOOK_SECRET</code>.
+            </p>
+
+            <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 p-3 rounded-md">
+              <code className="flex-1 text-sm font-mono text-gray-900 break-all">
+                {newSecret.secret}
+              </code>
+              <button
+                onClick={() => copyToClipboard(newSecret.secret)}
+                className="p-1 text-gray-600 hover:text-gray-900 transition-colors shrink-0"
+                aria-label="Copy signing secret"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setNewSecret(null)}
+                className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-800"
+              >
+                I've copied it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Newly created key — the only time the plaintext is available */}
       {newKey && (
