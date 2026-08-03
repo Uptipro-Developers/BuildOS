@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { safePercent } from "../../utils/number";
 import { toast } from "sonner";
 import { getMaterials, Material as ApiMaterial } from "../../api/materials";
 import {
@@ -329,7 +330,7 @@ export function StockLevelsPage() {
               };
               const pct =
                 item.max > 0
-                  ? Math.min((item.current / item.max) * 100, 100)
+                  ? Math.min(safePercent(item.current, item.max), 100)
                   : 0;
               const barColor =
                 status === "out_of_stock"

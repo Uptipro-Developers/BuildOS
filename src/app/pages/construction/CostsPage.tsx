@@ -508,7 +508,7 @@ export function CostsPage() {
                               >
                                 {stVar >= 0 ? "+" : ""}
                                 {(totalBudget > 0
-                                  ? (stVar / totalBudget) * 100
+                                  ? safePercent(stVar, totalBudget)
                                   : 0
                                 ).toFixed(1)}
                                 %
@@ -568,7 +568,7 @@ export function CostsPage() {
                 <div
                   className="bg-blue-500 h-3 rounded-full"
                   style={{
-                    width: `${Math.min((totalSpent / totalBudget) * 100, 100)}%`,
+                    width: `${Math.min(safePercent(totalSpent, totalBudget), 100)}%`,
                   }}
                 />
               </div>
@@ -594,7 +594,7 @@ export function CostsPage() {
                 <div
                   className="bg-green-500 h-3 rounded-full"
                   style={{
-                    width: `${Math.max(0, (totalVariance / totalBudget) * 100)}%`,
+                    width: `${Math.max(0, safePercent(totalVariance, totalBudget))}%`,
                   }}
                 />
               </div>

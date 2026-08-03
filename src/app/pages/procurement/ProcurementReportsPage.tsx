@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { DeployedReports } from "../../components/DeployedReports";
 import { toast } from "sonner";
 import { csvAmountHeader, getCurrencySymbol } from "../../utils/generalSettings";
@@ -28,20 +28,38 @@ export function ProcurementReportsPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
 
+  // Run Now had no handler. These reports are computed live from the four
+  // datasets below, so running one means re-reading them.
+  const [runningId, setRunningId] = useState<string | null>(null);
+
+  const loadData = useCallback(
+    () =>
+      Promise.all([
+        getMaterials().then(setMaterials),
+        fetchPurchaseOrders().then(setPurchaseOrders),
+        getMaterialRequests().then(setRequests),
+        fetchSuppliers().then(setSuppliers),
+      ]),
+    [],
+  );
+
   useEffect(() => {
-    getMaterials()
-      .then(setMaterials)
-      .catch(() => {});
-    fetchPurchaseOrders()
-      .then(setPurchaseOrders)
-      .catch(() => {});
-    getMaterialRequests()
-      .then(setRequests)
-      .catch(() => {});
-    fetchSuppliers()
-      .then(setSuppliers)
-      .catch(() => {});
-  }, []);
+    loadData().catch(() => {});
+  }, [loadData]);
+
+  async function runReport(reportId: string, name: string) {
+    setRunningId(reportId);
+    try {
+      await loadData();
+      toast.success(`${name} refreshed.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : `Could not run ${name}.`,
+      );
+    } finally {
+      setRunningId(null);
+    }
+  }
 
   const stockValue = materials.reduce(
     (sum, m) => sum + (m.availableQty ?? m.totalQty ?? 0) * (m.unitCost ?? 0),
@@ -406,8 +424,15 @@ export function ProcurementReportsPage() {
                 Last run: {report.lastRun}
               </p>
               <div className="flex gap-2">
-                <button className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-300 bg-white rounded-md hover:bg-gray-50 font-medium">
-                  <RefreshCw className="w-3 h-3" /> Run Now
+                <button
+                  onClick={() => runReport(report.id, report.title)}
+                  disabled={runningId === report.id}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 border border-gray-300 bg-white rounded-md hover:bg-gray-50 font-medium disabled:opacity-60"
+                >
+                  <RefreshCw
+                    className={`w-3 h-3 ${runningId === report.id ? "animate-spin" : ""}`}
+                  />{" "}
+                  {runningId === report.id ? "Running…" : "Run Now"}
                 </button>
                 <button
                   onClick={() => exportReport(report.id)}

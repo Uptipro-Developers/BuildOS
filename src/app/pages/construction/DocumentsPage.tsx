@@ -67,6 +67,8 @@ export function DocumentsPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
+  const [renamingFileName, setRenamingFileName] = useState("");
   const [editingFolderName, setEditingFolderName] = useState("");
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(
     null,
@@ -242,13 +244,28 @@ export function DocumentsPage() {
     input.click();
   }
 
+  // Used a browser prompt(); renames through an in-app dialog now, matching
+  // how folders are renamed on this page.
   function handleRenameFile(fileId: string) {
-    const newName = prompt("Enter new file name:");
-    if (!newName?.trim()) return;
-    setLocalFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, name: newName.trim() } : f)),
-    );
+    const current = localFiles.find((f) => f.id === fileId);
+    setRenamingFileId(fileId);
+    setRenamingFileName(current?.name ?? "");
     setOpenMenu(null);
+  }
+
+  function confirmRenameFile() {
+    if (!renamingFileId) return;
+    const name = renamingFileName.trim();
+    if (!name) {
+      showToast("Enter a file name.");
+      return;
+    }
+    setLocalFiles((prev) =>
+      prev.map((f) => (f.id === renamingFileId ? { ...f, name } : f)),
+    );
+    setRenamingFileId(null);
+    setRenamingFileName("");
+    showToast("File renamed");
   }
 
   function renderTreeNode(
@@ -720,6 +737,38 @@ export function DocumentsPage() {
 
       {openMenu && (
         <div className="fixed inset-0 z-0" onClick={() => setOpenMenu(null)} />
+      )}
+
+      {renamingFileId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">Rename file</h3>
+            <input
+              value={renamingFileName}
+              onChange={(e) => setRenamingFileName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confirmRenameFile();
+                if (e.key === "Escape") setRenamingFileId(null);
+              }}
+              autoFocus
+              className="mt-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setRenamingFileId(null)}
+                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRenameFile}
+                className="rounded-md bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700"
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { safePercent } from "../../utils/number";
 import { useState, useMemo, useEffect } from "react";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
@@ -307,7 +308,7 @@ export function DisbursementsPage() {
                       <div
                         className="h-full rounded-full"
                         style={{
-                          width: `${(amt / maxAmt) * 100}%`,
+                          width: `${safePercent(amt, maxAmt)}%`,
                           backgroundColor: "#E8973A",
                         }}
                       />

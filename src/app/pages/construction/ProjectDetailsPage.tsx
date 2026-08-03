@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { safePercent } from "../../utils/number";
 import { useParams, useNavigate } from "react-router";
 import {
   ArrowLeft,
@@ -204,7 +205,7 @@ const catLogColor: Record<string, string> = {
 // ─── Tab Panels ───────────────────────────────────────────────────────────────
 
 function OverviewTab({ p }: { p: ProjectDetail }) {
-  const budgetPct = Math.round((p.spent / p.budget) * 100);
+  const budgetPct = safePercent(p.spent, p.budget);
   return (
     <div className="space-y-5">
       {/* Top summary */}
@@ -704,7 +705,7 @@ function MaterialsTab({ materials }: { materials: Material[] }) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {materials.map((m) => {
-              const pct = Math.round((m.used / m.required) * 100);
+              const pct = safePercent(m.used, m.required);
               return (
                 <tr key={m.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">

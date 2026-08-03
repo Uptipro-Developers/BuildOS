@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safePercent } from "../../utils/number";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
 import {
@@ -344,19 +345,19 @@ export function HRDashboardPage() {
           <div
             className="bg-green-400 transition-all"
             style={{
-              width: `${(presentCount / attendanceTotal) * 100}%`,
+              width: `${safePercent(presentCount, attendanceTotal)}%`,
             }}
             title="Present"
           />
           <div
             className="bg-amber-400 transition-all"
-            style={{ width: `${(lateCount / attendanceTotal) * 100}%` }}
+            style={{ width: `${safePercent(lateCount, attendanceTotal)}%` }}
             title="Late"
           />
           <div
             className="bg-red-300 transition-all"
             style={{
-              width: `${(absentCount / attendanceTotal) * 100}%`,
+              width: `${safePercent(absentCount, attendanceTotal)}%`,
             }}
             title="Absent"
           />
@@ -444,7 +445,7 @@ export function HRDashboardPage() {
                 <div className="w-full bg-gray-100 rounded-full h-2">
                   <div
                     className={`${d.color} h-2 rounded-full`}
-                    style={{ width: `${(d.headcount / maxHead) * 100}%` }}
+                    style={{ width: `${safePercent(d.headcount, maxHead)}%` }}
                   />
                 </div>
               </div>

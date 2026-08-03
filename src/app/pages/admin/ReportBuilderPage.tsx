@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { safePercent } from "../../utils/number";
 import { toast } from "sonner";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
@@ -372,7 +373,7 @@ function BarChartViz({
             <div className="flex-1 bg-gray-100 rounded-full h-7 relative overflow-hidden">
               <div
                 className="h-full bg-indigo-500 rounded-full transition-all"
-                style={{ width: `${(val / max) * 100}%` }}
+                style={{ width: `${safePercent(val, max)}%` }}
               />
               <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-700">
                 {formatNumberByGeneralSettings(val)}

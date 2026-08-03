@@ -145,7 +145,7 @@ function generatePreview(
             label: "Progress %",
             values: projects
               .filter((p) => p.status !== "Completed")
-              .map((p) => Math.round((p.spent / p.budget) * 100)),
+              .map((p) => safePercent(p.spent, p.budget)),
             color: "#E8973A",
           },
         ],
@@ -156,7 +156,7 @@ function generatePreview(
         datasets: [
           {
             label: "Utilisation %",
-            values: projects.map((p) => Math.round((p.spent / p.budget) * 100)),
+            values: projects.map((p) => safePercent(p.spent, p.budget)),
             color: "#E8973A",
           },
         ],
@@ -346,7 +346,7 @@ export function ReportsPage() {
                         >
                           {previewData.datasets.map((ds, di) => {
                             const v = ds.values[i] ?? 0;
-                            const h = Math.max((v / maxVal) * 100, 3);
+                            const h = Math.max(safePercent(v, maxVal), 3);
                             return (
                               <div
                                 key={di}
@@ -554,7 +554,7 @@ export function ReportsPage() {
             </thead>
             <tbody className="divide-y" style={{ borderColor: "#E2E8F0" }}>
               {projects.map((p) => {
-                const pct = Math.round((p.spent / p.budget) * 100);
+                const pct = safePercent(p.spent, p.budget);
                 const statusBadge =
                   p.status === "Active"
                     ? { bg: "#E8F8EF", text: "#1B7A43" }

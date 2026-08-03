@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   getReceivedQuotes,
   createReceivedQuote,
@@ -1434,7 +1435,11 @@ export function ReceivedQuotesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
-                        <button className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium">
+                        {/* Had no handler; opens the detail row already below. */}
+                        <button
+                          onClick={() => setExpanded(isOpen ? null : d.id)}
+                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium"
+                        >
                           <Eye className="w-3.5 h-3.5" /> View
                         </button>
                         {d.docType === "quote" &&
@@ -1697,7 +1702,7 @@ export function ReceivedQuotesPage() {
               ),
             );
             setCreatePODoc(null);
-            alert(`Purchase Order ${poId} has been created successfully.`);
+            toast.success(`Purchase Order ${poId} created.`);
           }}
         />
       )}

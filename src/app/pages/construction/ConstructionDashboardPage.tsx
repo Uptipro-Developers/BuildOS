@@ -242,7 +242,7 @@ export function ConstructionDashboardPage() {
           <div className="divide-y divide-gray-100">
             {filtered.map((p) => {
               const sc = statusConfig[p.status];
-              const budgetPct = Math.round((p.spent / p.budget) * 100);
+              const budgetPct = safePercent(p.spent, p.budget);
               return (
                 <div
                   key={p.id}

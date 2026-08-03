@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { safePercent } from "../../utils/number";
 import { toast } from "sonner";
 import { Plus, X, Save, Lock, CheckCircle, Calendar, FileText, Download } from "lucide-react";
 import { useFinance, type TrialBalanceRow, type IncomeStatementRow } from "../../stores/financeStore";
@@ -132,7 +133,7 @@ export function FiscalYearsPage() {
         {fiscalYears.map(fy => {
           const totalDays = Math.round((new Date(fy.endDate).getTime() - new Date(fy.startDate).getTime()) / 86400000) + 1;
           const elapsedDays = fy.status !== "open" ? totalDays : Math.max(0, Math.round((Date.now() - new Date(fy.startDate).getTime()) / 86400000));
-          const progress = Math.min(100, Math.round((elapsedDays / totalDays) * 100));
+          const progress = Math.min(100, safePercent(elapsedDays, totalDays));
 
           return (
             <div key={fy.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">

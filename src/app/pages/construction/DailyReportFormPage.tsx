@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from "react-router";
+import { safePercent } from "../../utils/number";
 import { useState, useEffect, useMemo } from "react";
 import {
   getCurrencySymbol,
@@ -599,7 +600,7 @@ export function DailyReportFormPage() {
     ).catch(() => {});
   }
 
-  const progressPct = ((step + 1) / ALL_STEPS.length) * 100;
+  const progressPct = safePercent(step + 1, ALL_STEPS.length);
 
   return (
     <div className="space-y-6" style={{ backgroundColor: "#F7F8FA" }}>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { getConstructionApprovals } from "../../api/construction-extras";
 import { approveItem, rejectItem } from "../../api/approvals";
 import {
@@ -124,7 +125,7 @@ export function ApprovalsPage() {
           .catch(console.error);
       })
       .catch((err) => {
-        alert("Failed to approve. Please try again.");
+        toast.error("Failed to approve. Please try again.");
         console.error(err);
       });
   }
@@ -136,7 +137,7 @@ export function ApprovalsPage() {
           .catch(console.error);
       })
       .catch((err) => {
-        alert("Failed to reject. Please try again.");
+        toast.error("Failed to reject. Please try again.");
         console.error(err);
       });
   }

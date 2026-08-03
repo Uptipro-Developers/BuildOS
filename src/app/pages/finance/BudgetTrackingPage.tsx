@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { safePercent } from "../../utils/number";
 import { fetchBudgets } from "../../api/budgets";
 import { formatCurrencyByGeneralSettings } from "../../utils/generalSettings";
 
@@ -32,7 +33,7 @@ export function BudgetTrackingPage() {
 
   const getPercentage = (spent: number, budget: number) => {
     if (!budget) return 0;
-    return Math.round((spent / budget) * 100);
+    return safePercent(spent, budget);
   };
 
   const totalBudget = projects.reduce(

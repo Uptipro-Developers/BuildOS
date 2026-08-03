@@ -55,7 +55,7 @@ import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { getProject } from "../../api/projects";
 import { fetchEmployees } from "../../api/employees";
 import { fetchSuppliers } from "../../api/suppliers";
-import { getMaterials } from "../../api/materials";
+import { getMaterials, createMaterialRequest } from "../../api/materials";
 import { getTasks } from "../../api/tasks";
 import { getClusters } from "../../api/clusters";
 import { getEquipment } from "../../api/equipment";
@@ -330,6 +330,11 @@ export function ProjectSetupPage() {
   >([]);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
   const [procurementQuery, setProcurementQuery] = useState("");
+  // The quantity and notes inputs had no bindings and Submit Request only
+  // raised an alert — nothing was ever sent to procurement.
+  const [procurementQty, setProcurementQty] = useState("");
+  const [procurementNotes, setProcurementNotes] = useState("");
+  const [submittingProcurement, setSubmittingProcurement] = useState(false);
   const [showExternalEquipmentModal, setShowExternalEquipmentModal] =
     useState(false);
   const [externalEquipType, setExternalEquipType] = useState<
@@ -554,6 +559,46 @@ export function ProjectSetupPage() {
       return false;
     }
   };
+
+  /** Raises a real material request for the item picked in the modal. */
+  async function submitProcurementRequest() {
+    const qty = Number(procurementQty);
+    const missing = [
+      !procurementQuery.trim() && "a material",
+      !procurementQty.trim() && "a quantity",
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      toast.error(`A procurement request needs ${missing.join(" and ")}.`);
+      return;
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error("Enter a quantity greater than zero.");
+      return;
+    }
+    setSubmittingProcurement(true);
+    try {
+      await createMaterialRequest({
+        materialName: procurementQuery.trim(),
+        qty,
+        projectId: projectId ?? undefined,
+        projectName: basicInfo.name || undefined,
+        notes: procurementNotes.trim() || undefined,
+        status: "pending",
+      });
+      toast.success("Procurement request submitted.");
+      setShowProcurementModal(false);
+      setProcurementQty("");
+      setProcurementNotes("");
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not submit the procurement request.",
+      );
+    } finally {
+      setSubmittingProcurement(false);
+    }
+  }
 
   /**
    * Required fields per step. The wizard marked every step complete and advanced
@@ -2802,10 +2847,13 @@ export function ProjectSetupPage() {
                           placeholder="Select materials..."
                           onNotFoundAction={{
                             label: "Submit Procurement Request",
+                            // Announced a request that was never raised; opens
+                            // the procurement modal seeded with the search term.
                             onClick: (q) => {
-                              alert(
-                                `Procurement request for "${q}" will be submitted.`,
-                              );
+                              setProcurementQuery(q);
+                              setProcurementQty("");
+                              setProcurementNotes("");
+                              setShowProcurementModal(true);
                             },
                           }}
                         />
@@ -2827,10 +2875,17 @@ export function ProjectSetupPage() {
                           placeholder="Select equipment..."
                           onNotFoundAction={{
                             label: "Add External Equipment",
+                            // Same stub; opens the external equipment modal the
+                            // Equipment step already uses.
                             onClick: (q) => {
-                              alert(
-                                `External equipment form for "${q}" will be opened.`,
-                              );
+                              setEquipmentForm({
+                                ...equipmentForm,
+                                ownership: "client-supplied",
+                                name: q,
+                                category: "",
+                              });
+                              setExternalEquipType("client-supplied");
+                              setShowExternalEquipmentModal(true);
                             },
                           }}
                         />
@@ -4216,6 +4271,8 @@ export function ProjectSetupPage() {
                   </label>
                   <input
                     type="number"
+                    value={procurementQty}
+                    onChange={(e) => setProcurementQty(e.target.value)}
                     placeholder="e.g. 500"
                     className="w-full px-3 py-2 rounded-lg border text-sm"
                     style={{
@@ -4230,6 +4287,8 @@ export function ProjectSetupPage() {
                   </label>
                   <textarea
                     rows={3}
+                    value={procurementNotes}
+                    onChange={(e) => setProcurementNotes(e.target.value)}
                     placeholder="Specifications, delivery date, etc."
                     className="w-full px-3 py-2 rounded-lg border text-sm"
                     style={{
@@ -4251,14 +4310,12 @@ export function ProjectSetupPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    alert("Procurement request submitted.");
-                    setShowProcurementModal(false);
-                  }}
-                  className="px-4 py-2 rounded-lg text-sm text-white font-medium"
+                  onClick={submitProcurementRequest}
+                  disabled={submittingProcurement}
+                  className="px-4 py-2 rounded-lg text-sm text-white font-medium disabled:opacity-60"
                   style={{ backgroundColor: "#E8973A" }}
                 >
-                  Submit Request
+                  {submittingProcurement ? "Submitting…" : "Submit Request"}
                 </button>
               </div>
             </div>

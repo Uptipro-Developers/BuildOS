@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safePercent } from "../../utils/number";
 import {
   DollarSign,
   TrendingUp,
@@ -94,7 +95,7 @@ export function FinanceDashboardPage() {
       value: fmtShort(netPosition),
       delta:
         totalIncome > 0
-          ? `${Math.round((netPosition / totalIncome) * 100)}% margin`
+          ? `${safePercent(netPosition, totalIncome)}% margin`
           : "—",
       positive: netPosition >= 0,
       icon: DollarSign,
@@ -194,7 +195,7 @@ export function FinanceDashboardPage() {
           </div>
           <div className="space-y-4">
             {budgetSummary.map((b) => {
-              const pct = Math.min(Math.round((b.spent / b.budget) * 100), 100);
+              const pct = Math.min(safePercent(b.spent, b.budget), 100);
               const over = b.spent > b.budget;
               const warn = pct >= 85 && !over;
               return (
@@ -206,7 +207,7 @@ export function FinanceDashboardPage() {
                     <span
                       className={`text-xs font-semibold ${over ? "text-red-600" : warn ? "text-amber-600" : "text-emerald-600"}`}
                     >
-                      {Math.round((b.spent / b.budget) * 100)}%
+                      {safePercent(b.spent, b.budget)}%
                     </span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-1.5">

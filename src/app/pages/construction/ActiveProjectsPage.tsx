@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { safePercent } from "../../utils/number";
 import { useNavigate } from "react-router";
 import {
   Search,
@@ -255,7 +256,7 @@ export function ActiveProjectsPage() {
                   <div>
                     <span className="font-medium">Spent:</span> $
                     {(project.spent / 1000000).toFixed(1)}M (
-                    {Math.round((project.spent / project.budget) * 100)}%)
+                    {safePercent(project.spent, project.budget)}%)
                   </div>
                 </div>
 

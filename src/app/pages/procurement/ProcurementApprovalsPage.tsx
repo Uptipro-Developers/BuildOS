@@ -1,4 +1,5 @@
 import { useState, useEffect, type ReactNode } from "react";
+import { toast } from "sonner";
 import { getCurrencySymbol } from "../../utils/generalSettings";
 import {
   getApprovals,
@@ -126,7 +127,7 @@ export function ProcurementApprovalsPage() {
           .catch(console.error);
       })
       .catch((err) => {
-        alert("Failed to approve. Please try again.");
+        toast.error("Failed to approve. Please try again.");
         console.error(err);
       });
   }
@@ -138,7 +139,7 @@ export function ProcurementApprovalsPage() {
           .catch(console.error);
       })
       .catch((err) => {
-        alert("Failed to reject. Please try again.");
+        toast.error("Failed to reject. Please try again.");
         console.error(err);
       });
   }

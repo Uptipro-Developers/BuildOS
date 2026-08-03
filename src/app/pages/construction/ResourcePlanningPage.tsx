@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { safePercent } from "../../utils/number";
 import {
   Users,
   AlertTriangle,
@@ -42,7 +43,7 @@ const projectColors = [
 
 function getAllocPct(w: Worker) {
   const total = w.projects.reduce((s, p) => s + p.hoursPerWeek, 0);
-  return Math.round((total / w.totalCapacity) * 100);
+  return safePercent(total, w.totalCapacity);
 }
 
 export function ResourcePlanningPage() {
@@ -343,7 +344,7 @@ export function ResourcePlanningPage() {
                     (s, p) => s + p.hoursPerWeek,
                     0,
                   );
-                  const pct = Math.round((allocHrs / w.totalCapacity) * 100);
+                  const pct = safePercent(allocHrs, w.totalCapacity);
                   const isOver = pct > 100;
                   return (
                     <tr

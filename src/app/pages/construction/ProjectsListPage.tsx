@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { safePercent } from "../../utils/number";
+import { toast } from "sonner";
 import { useNavigate } from "react-router";
 import {
   Plus,
@@ -321,7 +323,7 @@ export function ProjectsListPage() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {displayed.map((p) => {
-              const pct = Math.min(Math.round((p.spent / p.budget) * 100), 100);
+              const pct = Math.min(safePercent(p.spent, p.budget), 100);
               return (
                 <tr
                   key={p.id}
@@ -513,7 +515,7 @@ export function ProjectsListPage() {
                   setShowCreate(false);
                   setForm(DEFAULT_FORM);
                 } catch (err) {
-                  alert(
+                  toast.error(
                     (err as Error)?.message ||
                       "Failed to create project. Please try again.",
                   );

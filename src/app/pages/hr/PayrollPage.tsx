@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router";
+import { safePercent } from "../../utils/number";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -225,7 +226,7 @@ export function PayrollPage() {
           <p className="text-xs text-gray-500 mb-2">Total Deductions</p>
           <p className="text-2xl font-bold text-red-600">{fmt(totalDed)}</p>
           <p className="text-xs text-gray-400 mt-0.5">
-            {((totalDed / totalGross) * 100).toFixed(1)}% of gross
+            {safePercent(totalDed, totalGross)}% of gross
           </p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -269,7 +270,7 @@ export function PayrollPage() {
           ).map((dept) => {
             const deptData = payrollData.filter((p) => p.department === dept);
             const deptTotal = deptData.reduce((s, p) => s + p.netPay, 0);
-            const pct = ((deptTotal / totalNet) * 100).toFixed(1);
+            const pct = safePercent(deptTotal, totalNet);
             return (
               <div key={dept} className="flex items-center gap-3">
                 <span className="text-xs text-gray-500 w-32 flex-shrink-0">

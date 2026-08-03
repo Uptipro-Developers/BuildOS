@@ -50,6 +50,10 @@ export function HRRolesPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newDept, setNewDept] = useState("");
   const [newGrade, setNewGrade] = useState("");
+  // The salary inputs had no bindings, so the range a user typed was thrown
+  // away even though JobRole stores minSalary/maxSalary.
+  const [newMinSalary, setNewMinSalary] = useState("");
+  const [newMaxSalary, setNewMaxSalary] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
 
   function loadRoles() {
@@ -383,6 +387,9 @@ export function HRRolesPage() {
                     Min Salary
                   </label>
                   <input
+                    type="number"
+                    value={newMinSalary}
+                    onChange={(e) => setNewMinSalary(e.target.value)}
                     placeholder={`${getCurrencySymbol()}150,000`}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   />
@@ -392,6 +399,9 @@ export function HRRolesPage() {
                     Max Salary
                   </label>
                   <input
+                    type="number"
+                    value={newMaxSalary}
+                    onChange={(e) => setNewMaxSalary(e.target.value)}
                     placeholder={`${getCurrencySymbol()}280,000`}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   />
@@ -408,11 +418,29 @@ export function HRRolesPage() {
               <button
                 className="px-4 py-2 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800"
                 onClick={() => {
-                  if (!newTitle || !newDept) return;
+                  // Bailed silently, so the button looked broken.
+                  const missing = [
+                    !newTitle.trim() && "a title",
+                    !newDept && "a department",
+                  ].filter(Boolean);
+                  if (missing.length > 0) {
+                    toast.error(`A role needs ${missing.join(" and ")}.`);
+                    return;
+                  }
+                  const min = newMinSalary.trim() || undefined;
+                  const max = newMaxSalary.trim() || undefined;
+                  if (min != null && max != null && Number(max) < Number(min)) {
+                    toast.error(
+                      "The maximum salary cannot be below the minimum.",
+                    );
+                    return;
+                  }
                   createJobRole({
                     title: newTitle,
                     department: newDept,
                     gradeLevel: newGrade,
+                    minSalary: min,
+                    maxSalary: max,
                     headcount: 1,
                     responsibilities: [],
                     skills: [],

@@ -1,4 +1,5 @@
 import { useParams } from "react-router";
+import { safePercent } from "../../utils/number";
 import { useEffect, useState, useMemo } from "react";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import {
@@ -786,7 +787,7 @@ export function SchedulePage() {
     const totalMs = projectEnd.getTime() - projectStart.getTime();
     const today = new Date();
     const todayMs = today.getTime() - projectStart.getTime();
-    const todayPct = (todayMs / totalMs) * 100;
+    const todayPct = safePercent(todayMs, totalMs);
     const showToday = todayMs >= 0 && todayMs <= totalMs;
 
     const months: Date[] = [];
@@ -852,8 +853,8 @@ export function SchedulePage() {
         const taskEnd = new Date(task.plannedEnd);
         const offsetMs = taskStart.getTime() - projectStart.getTime();
         const durMs = taskEnd.getTime() - taskStart.getTime();
-        const leftPct = (offsetMs / totalMs) * 100;
-        const widthPct = (durMs / totalMs) * 100;
+        const leftPct = safePercent(offsetMs, totalMs);
+        const widthPct = safePercent(durMs, totalMs);
 
         return [
           <div
@@ -904,7 +905,7 @@ export function SchedulePage() {
                   {months.map((m, i) => {
                     const mStart = Math.max(
                       0,
-                      ((m.getTime() - projectStart.getTime()) / totalMs) * 100,
+                      safePercent(m.getTime() - projectStart.getTime(), totalMs),
                     );
                     const nextM = new Date(m);
                     nextM.setMonth(m.getMonth() + 1);

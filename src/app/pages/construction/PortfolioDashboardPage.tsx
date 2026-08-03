@@ -459,10 +459,8 @@ export function PortfolioDashboardPage() {
       {/* Project cards grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filtered.map((project) => {
-          const pct = Math.min(
-            Math.round((project.spent / project.budget) * 100),
-            100,
-          );
+          // budget is 0 on a project with no budget set, so this printed NaN%.
+          const pct = Math.min(safePercent(project.spent, project.budget), 100);
           const schedule = scheduleInfo(project.plannedEndDate);
           return (
             <div
