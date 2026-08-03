@@ -6,12 +6,41 @@ import { fetchProjects } from "../../api/projects";
 export function CompletedProjectsPage() {
   const navigate = useNavigate();
   const [completedProjects, setCompletedProjects] = useState<any[]>([]);
+  // Search and the year select had no bindings; the years were hardcoded.
+  const [search, setSearch] = useState("");
+  const [yearFilter, setYearFilter] = useState("All Years");
 
   useEffect(() => {
     fetchProjects({ status: "Completed" })
       .then(setCompletedProjects)
       .catch(console.error);
   }, []);
+
+  const years = [
+    ...new Set(
+      completedProjects
+        .map((p) => (p.endDate ? new Date(p.endDate).getFullYear() : null))
+        .filter((y): y is number => Number.isFinite(y as number)),
+    ),
+  ].sort((a, b) => b - a);
+
+  const q = search.trim().toLowerCase();
+  const filteredProjects = completedProjects.filter((p) => {
+    if (
+      q &&
+      !`${p.name ?? ""} ${p.location ?? ""} ${p.client ?? ""}`
+        .toLowerCase()
+        .includes(q)
+    )
+      return false;
+    if (
+      yearFilter !== "All Years" &&
+      (!p.endDate ||
+        String(new Date(p.endDate).getFullYear()) !== yearFilter)
+    )
+      return false;
+    return true;
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -84,19 +113,26 @@ export function CompletedProjectsPage() {
             <input
               type="text"
               placeholder="Search completed projects..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
-          <select className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <select
+            value={yearFilter}
+            onChange={(e) => setYearFilter(e.target.value)}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
             <option>All Years</option>
-            <option>2026</option>
-            <option>2025</option>
+            {years.map((y) => (
+              <option key={y}>{y}</option>
+            ))}
           </select>
         </div>
       </div>
 
       <div className="space-y-4">
-        {completedProjects.map((project) => (
+        {filteredProjects.map((project) => (
           <div
             key={project.id}
             className="bg-white border border-gray-200 rounded-lg p-6 hover:border-blue-300 transition-colors cursor-pointer"

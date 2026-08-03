@@ -36,6 +36,11 @@ interface AuditLog {
 export function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [activeUsers, setActiveUsers] = useState(0);
+  // The action, module and date controls had no bindings, so the whole
+  // filter bar was decorative and the table always showed every log.
+  const [actionFilter, setActionFilter] = useState("");
+  const [moduleFilter, setModuleFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
 
   useEffect(() => {
     Promise.all([getAuditLogs({ limit: 100 }), getUsers()])
@@ -181,6 +186,22 @@ export function AuditLogsPage() {
     },
   ];
 
+  const filteredLogs = logs.filter((log) => {
+    if (
+      actionFilter &&
+      !String(log.action ?? "").toLowerCase().includes(actionFilter)
+    )
+      return false;
+    if (
+      moduleFilter &&
+      !String(log.module ?? "").toLowerCase().includes(moduleFilter)
+    )
+      return false;
+    if (dateFilter && !String(log.createdAt ?? "").startsWith(dateFilter))
+      return false;
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -229,7 +250,11 @@ export function AuditLogsPage() {
         <div className="flex items-center gap-4">
           <Filter className="w-5 h-5 text-gray-600" />
           <div className="flex flex-wrap gap-4 flex-1">
-            <select className="px-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+            <select
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
+            >
               <option value="">All Actions</option>
               <option value="created">Created</option>
               <option value="updated">Updated</option>
@@ -238,7 +263,11 @@ export function AuditLogsPage() {
               <option value="login">Login</option>
             </select>
 
-            <select className="px-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent">
+            <select
+              value={moduleFilter}
+              onChange={(e) => setModuleFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
+            >
               <option value="">All Modules</option>
               <option value="projects">Projects</option>
               <option value="expenses">Expenses</option>
@@ -248,6 +277,8 @@ export function AuditLogsPage() {
 
             <input
               type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
               className="px-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
             />
           </div>
@@ -256,7 +287,7 @@ export function AuditLogsPage() {
 
       {/* Audit Logs Table */}
       <DataTable
-        data={logs}
+        data={filteredLogs}
         columns={columns}
         keyExtractor={(row) => row.id}
         searchFields={[

@@ -13,6 +13,11 @@ import { formatNumberByGeneralSettings } from "../../utils/generalSettings";
 export function ActiveProjectsPage() {
   const navigate = useNavigate();
   const [activeProjects, setActiveProjects] = useState<any[]>([]);
+  // The search box and both selects had no bindings, so the filter bar was
+  // decorative. The contractor list was three hardcoded sample names.
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All Status");
+  const [contractorFilter, setContractorFilter] = useState("All Contractors");
 
   useEffect(() => {
     fetchProjects()
@@ -25,6 +30,30 @@ export function ActiveProjectsPage() {
       )
       .catch(console.error);
   }, []);
+
+  const contractors = [
+    ...new Set(
+      activeProjects.map((p) => p.contractor ?? p.client).filter(Boolean),
+    ),
+  ].sort();
+
+  const q = search.trim().toLowerCase();
+  const filteredProjects = activeProjects.filter((p) => {
+    if (
+      q &&
+      !`${p.name ?? ""} ${p.location ?? ""} ${p.client ?? ""}`
+        .toLowerCase()
+        .includes(q)
+    )
+      return false;
+    if (statusFilter !== "All Status" && p.status !== statusFilter) return false;
+    if (
+      contractorFilter !== "All Contractors" &&
+      (p.contractor ?? p.client) !== contractorFilter
+    )
+      return false;
+    return true;
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -125,27 +154,37 @@ export function ActiveProjectsPage() {
             <input
               type="text"
               placeholder="Search active projects..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
-          <select className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
             <option>All Status</option>
             <option>On Track</option>
             <option>At Risk</option>
             <option>Delayed</option>
           </select>
-          <select className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <select
+            value={contractorFilter}
+            onChange={(e) => setContractorFilter(e.target.value)}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
             <option>All Contractors</option>
-            <option>Premier Construction Co.</option>
-            <option>Skyline Constructions</option>
-            <option>Infrastructure Pro Ltd.</option>
+            {contractors.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
           </select>
         </div>
       </div>
 
       {/* Projects List */}
       <div className="space-y-4">
-        {activeProjects.map((project) => (
+        {filteredProjects.map((project) => (
           <div
             key={project.id}
             className="bg-white border border-gray-200 rounded-lg p-6 hover:border-blue-300 transition-colors cursor-pointer"
