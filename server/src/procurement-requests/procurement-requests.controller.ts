@@ -52,7 +52,11 @@ export class ProcurementRequestsController {
     // ── Purchase Requests ──
     @Get('purchase-requests')
     getAllPRs(@Query('status') status?: string) { return this.svc.findAllPRs(status); }
+    // Service-accessible for the same reason as the RFQ read: the PATCH below is
+    // service-accessible, so the portal must be able to fetch the request it is
+    // mirroring a decision onto.
     @Get('purchase-requests/:id')
+    @ServiceAuth()
     getPR(@Param('id') id: string) { return this.svc.findPR(id); }
     @Post('purchase-requests')
     createPR(@Body() body: any) { return this.svc.createPR(body); }
@@ -94,7 +98,12 @@ export class ProcurementRequestsController {
     // ── Sent RFQs ──
     @Get('sent-rfqs')
     getAllRFQs(@Query('status') status?: string) { return this.svc.findAllRFQs(status); }
+    // Service-accessible: the portal has to read the RFQ before it can show the
+    // supplier what they are being asked to quote for. The PATCH below was
+    // already service-accessible, so the portal could acknowledge an RFQ it was
+    // never able to fetch.
     @Get('sent-rfqs/:id')
+    @ServiceAuth()
     getRFQ(@Param('id') id: string) { return this.svc.findRFQ(id); }
     @Post('sent-rfqs')
     createRFQ(@Body() body: any) { return this.svc.createRFQ(body); }
@@ -112,9 +121,16 @@ export class ProcurementRequestsController {
     getAllQuotes(@Query('status') status?: string) { return this.svc.findAllQuotes(status); }
     @Get('received-quotes/:id')
     getQuote(@Param('id') id: string) { return this.svc.findQuote(id); }
+    // Service-accessible: this is how a supplier's quote gets back into BuildOS
+    // at all. Returning a quote is the whole point of sending an RFQ, and it was
+    // the one portal-facing write with no service access — so RFQs went out and
+    // nothing could ever come back.
     @Post('received-quotes')
+    @ServiceAuth()
     createQuote(@Body() body: any) { return this.svc.createQuote(body); }
+    // Service-accessible: a supplier revising a quote before it is accepted.
     @Patch('received-quotes/:id')
+    @ServiceAuth()
     updateQuote(@Param('id') id: string, @Body() body: any) { return this.svc.updateQuote(id, body); }
     @Delete('received-quotes/:id')
     deleteQuote(@Param('id') id: string) { return this.svc.deleteQuote(id); }

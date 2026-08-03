@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from '../integrations/webhook.service';
 import { MailQueueService } from '../queue/mail-queue.service';
+import { supplierPortalLink } from '../common/supplier-portal';
+import { NumberingService } from '../numbering/numbering.service';
 
 /** Accepts ISO (YYYY-MM-DD) or DD/MM/YYYY date strings; returns a Date or null. */
 function parseFlexDate(raw: any): Date | null {
@@ -20,6 +22,7 @@ export class ProcurementRequestsService {
         private prisma: PrismaService,
         private webhookService: WebhookService,
         private mailQueue: MailQueueService,
+        private numbering: NumberingService,
     ) {}
 
     // ── Purchase Requests ──
@@ -32,8 +35,11 @@ export class ProcurementRequestsService {
     findPR(id: string) {
         return this.prisma.purchaseRequest.findUniqueOrThrow({ where: { id } });
     }
-    createPR(data: any) {
-        const prRef = `PR-${Date.now()}`;
+    async createPR(data: any) {
+        // From the PurchaseRequest sequence in Settings > Numbering ("PR-{N:4}").
+        // `PR-${Date.now()}` ignored that configuration and produced references
+        // like PR-1785770844706, which match no convention and cannot be cited.
+        const { reference: prRef } = await this.numbering.allocate('PurchaseRequest');
         return this.prisma.purchaseRequest.create({ data: { ...data, prRef } }).then((pr) => {
             this.webhookService.triggerWebhook('purchase-request.created', pr).catch(() => {});
             return pr;
@@ -80,8 +86,9 @@ export class ProcurementRequestsService {
             where: { OR: [{ id }, { rfqRef: id }] },
         });
     }
-    createRFQ(data: any) {
-        const rfqRef = `RFQ-${Date.now()}`;
+    async createRFQ(data: any) {
+        // From the RFQ sequence in Settings > Numbering ("RFQ-{N:4}").
+        const { reference: rfqRef } = await this.numbering.allocate('RFQ');
         const rfqData: any = {
             supplierName: data.supplierName,
             supplierId: data.supplierId ?? null,
@@ -97,7 +104,7 @@ export class ProcurementRequestsService {
             if (data.supplierId) {
                 const supplier = await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null);
                 if (supplier?.email) {
-                    const portalUrl = (process.env.SUPPLIER_PORTAL_URL || 'https://sabiquot.vercel.app').replace(/\/+$/, '');
+                    const portalUrl = supplierPortalLink('rfq', rfq.id, String(rfqRef));
                     this.mailQueue.enqueueEmail({
                         to: supplier.email,
                         subject: `New RFQ from BuildOS — ${rfqRef}`,

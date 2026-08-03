@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from '../integrations/webhook.service';
 import { MailQueueService } from '../queue/mail-queue.service';
+import { supplierPortalLink } from '../common/supplier-portal';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -42,7 +43,7 @@ export class PurchaseOrdersService {
             const supplier = po.supplier;
             if (supplier?.email) {
                 const poRef = (po as any).poRef || po.id;
-                const portalUrl = (process.env.SUPPLIER_PORTAL_URL || 'https://sabiquot.vercel.app').replace(/\/+$/, '');
+                const portalUrl = supplierPortalLink('purchase-order', po.id, String(poRef));
                 this.mailQueue.enqueueEmail({
                     to: supplier.email,
                     subject: `New Purchase Order from BuildOS — ${poRef}`,
