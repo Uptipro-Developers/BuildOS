@@ -3,10 +3,9 @@ import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
-import { QueueModule } from '../queue/queue.module';
 
 @Module({
-    imports: [PrismaModule, IntegrationsModule, QueueModule],
+    imports: [PrismaModule, IntegrationsModule],
     controllers: [PurchaseOrdersController],
     providers: [PurchaseOrdersService],
 })

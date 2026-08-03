@@ -237,22 +237,26 @@ function NewPOModal({
 
   async function handleSave() {
     if (!valid) return;
-    // Consumes the next PO number for the numbering config's sequence, even
-    // though PurchaseOrder has no field of its own to store it in yet.
-    await allocate("PurchaseOrder");
-    onSave({
-      supplierId,
-      prRef: prRef.trim() || undefined,
-      createdBy: getAuthUserName() || "Current User",
-      expectedDate: addDaysIso(parseInt(deliveryDays) || 7),
-      totalValue,
-      items: items.map((it) => ({
-        material: it.material,
-        qty: parseFloat(it.qty) || 0,
-        unit: it.unit,
-        unitCost: parseFloat(it.unitCost) || 0,
-      })),
-    });
+    try {
+      await allocate("PurchaseOrder");
+      onSave({
+        supplierId,
+        prRef: prRef.trim() || undefined,
+        createdBy: getAuthUserName() || "Current User",
+        expectedDate: addDaysIso(parseInt(deliveryDays) || 7),
+        totalValue,
+        items: items.map((it) => ({
+          material: it.material,
+          qty: parseFloat(it.qty) || 0,
+          unit: it.unit,
+          unitCost: parseFloat(it.unitCost) || 0,
+        })),
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create the purchase order.",
+      );
+    }
   }
 
   return (

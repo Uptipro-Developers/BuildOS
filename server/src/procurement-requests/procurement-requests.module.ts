@@ -4,10 +4,9 @@ import { ProcurementRequestsService } from './procurement-requests.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { AdminExtrasModule } from '../admin-extras/admin-extras.module';
-import { QueueModule } from '../queue/queue.module';
 
 @Module({
-    imports: [PrismaModule, IntegrationsModule, AdminExtrasModule, QueueModule],
+    imports: [PrismaModule, IntegrationsModule, AdminExtrasModule],
     controllers: [ProcurementRequestsController],
     providers: [ProcurementRequestsService],
 })

@@ -39,15 +39,15 @@ export class PurchaseOrdersService {
             include: { supplier: true, items: true },
         }).then((po) => {
             this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => {});
-            // Email the supplier directly — independent of webhook and SabiQuot.
             const supplier = po.supplier;
             if (supplier?.email) {
                 const poRef = (po as any).poRef || po.id;
+                const portalUrl = (process.env.SUPPLIER_PORTAL_URL || 'https://sabiquot.vercel.app').replace(/\/+$/, '');
                 this.mailQueue.enqueueEmail({
                     to: supplier.email,
                     subject: `New Purchase Order from BuildOS — ${poRef}`,
-                    text: `Dear ${supplier.contactPerson || supplier.name},\n\nA new Purchase Order (${poRef}) has been raised for your company on BuildOS.\n\nPlease log in to the supplier portal or contact the procurement team to review the order.\n\nRef: ${poRef}`,
-                    html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>A new <strong>Purchase Order</strong> (<code>${poRef}</code>) has been raised for your company on BuildOS.</p><p>Please log in to the supplier portal or contact the procurement team to review the order.</p><p style="color:#6b7280;font-size:12px;">Ref: ${poRef}</p>`,
+                    text: `Dear ${supplier.contactPerson || supplier.name},\n\nA new Purchase Order (${poRef}) has been raised for your company on BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${poRef}`,
+                    html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>A new <strong>Purchase Order</strong> (<code>${poRef}</code>) has been raised for your company on BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${poRef}</p>`,
                 }).catch(() => {});
             }
             return po;

@@ -64,22 +64,24 @@ export class ProcurementRequestsService {
         });
     }
     findRFQ(id: string) {
-        return this.prisma.sentRFQ.findUniqueOrThrow({ where: { id } });
+        // Callers may pass either the cuid id or the human-readable rfqRef.
+        return this.prisma.sentRFQ.findFirstOrThrow({
+            where: { OR: [{ id }, { rfqRef: id }] },
+        });
     }
     createRFQ(data: any) {
         const rfqRef = `RFQ-${Date.now()}`;
         return this.prisma.sentRFQ.create({ data: { ...data, rfqRef } }).then(async (rfq) => {
             this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => {});
-            // Email the supplier directly so they are notified even without a
-            // webhook or SabiQuot account.
             if (data.supplierId) {
                 const supplier = await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null);
                 if (supplier?.email) {
+                    const portalUrl = (process.env.SUPPLIER_PORTAL_URL || 'https://sabiquot.vercel.app').replace(/\/+$/, '');
                     this.mailQueue.enqueueEmail({
                         to: supplier.email,
                         subject: `New RFQ from BuildOS — ${rfqRef}`,
-                        text: `Dear ${supplier.contactPerson || supplier.name},\n\nYou have received a new Request for Quotation (${rfqRef}) from BuildOS.\n\nPlease log in to the supplier portal or contact the procurement team to review and respond.\n\nRef: ${rfqRef}`,
-                        html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>You have received a new <strong>Request for Quotation</strong> (<code>${rfqRef}</code>) from BuildOS.</p><p>Please log in to the supplier portal or contact the procurement team to review and respond.</p><p style="color:#6b7280;font-size:12px;">Ref: ${rfqRef}</p>`,
+                        text: `Dear ${supplier.contactPerson || supplier.name},\n\nYou have received a new Request for Quotation (${rfqRef}) from BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${rfqRef}`,
+                        html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>You have received a new <strong>Request for Quotation</strong> (<code>${rfqRef}</code>) from BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${rfqRef}</p>`,
                     }).catch(() => {});
                 }
             }
