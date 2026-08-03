@@ -4,6 +4,14 @@ import axios, { AxiosError } from 'axios';
 import { createHmac, randomBytes } from 'crypto';
 import { WebhookDeliveryQueue } from './webhook-delivery.queue';
 
+/**
+ * Response statuses that implicate the endpoint rather than the payload, and so
+ * count toward deactivating it: unauthorised (wrong secret), forbidden, gone,
+ * not found, or method not allowed. Any other 4xx is the receiver declining one
+ * delivery, which says nothing about the next.
+ */
+const ENDPOINT_FAILURE_STATUSES = new Set([401, 403, 404, 405, 410]);
+
 /** Context passed by the BullMQ worker so terminal failure can be recorded once. */
 export interface DeliveryAttemptContext {
   attempt: number;
@@ -160,6 +168,20 @@ export class WebhookService {
         });
       }
     } catch (error: any) {
+      // A receiver that rejects one payload has not shown the endpoint to be
+      // broken, so it must not spend the endpoint's deactivation allowance.
+      // Every failure used to count equally, which meant a bug in the receiver
+      // — a handler returning 500 for an unmigrated column, say — silently ate
+      // the allowance and took the integration down permanently. Only faults
+      // that implicate the endpoint itself do that now.
+      if (this.classifyFailure(error) === 'payload') {
+        await this.prisma.webhook.update({
+          where: { id: webhook.id },
+          data: { lastError: error.message },
+        });
+        throw error;
+      }
+
       if (context.isFinalAttempt) {
         const retryCount = (webhook.retryCount || 0) + 1;
         await this.prisma.webhook.update({
@@ -175,6 +197,29 @@ export class WebhookService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Whether a failed delivery reflects a broken endpoint or just a rejected
+   * payload.
+   *
+   * - `endpoint` — the endpoint is misconfigured, gone, or refusing us (401,
+   *   403, 404, 405, 410). Repeating it will not help and an operator needs to
+   *   know, so these count toward deactivation.
+   * - `payload` — the endpoint answered, understood us, and declined this
+   *   particular delivery (any other 4xx). The next event may well succeed, so
+   *   this is recorded but never deactivates.
+   * - `transient` — timeout, DNS, refused connection, or any 5xx. Worth
+   *   retrying, and counts toward deactivation once the retries are exhausted.
+   */
+  private classifyFailure(error: unknown): 'transient' | 'payload' | 'endpoint' {
+    const status = (error as AxiosError)?.response?.status;
+    // No response at all: timeout, DNS failure, connection refused.
+    if (!status) return 'transient';
+    if (status >= 500) return 'transient';
+    if (ENDPOINT_FAILURE_STATUSES.has(status)) return 'endpoint';
+    if (status >= 400) return 'payload';
+    return 'transient';
   }
 
   /**
