@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router";
 import { fetchPurchaseOrders, createPurchaseOrder, mapPO } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
 import { getAuthUserName } from "../../utils/useAuthUser";
@@ -650,13 +651,20 @@ function RecordReceiptModal({
 
 export function PurchaseOrdersPage() {
   const { logChange } = useChangelog();
+  // Suppliers → View Order History / Create PO with Supplier arrive here with
+  // the supplier in the query string, so honour it rather than landing on an
+  // unfiltered list.
+  const [searchParams] = useSearchParams();
+  const supplierParam = searchParams.get("supplier") ?? "";
   const [poList, setPoList] = useState<PurchaseOrder[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<PurchaseOrder | null>(null);
   useEffect(() => {
     fetchPurchaseOrders().then(setPoList);
   }, []);
   const [activeTab, setActiveTab] = useState<POStatus | "all">("all");
-  const [showNewPO, setShowNewPO] = useState(false);
+  const [showNewPO, setShowNewPO] = useState(
+    () => searchParams.get("new") === "1",
+  );
   const [sendPO, setSendPO] = useState<PurchaseOrder | null>(null);
   const [receiptPO, setReceiptPO] = useState<PurchaseOrder | null>(null);
 
@@ -733,7 +741,9 @@ export function PurchaseOrdersPage() {
   }
 
   const filtered = poList.filter(
-    (po) => activeTab === "all" || po.status === activeTab,
+    (po) =>
+      (activeTab === "all" || po.status === activeTab) &&
+      (!supplierParam || po.supplier === supplierParam),
   );
 
   const columns: Column<PurchaseOrder>[] = [

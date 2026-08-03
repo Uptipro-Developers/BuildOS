@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
   fetchSuppliers,
@@ -80,6 +81,7 @@ const BLANK_MODAL_DOCS: Record<string, File | null> = Object.fromEntries(
 );
 
 export function SuppliersPage() {
+  const navigate = useNavigate();
   const [supplierList, setSupplierList] = useState<Supplier[]>([]);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -571,10 +573,26 @@ export function SuppliersPage() {
                         </div>
                       </div>
                       <div className="flex justify-end gap-2 mt-4">
-                        <button className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50">
+                        {/* Both actions were inert; they cross to the orders
+                            module filtered to, or prefilled with, this supplier. */}
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/apps/procurement/purchase-orders?supplier=${encodeURIComponent(sup.name)}`,
+                            )
+                          }
+                          className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                        >
                           View Order History
                         </button>
-                        <button className="px-3 py-1.5 text-sm bg-blue-700 text-white rounded-md hover:bg-blue-800">
+                        <button
+                          onClick={() =>
+                            navigate(
+                              `/apps/procurement/purchase-orders?new=1&supplier=${encodeURIComponent(sup.name)}`,
+                            )
+                          }
+                          className="px-3 py-1.5 text-sm bg-blue-700 text-white rounded-md hover:bg-blue-800"
+                        >
                           Create PO with Supplier
                         </button>
                       </div>

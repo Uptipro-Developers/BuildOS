@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
+import { toast } from "sonner";
 import {
   Send,
   Search,
@@ -19,6 +21,7 @@ import {
   getSentRFQs,
   createSentRFQ,
   SentRFQ as ApiSentRFQ,
+  updateSentRFQ,
 } from "../../api/procurement-requests";
 import { getReferenceData } from "../../api/reference-data";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
@@ -413,7 +416,27 @@ export function SentRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<SRStatus | "all">("all");
   const [search, setSearch] = useState("");
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
+  /** Re-sends an RFQ by bumping its sent date, which re-triggers delivery. */
+  async function resendRfq(r: SentRequest) {
+    setResendingId(r.id);
+    try {
+      await updateSentRFQ(r.id, {
+        sentDate: new Date().toISOString(),
+        status: "sent",
+      } as any);
+      toast.success(`RFQ resent to ${r.vendor}.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not resend the RFQ.",
+      );
+    } finally {
+      setResendingId(null);
+    }
+  }
   const [showNewRFQ, setShowNewRFQ] = useState(false);
 
   useEffect(() => {
@@ -641,17 +664,33 @@ export function SentRequestsPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium">
+                        {/* All three actions were inert. View opens the detail
+                            row that already existed, Open Quote crosses to the
+                            quote, and Resend re-sends the RFQ. */}
+                        <button
+                          onClick={() => setExpanded(isOpen ? null : r.id)}
+                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium"
+                        >
                           <Eye className="w-3.5 h-3.5" /> View
                         </button>
                         {r.status === "quote_received" && (
-                          <button className="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium">
+                          <button
+                            onClick={() =>
+                              navigate("/apps/procurement/received-quotes")
+                            }
+                            className="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium"
+                          >
                             <CheckCircle className="w-3.5 h-3.5" /> Open Quote
                           </button>
                         )}
                         {(r.status === "sent" || r.status === "viewed") && (
-                          <button className="flex items-center gap-1 text-purple-600 hover:text-purple-800 text-xs font-medium">
-                            <Send className="w-3.5 h-3.5" /> Resend
+                          <button
+                            onClick={() => resendRfq(r)}
+                            disabled={resendingId === r.id}
+                            className="flex items-center gap-1 text-purple-600 hover:text-purple-800 text-xs font-medium disabled:opacity-60"
+                          >
+                            <Send className="w-3.5 h-3.5" />{" "}
+                            {resendingId === r.id ? "Sending…" : "Resend"}
                           </button>
                         )}
                       </div>

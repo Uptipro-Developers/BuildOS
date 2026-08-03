@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import { getMaterials, Material as ApiMaterial } from "../../api/materials";
 import {
   RefreshCw,
@@ -68,12 +69,34 @@ type SortDir = "asc" | "desc";
 export function StockLevelsPage() {
   const [items, setItems] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // Sync Stock had no handler, so the only way to pick up stock movements made
+  // elsewhere was a full page reload.
+  const [syncing, setSyncing] = useState(false);
+
+  const loadStock = useCallback(
+    () => getMaterials().then((data) => setItems(data.map(fromApiStock))),
+    [],
+  );
+
   useEffect(() => {
-    getMaterials()
-      .then((data) => setItems(data.map(fromApiStock)))
+    loadStock()
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadStock]);
+
+  async function syncStock() {
+    setSyncing(true);
+    try {
+      await loadStock();
+      toast.success("Stock levels refreshed.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not refresh stock levels.",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }
   const [search, setSearch] = useState("");
   const [adjustModal, setAdjustModal] = useState<StockItem | null>(null);
   const [adjustType, setAdjustType] = useState("recount");
@@ -171,8 +194,15 @@ export function StockLevelsPage() {
           >
             <Download className="w-3.5 h-3.5" /> Export
           </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800">
-            <RefreshCw className="w-3.5 h-3.5" /> Sync Stock
+          <button
+            onClick={syncStock}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800 disabled:opacity-60"
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`}
+            />{" "}
+            {syncing ? "Syncing…" : "Sync Stock"}
           </button>
         </div>
       </div>

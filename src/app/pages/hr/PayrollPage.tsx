@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -62,6 +63,7 @@ type SortKey = "name" | "gross" | "deductions" | "net" | "status";
 type SortDir = "asc" | "desc";
 
 export function PayrollPage() {
+  const navigate = useNavigate();
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("All Departments");
@@ -200,7 +202,10 @@ export function PayrollPage() {
           >
             <Download className="w-3.5 h-3.5" /> Export Payroll
           </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800">
+          <button
+            onClick={() => navigate("/apps/hr/payroll-processing")}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 text-white rounded-md text-sm hover:bg-indigo-800"
+          >
             Run Payroll Cycle
           </button>
         </div>
