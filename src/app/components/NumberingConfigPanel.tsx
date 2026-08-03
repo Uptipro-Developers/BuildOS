@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Save, RotateCcw, X, Trash2, Edit, Hash } from "lucide-react";
+import { Save, RotateCcw, X, Trash2, Edit, Hash, Plus } from "lucide-react";
 import { useNumbering, type ModuleNumbering } from "../stores/numberingStore";
 import { ConfirmationModal } from "./ConfirmationModal";
 
@@ -63,7 +63,7 @@ export function NumberingConfigPanel({
   /** Which accent the action buttons use, to match the host app. */
   accent?: keyof typeof ACCENTS;
 }) {
-  const { configs, loading, error, updateConfig, resetConfig, removeConfig } =
+  const { configs, loading, error, updateConfig, resetConfig, removeConfig, addConfig } =
     useNumbering();
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<EditForm>({
@@ -74,6 +74,73 @@ export function NumberingConfigPanel({
   });
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ModuleNumbering | null>(null);
+  /**
+   * The new sequence being composed. The prototype offers an "Add Numbering
+   * Entry" row so a process without a configured sequence can be given one;
+   * this panel was rebuilt without it, leaving no way to add one at all.
+   */
+  const [adding, setAdding] = useState(false);
+  const [addForm, setAddForm] = useState<EditForm & { module: string; description: string }>({
+    module: "",
+    template: "",
+    startingNumber: 1,
+    endingNumber: null,
+    incrementBy: 1,
+    description: "",
+  });
+
+  function startAdd() {
+    setEditing(null);
+    setAddForm({
+      module: "",
+      template: "",
+      startingNumber: 1,
+      endingNumber: null,
+      incrementBy: 1,
+      description: "",
+    });
+    setAdding(true);
+  }
+
+  async function saveAdd() {
+    const module = addForm.module.trim();
+    if (!module) {
+      toast.error("A process name is required.");
+      return;
+    }
+    if (rows.some((r) => r.module.toLowerCase() === module.toLowerCase())) {
+      toast.error(`${module} already has a numbering sequence.`);
+      return;
+    }
+    // Default the template from the process name, matching the prototype.
+    const prefix = module.slice(0, 3).toUpperCase();
+    const template = addForm.template.trim() || `${prefix}-{N:4}`;
+
+    setSaving(true);
+    try {
+      await addConfig({
+        module,
+        app,
+        prefix,
+        separator: "-",
+        padLength: 4,
+        nextNumber: addForm.startingNumber,
+        description: addForm.description,
+        template,
+        startingNumber: addForm.startingNumber,
+        endingNumber: addForm.endingNumber,
+        incrementBy: addForm.incrementBy,
+      });
+      toast.success(`Numbering for ${module} added.`);
+      setAdding(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not add the numbering entry.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const rows = configs
     .filter((c) => (c.app ?? "shared") === app)
@@ -152,11 +219,14 @@ export function NumberingConfigPanel({
 
         {loading && rows.length === 0 ? (
           <p className="text-sm text-gray-400">Loading numbering…</p>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && !adding ? (
           <p className="text-sm text-gray-400">
             No numbered modules for this application.
           </p>
         ) : (
+          // Rendered while adding even with no rows — an empty application is
+          // exactly when the first entry needs to be created, and the add row
+          // lives inside this table.
           // Scrolls rather than clipping: at eight columns the trailing actions
           // cell would otherwise be cut off on a narrow viewport.
           <div className="border border-gray-200 rounded-xl overflow-x-auto">
@@ -340,9 +410,130 @@ export function NumberingConfigPanel({
                     </tr>
                   ),
                 )}
+                {/* Inline add row, as in the prototype. */}
+                {adding && (
+                  <tr className="bg-amber-50/50">
+                    <td className="px-4 py-3">
+                      <input
+                        autoFocus
+                        value={addForm.module}
+                        onChange={(e) =>
+                          setAddForm({ ...addForm, module: e.target.value })
+                        }
+                        placeholder="Process name"
+                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        value={addForm.template}
+                        onChange={(e) =>
+                          setAddForm({ ...addForm, template: e.target.value })
+                        }
+                        placeholder={
+                          addForm.module
+                            ? `${addForm.module.slice(0, 3).toUpperCase()}-{N:4}`
+                            : "ABC-{N:4}"
+                        }
+                        className="w-32 px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min={1}
+                        value={addForm.startingNumber}
+                        onChange={(e) =>
+                          setAddForm({
+                            ...addForm,
+                            startingNumber: parseInt(e.target.value) || 1,
+                          })
+                        }
+                        className="w-20 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={1}
+                          value={addForm.endingNumber ?? ""}
+                          onChange={(e) =>
+                            setAddForm({
+                              ...addForm,
+                              endingNumber: e.target.value
+                                ? parseInt(e.target.value)
+                                : null,
+                            })
+                          }
+                          placeholder="∞"
+                          className="w-16 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                        <label className="text-[10px] text-gray-400 flex items-center gap-0.5 whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            checked={addForm.endingNumber === null}
+                            onChange={(e) =>
+                              setAddForm({
+                                ...addForm,
+                                endingNumber: e.target.checked ? null : 9999,
+                              })
+                            }
+                            className="w-3 h-3"
+                          />
+                          Unlimited
+                        </label>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min={1}
+                        value={addForm.incrementBy}
+                        onChange={(e) =>
+                          setAddForm({
+                            ...addForm,
+                            incrementBy: parseInt(e.target.value) || 1,
+                          })
+                        }
+                        className="w-16 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-400">—</td>
+                    <td className="px-4 py-3 text-xs text-gray-400">—</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={saveAdd}
+                          disabled={saving}
+                          className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-50"
+                          title="Add"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setAdding(false)}
+                          className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"
+                          title="Cancel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+        )}
+
+        {!adding && (
+          <button
+            onClick={startAdd}
+            className={`mt-4 flex items-center gap-1.5 text-sm font-medium ${ACCENTS[accent]}`}
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Numbering Entry
+          </button>
         )}
       </div>
 

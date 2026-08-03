@@ -97,3 +97,49 @@ describe('configuration validation', () => {
         expect(sanitize({ ...valid, nextNumber: 25 }).nextNumber).toBe(25);
     });
 });
+
+describe("payload sent by the Add Numbering Entry row", () => {
+    const sanitize = (input: any) => svc().sanitize(input);
+
+    /**
+     * The Settings panel defaults the template from the process name when the
+     * admin leaves it blank, so the payload always carries one. These pin the
+     * shape that row actually posts.
+     */
+    it("accepts a defaulted template derived from the module name", () => {
+        const result = sanitize({
+            module: "Requisition",
+            app: "procurement",
+            template: "REQ-{N:4}",
+            startingNumber: 1,
+            endingNumber: null,
+            incrementBy: 1,
+            nextNumber: 1,
+        });
+        expect(result).toMatchObject({
+            template: "REQ-{N:4}",
+            startingNumber: 1,
+            endingNumber: null,
+            incrementBy: 1,
+            nextNumber: 1,
+        });
+        // prefix/separator/padding are derived, not supplied by the panel.
+        expect(result).toMatchObject({ prefix: "REQ", separator: "-", padLength: 4 });
+    });
+
+    it("accepts a bounded, stepped sequence from the add row", () => {
+        const result = sanitize({
+            module: "Waybill",
+            template: "WB-{N:3}",
+            startingNumber: 100,
+            endingNumber: 999,
+            incrementBy: 5,
+            nextNumber: 100,
+        });
+        expect(result).toMatchObject({
+            startingNumber: 100,
+            endingNumber: 999,
+            incrementBy: 5,
+        });
+    });
+});
