@@ -3,6 +3,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from '../integrations/webhook.service';
 import { MailQueueService } from '../queue/mail-queue.service';
 
+/** Accepts ISO (YYYY-MM-DD) or DD/MM/YYYY date strings; returns a Date or null. */
+function parseFlexDate(raw: any): Date | null {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    // DD/MM/YYYY
+    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) return new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+}
+
 @Injectable()
 export class ProcurementRequestsService {
     constructor(
@@ -71,7 +82,17 @@ export class ProcurementRequestsService {
     }
     createRFQ(data: any) {
         const rfqRef = `RFQ-${Date.now()}`;
-        return this.prisma.sentRFQ.create({ data: { ...data, rfqRef } }).then(async (rfq) => {
+        const rfqData: any = {
+            supplierName: data.supplierName,
+            supplierId: data.supplierId ?? null,
+            status: data.status ?? 'Sent',
+            items: Array.isArray(data.items) ? data.items : [],
+            notes: data.notes ?? null,
+            rfqRef,
+            sentDate: parseFlexDate(data.sentDate) ?? new Date(),
+            expiryDate: parseFlexDate(data.expiryDate) ?? null,
+        };
+        return this.prisma.sentRFQ.create({ data: rfqData }).then(async (rfq) => {
             this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => {});
             if (data.supplierId) {
                 const supplier = await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null);
