@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
 import { ResourcePlanningService } from './resource-planning.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller()
 export class ResourcePlanningController {
@@ -18,5 +19,6 @@ export class ResourcePlanningController {
     update(@Param('id') id: string, @Body() body: any) { return this.svc.update(id, body); }
 
     @Delete('resource-planning/:id')
+    @RequiresProcess('p_resources', 'delete')
     remove(@Param('id') id: string) { return this.svc.remove(id); }
 }

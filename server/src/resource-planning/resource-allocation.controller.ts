@@ -10,11 +10,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 import { ResourceAllocationService } from './resource-allocation.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('resource-allocations')
-@UseGuards(RolesGuard)
 export class ResourceAllocationController {
   constructor(private resourceAllocationService: ResourceAllocationService) {}
 
@@ -56,6 +55,7 @@ export class ResourceAllocationController {
   }
 
   @Delete(':id')
+  @RequiresProcess('p_resources', 'delete')
   @Roles('admin', 'project-manager', 'resource-manager')
   async delete(@Param('id') id: string) {
     await this.resourceAllocationService.delete(id);

@@ -10,12 +10,10 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RequireApp } from '../auth/decorators';
 import { NotificationService } from './notification.service';
 
 @Controller('notifications')
-@UseGuards(RolesGuard)
 export class NotificationController {
   constructor(private notificationService: NotificationService) {}
 
@@ -91,6 +89,7 @@ export class NotificationController {
   // ── Notification Rules (Admin Only) ──
   @Get('rules')
   @Roles('admin')
+  @RequireApp('admin')
   async getNotificationRules(@Query('event') event?: string) {
     const rules = await this.notificationService.getNotificationRules(event);
     return { success: true, data: rules };
@@ -98,6 +97,7 @@ export class NotificationController {
 
   @Post('rules')
   @Roles('admin')
+  @RequireApp('admin')
   async createNotificationRule(@Body() ruleData: any) {
     const rule = await this.notificationService.createNotificationRule(ruleData);
     return { success: true, data: rule, message: 'Notification rule created' };
@@ -105,6 +105,7 @@ export class NotificationController {
 
   @Put('rules/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async updateNotificationRule(@Param('id') id: string, @Body() updateData: any) {
     const rule = await this.notificationService.updateNotificationRule(id, updateData);
     return { success: true, data: rule, message: 'Notification rule updated' };
@@ -112,6 +113,7 @@ export class NotificationController {
 
   @Delete('rules/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async deleteNotificationRule(@Param('id') id: string) {
     await this.notificationService.deleteNotificationRule(id);
     return { success: true, message: 'Notification rule deleted' };
@@ -120,6 +122,7 @@ export class NotificationController {
   // ── Notification Templates (Admin Only) ──
   @Get('templates')
   @Roles('admin')
+  @RequireApp('admin')
   async getNotificationTemplates(@Query('eventType') eventType?: string) {
     const templates = await this.notificationService.getNotificationTemplates(eventType);
     return { success: true, data: templates };
@@ -127,6 +130,7 @@ export class NotificationController {
 
   @Post('templates')
   @Roles('admin')
+  @RequireApp('admin')
   async saveNotificationTemplate(@Body() data: any) {
     const template = await this.notificationService.saveNotificationTemplate(data);
     return { success: true, data: template, message: 'Template saved' };
@@ -135,6 +139,7 @@ export class NotificationController {
   // ── Cleanup ──
   @Post('cleanup')
   @Roles('admin')
+  @RequireApp('admin')
   async cleanupOldNotifications(@Body('daysToKeep') daysToKeep?: number) {
     const result = await this.notificationService.deleteOldNotifications(daysToKeep);
     return { success: true, data: result, message: 'Old notifications cleaned up' };

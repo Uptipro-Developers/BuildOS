@@ -10,11 +10,9 @@ import {
   Request,
 } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 import { WorkflowEngineService } from './workflow-engine.service';
 
 @Controller('workflows')
-@UseGuards(RolesGuard)
 export class WorkflowController {
   constructor(private workflowEngine: WorkflowEngineService) {}
 

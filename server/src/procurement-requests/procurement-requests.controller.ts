@@ -5,6 +5,7 @@ import {
 import { ServiceAuth } from '../auth/decorators';
 import { ProcurementRequestsService } from './procurement-requests.service';
 import { AdminExtrasService } from '../admin-extras/admin-extras.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller()
 export class ProcurementRequestsController {
@@ -69,6 +70,7 @@ export class ProcurementRequestsController {
         return this.svc.updatePR(id, body);
     }
     @Delete('purchase-requests/:id')
+    @RequiresProcess('p_purchase_requests', 'delete')
     deletePR(@Param('id') id: string) { return this.svc.deletePR(id); }
 
     // ── Purchase Invoices ──
@@ -86,6 +88,7 @@ export class ProcurementRequestsController {
     @Patch('purchase-invoices/:id')
     patchInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
     @Delete('purchase-invoices/:id')
+    @RequiresProcess('p_purchase_invoices', 'delete')
     deleteInvoice(@Param('id') id: string) { return this.svc.deleteInvoice(id); }
 
     // ── Sent RFQs ──
@@ -101,6 +104,7 @@ export class ProcurementRequestsController {
     @ServiceAuth()
     updateRFQ(@Param('id') id: string, @Body() body: any) { return this.svc.updateRFQ(id, body); }
     @Delete('sent-rfqs/:id')
+    @RequiresProcess('p_rfqs', 'delete')
     deleteRFQ(@Param('id') id: string) { return this.svc.deleteRFQ(id); }
 
     // ── Received Quotes ──

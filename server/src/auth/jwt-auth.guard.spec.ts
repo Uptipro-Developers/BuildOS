@@ -10,6 +10,7 @@ interface MockMeta {
     roles?: string[];
     permissions?: string[];
     requiredApps?: string[];
+    requiredProcessPermission?: { processId: string; action: string };
 }
 
 function makeContext(meta: MockMeta, headers: Record<string, string> = {}): {
@@ -77,6 +78,42 @@ function makePrisma(
     } as unknown as ConstructorParameters<typeof JwtAuthGuard>[3];
 }
 
+/**
+ * Stub PermissionsService backing the Layer 3 fallback. `sources` mirrors the real
+ * `processSources` map — a process/action absent from it resolves as unconfigured,
+ * which must NOT satisfy a role gate.
+ */
+function makePermissions(
+    sources: Record<string, Record<string, string>> = {},
+    permissions: Record<string, Record<string, boolean>> = {},
+) {
+    return {
+        resolveForUser: jest.fn().mockResolvedValue({
+            processSources: sources,
+            processPermissions: permissions,
+        }),
+        can: jest.fn().mockResolvedValue(true),
+    } as unknown as ConstructorParameters<typeof JwtAuthGuard>[4];
+}
+
+function makeGuard(
+    meta: MockMeta,
+    opts: {
+        redis?: ConstructorParameters<typeof JwtAuthGuard>[1];
+        serviceKeys?: ConstructorParameters<typeof JwtAuthGuard>[2];
+        prisma?: ConstructorParameters<typeof JwtAuthGuard>[3];
+        permissions?: ConstructorParameters<typeof JwtAuthGuard>[4];
+    } = {},
+) {
+    return new JwtAuthGuard(
+        makeReflector(meta),
+        opts.redis ?? makeRedis(),
+        opts.serviceKeys ?? makeServiceKeys(),
+        opts.prisma ?? makePrisma(),
+        opts.permissions ?? makePermissions(),
+    );
+}
+
 function token(payload: Record<string, unknown>): string {
     return sign(payload, SECRET);
 }
@@ -84,28 +121,31 @@ function token(payload: Record<string, unknown>): string {
 describe('JwtAuthGuard', () => {
     beforeEach(() => {
         process.env.JWT_SECRET = SECRET;
+        // The role table is cached across requests by design; each test supplies its
+        // own role fixture, so the cache must not carry over between them.
+        (JwtAuthGuard as unknown as { roleCache: unknown }).roleCache = null;
     });
 
     it('allows public routes with no token', async () => {
-        const guard = new JwtAuthGuard(makeReflector({ isPublic: true }), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard({ isPublic: true });
         const { context } = makeContext({ isPublic: true });
         await expect(guard.canActivate(context)).resolves.toBe(true);
     });
 
     it('rejects protected routes with no token (401)', async () => {
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard({});
         const { context } = makeContext({});
         await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
     it('rejects protected routes with an invalid token (401)', async () => {
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard({});
         const { context } = makeContext({}, { authorization: 'Bearer not-a-real-token' });
         await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
     it('allows a valid token when no roles are required and sets request.user', async () => {
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard({});
         const { context, request } = makeContext(
             {},
             { authorization: `Bearer ${token({ sub: 'u1', email: 'a@b.c', role: 'staff' })}` },
@@ -116,7 +156,7 @@ describe('JwtAuthGuard', () => {
 
     it('enforces required roles (403 when missing)', async () => {
         const meta = { roles: ['admin'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard(meta);
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
         });
@@ -125,7 +165,7 @@ describe('JwtAuthGuard', () => {
 
     it('allows when the user has the required role (case-insensitive)', async () => {
         const meta = { roles: ['Admin'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard(meta);
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'admin' })}`,
         });
@@ -133,12 +173,7 @@ describe('JwtAuthGuard', () => {
     });
 
     it('rejects a token issued before a revocation marker (401)', async () => {
-        const guard = new JwtAuthGuard(
-            makeReflector({}),
-            makeRedis({ isEnabled: true, revokedAt: '9999999999' }),
-            makeServiceKeys(),
-            makePrisma(),
-        );
+        const guard = makeGuard({}, { redis: makeRedis({ isEnabled: true, revokedAt: '9999999999' }) });
         const { context } = makeContext({}, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
         });
@@ -146,12 +181,7 @@ describe('JwtAuthGuard', () => {
     });
 
     it('allows a token issued after the revocation marker', async () => {
-        const guard = new JwtAuthGuard(
-            makeReflector({}),
-            makeRedis({ isEnabled: true, revokedAt: '1' }),
-            makeServiceKeys(),
-            makePrisma(),
-        );
+        const guard = makeGuard({}, { redis: makeRedis({ isEnabled: true, revokedAt: '1' }) });
         const { context } = makeContext({}, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
         });
@@ -160,7 +190,7 @@ describe('JwtAuthGuard', () => {
 
     it('allows when the user has a required app', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard(meta);
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff', assignedApps: ['hr', 'ess'] })}`,
         });
@@ -169,7 +199,7 @@ describe('JwtAuthGuard', () => {
 
     it('denies when the user lacks the required app (403)', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard(meta);
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff', assignedApps: ['construction'] })}`,
         });
@@ -178,7 +208,7 @@ describe('JwtAuthGuard', () => {
 
     it('lets admins bypass app restrictions', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard(meta);
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'admin', assignedApps: [] })}`,
         });
@@ -187,12 +217,9 @@ describe('JwtAuthGuard', () => {
 
     it('lets a super role satisfy a @Roles() gate it is not named in', async () => {
         const meta = { roles: ['admin'] };
-        const guard = new JwtAuthGuard(
-            makeReflector(meta),
-            makeRedis(),
-            makeServiceKeys(),
-            makePrisma([{ name: 'Managing Director', isSuper: true }]),
-        );
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Managing Director', isSuper: true }]),
+        });
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'Managing Director' })}`,
         });
@@ -201,12 +228,9 @@ describe('JwtAuthGuard', () => {
 
     it('lets an admin-created role reach a module its app scope covers', async () => {
         const meta = { roles: ['admin'], requiredApps: ['procurement'] };
-        const guard = new JwtAuthGuard(
-            makeReflector(meta),
-            makeRedis(),
-            makeServiceKeys(),
-            makePrisma([{ name: 'Procurement Officer', appScope: ['procurement'] }]),
-        );
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Procurement Officer', appScope: ['procurement'] }]),
+        });
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({
                 sub: 'u1',
@@ -219,12 +243,9 @@ describe('JwtAuthGuard', () => {
 
     it('still denies a configured role outside the route’s app scope (403)', async () => {
         const meta = { roles: ['admin'], requiredApps: ['finance'] };
-        const guard = new JwtAuthGuard(
-            makeReflector(meta),
-            makeRedis(),
-            makeServiceKeys(),
-            makePrisma([{ name: 'Procurement Officer', appScope: ['procurement'] }]),
-        );
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Procurement Officer', appScope: ['procurement'] }]),
+        });
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({
                 sub: 'u1',
@@ -235,9 +256,145 @@ describe('JwtAuthGuard', () => {
         await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
+    /**
+     * The escalation this fallback exists for: a Project Manager an admin extended
+     * into an application was still met with "does not have required role(s): admin"
+     * on every endpoint of it.
+     */
+    it('lets a user extended into an app reach a @Roles(admin) route for that app', async () => {
+        const meta = { roles: ['admin'], requiredApps: ['admin'] };
+        const guard = makeGuard(meta, {
+            // The role itself is NOT scoped to the admin app — the extension lives on
+            // the user record, which is the authoritative source for app access.
+            prisma: makePrisma([{ name: 'Project Manager', appScope: ['construction'] }]),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({
+                sub: 'u1',
+                role: 'Project Manager',
+                assignedApps: ['construction', 'admin', 'ess'],
+            })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('denies an app assignment whose role is not configured at all (403)', async () => {
+        // Role drift — a `role` string naming no configured role, such as the
+        // deprecated `viewer` default. The app assignment alone is not a grant.
+        const meta = { roles: ['admin'], requiredApps: ['admin'] };
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Project Manager', appScope: ['construction'] }]),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({
+                sub: 'u1',
+                role: 'viewer',
+                assignedApps: ['admin', 'ess'],
+            })}`,
+        });
+        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('still denies a role gate when neither an app nor a process is declared', async () => {
+        // Nothing to resolve against, so the static list stays authoritative — this
+        // is what keeps genuinely admin-only endpoints closed.
+        const meta = { roles: ['admin'] };
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Project Manager', appScope: ['construction'] }]),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({
+                sub: 'u1',
+                role: 'Project Manager',
+                assignedApps: ['construction', 'admin'],
+            })}`,
+        });
+        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets an explicitly granted process permission satisfy a @Roles() gate', async () => {
+        const meta = {
+            roles: ['admin'],
+            requiredProcessPermission: { processId: 'p_purchase_orders', action: 'approve' },
+        };
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Project Manager', appScope: ['construction'] }]),
+            permissions: makePermissions(
+                { p_purchase_orders: { approve: 'allow' } },
+                { p_purchase_orders: { approve: true } },
+            ),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({ sub: 'u1', role: 'Project Manager' })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('does not let an unconfigured ("open") process satisfy a @Roles() gate (403)', async () => {
+        // PermissionsService resolves unconfigured processes as open by design. That
+        // must never be what unlocks a role-gated endpoint.
+        const meta = {
+            roles: ['admin'],
+            requiredProcessPermission: { processId: 'p_purchase_orders', action: 'approve' },
+        };
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Project Manager', appScope: ['construction'] }]),
+            permissions: makePermissions(
+                { p_purchase_orders: { approve: 'open' } },
+                { p_purchase_orders: { approve: true } },
+            ),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({ sub: 'u1', role: 'Project Manager' })}`,
+        });
+        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets a super role bypass app restrictions under its own name', async () => {
+        const meta = { requiredApps: ['hr'] };
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([{ name: 'Managing Director', isSuper: true }]),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({
+                sub: 'u1',
+                role: 'Managing Director',
+                assignedApps: [],
+            })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('resolves @Permissions() through configuration rather than a JWT claim', async () => {
+        // The `permissions` claim is never issued, so this used to 403 everyone.
+        const meta = { permissions: ['p_purchase_orders:approve'] };
+        const permissions = makePermissions();
+        const guard = makeGuard(meta, { permissions });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({ sub: 'u1', role: 'Project Manager' })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+        expect((permissions as any).can).toHaveBeenCalledWith(
+            'u1',
+            'p_purchase_orders',
+            'approve',
+        );
+    });
+
+    it('denies @Permissions() when the configuration does not grant it (403)', async () => {
+        const meta = { permissions: ['p_purchase_orders:approve'] };
+        const permissions = makePermissions();
+        (permissions as any).can = jest.fn().mockResolvedValue(false);
+        const guard = makeGuard(meta, { permissions });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({ sub: 'u1', role: 'Project Manager' })}`,
+        });
+        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
     it('records presence for the authenticated user', async () => {
         const prisma = makePrisma();
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), prisma);
+        const guard = makeGuard({}, { prisma });
         const { context } = makeContext({}, {
             authorization: `Bearer ${token({ sub: 'presence-user-1', role: 'staff' })}`,
         });
@@ -253,7 +410,7 @@ describe('JwtAuthGuard', () => {
         (prisma as any).user.update = jest.fn(() => {
             throw new Error('db down');
         });
-        const guard = new JwtAuthGuard(makeReflector({}), makeRedis(), makeServiceKeys(), prisma);
+        const guard = makeGuard({}, { prisma });
         const { context } = makeContext({}, {
             authorization: `Bearer ${token({ sub: 'presence-user-2', role: 'staff' })}`,
         });
@@ -262,7 +419,7 @@ describe('JwtAuthGuard', () => {
 
     it('allows legacy tokens without an assignedApps claim (backward compat)', async () => {
         const meta = { requiredApps: ['hr'] };
-        const guard = new JwtAuthGuard(makeReflector(meta), makeRedis(), makeServiceKeys(), makePrisma());
+        const guard = makeGuard(meta);
         const { context } = makeContext(meta, {
             authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
         });
@@ -272,12 +429,7 @@ describe('JwtAuthGuard', () => {
     describe('service auth (@ServiceAuth)', () => {
         it('allows a valid X-Api-Key and records the service client', async () => {
             const meta = { isServiceAuth: true };
-            const guard = new JwtAuthGuard(
-                makeReflector(meta),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard(meta, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context, request } = makeContext(meta, { 'x-api-key': 'sk_live_good' });
             await expect(guard.canActivate(context)).resolves.toBe(true);
             expect((request as { serviceClient?: { name: string } }).serviceClient?.name).toBe(
@@ -287,59 +439,34 @@ describe('JwtAuthGuard', () => {
 
         it('accepts the key via "Authorization: ApiKey <key>"', async () => {
             const meta = { isServiceAuth: true };
-            const guard = new JwtAuthGuard(
-                makeReflector(meta),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard(meta, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context } = makeContext(meta, { authorization: 'ApiKey sk_live_good' });
             await expect(guard.canActivate(context)).resolves.toBe(true);
         });
 
         it('rejects an unknown key (401)', async () => {
             const meta = { isServiceAuth: true };
-            const guard = new JwtAuthGuard(
-                makeReflector(meta),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard(meta, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context } = makeContext(meta, { 'x-api-key': 'sk_live_wrong' });
             await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
         });
 
         it('rejects a service route with no credential at all (401)', async () => {
             const meta = { isServiceAuth: true };
-            const guard = new JwtAuthGuard(
-                makeReflector(meta),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard(meta, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context } = makeContext(meta);
             await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
         });
 
         it('does not let a service key satisfy a route that is not @ServiceAuth (401)', async () => {
-            const guard = new JwtAuthGuard(
-                makeReflector({}),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard({}, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context } = makeContext({}, { 'x-api-key': 'sk_live_good' });
             await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
         });
 
         it('still enforces roles for a user JWT on a service route (403)', async () => {
             const meta = { isServiceAuth: true, roles: ['admin'] };
-            const guard = new JwtAuthGuard(
-                makeReflector(meta),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard(meta, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context } = makeContext(meta, {
                 authorization: `Bearer ${token({ sub: 'u1', role: 'staff' })}`,
             });
@@ -348,12 +475,7 @@ describe('JwtAuthGuard', () => {
 
         it('lets a service key bypass role requirements', async () => {
             const meta = { isServiceAuth: true, roles: ['admin'] };
-            const guard = new JwtAuthGuard(
-                makeReflector(meta),
-                makeRedis(),
-                makeServiceKeys('sk_live_good'),
-                makePrisma(),
-            );
+            const guard = makeGuard(meta, { serviceKeys: makeServiceKeys('sk_live_good'), prisma: makePrisma() });
             const { context } = makeContext(meta, { 'x-api-key': 'sk_live_good' });
             await expect(guard.canActivate(context)).resolves.toBe(true);
         });

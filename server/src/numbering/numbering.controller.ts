@@ -9,8 +9,7 @@ import {
     Query,
     UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RequireApp } from '../auth/decorators';
 import { NumberingService } from './numbering.service';
 
 /**
@@ -22,7 +21,6 @@ import { NumberingService } from './numbering.service';
  * admin-only, since it governs every reference the system issues.
  */
 @Controller('numbering')
-@UseGuards(RolesGuard)
 export class NumberingController {
     constructor(private readonly svc: NumberingService) {}
 
@@ -45,24 +43,28 @@ export class NumberingController {
 
     @Post('configs')
     @Roles('admin')
+    @RequireApp('admin')
     create(@Body() body: any) {
         return this.svc.create(body);
     }
 
     @Patch('configs/:module')
     @Roles('admin')
+    @RequireApp('admin')
     update(@Param('module') module: string, @Body() body: any) {
         return this.svc.update(module, body);
     }
 
     @Post('configs/:module/reset')
     @Roles('admin')
+    @RequireApp('admin')
     reset(@Param('module') module: string) {
         return this.svc.reset(module);
     }
 
     @Delete('configs/:module')
     @Roles('admin')
+    @RequireApp('admin')
     remove(@Param('module') module: string) {
         return this.svc.remove(module);
     }

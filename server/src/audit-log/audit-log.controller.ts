@@ -1,14 +1,12 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { AuditLogService } from './audit-log.service';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('audit-logs')
 export class AuditLogController {
   constructor(private auditLogService: AuditLogService) {}
 
   @Get()
-  @UseGuards(RolesGuard)
   @Roles('admin', 'compliance-officer')
   async getAuditLogs(
     @Query('userId') userId?: string,

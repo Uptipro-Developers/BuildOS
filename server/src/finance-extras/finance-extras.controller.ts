@@ -3,6 +3,7 @@ import {
     Param, Body, Query,
 } from '@nestjs/common';
 import { FinanceExtrasService } from './finance-extras.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller()
 export class FinanceExtrasController {
@@ -50,6 +51,7 @@ export class FinanceExtrasController {
     @Put('chart-accounts/:id')
     updateAccount(@Param('id') id: string, @Body() body: any) { return this.svc.updateAccount(id, body); }
     @Delete('chart-accounts/:id')
+    @RequiresProcess('p_chart_of_accounts', 'delete')
     deleteAccount(@Param('id') id: string) { return this.svc.deleteAccount(id); }
 
     // ── Bank Accounts ──

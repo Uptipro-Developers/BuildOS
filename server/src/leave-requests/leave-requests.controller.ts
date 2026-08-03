@@ -12,13 +12,11 @@ import {
   Request,
 } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 import { LeaveBalanceService } from './leave-balance.service';
 import { LeaveRequestsService } from './leave-requests.service';
 import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('leave-requests')
-@UseGuards(RolesGuard)
 export class LeaveRequestsController {
   constructor(
     private leaveBalanceService: LeaveBalanceService,
@@ -107,6 +105,7 @@ export class LeaveRequestsController {
   }
 
   @Delete(':id')
+  @RequiresProcess('p_leave_requests', 'delete')
   @Roles('admin', 'employee')
   async delete(@Param('id') id: string) {
     await this.leaveRequestsService.remove(id);

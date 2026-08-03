@@ -9,11 +9,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 import { TimelineService } from './timeline.service';
 
 @Controller('timelines')
-@UseGuards(RolesGuard)
 export class TimelineController {
   constructor(private timelineService: TimelineService) {}
 

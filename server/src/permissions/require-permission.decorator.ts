@@ -25,11 +25,15 @@ interface RequiredPermission {
  * UI actually matters — so a role or user whose `approve`/`delete` has been
  * revoked cannot simply call the API directly.
  *
- * This is additive to RolesGuard rather than a replacement: RolesGuard still
- * checks the coarse `@Roles()` list, and this checks the fine-grained VCEAD
+ * This is additive to the global JwtAuthGuard rather than a replacement: that
+ * guard checks the coarse `@Roles()` list, and this checks the fine-grained VCEAD
  * configuration on top. Anything an admin has not configured resolves to allowed,
  * so adding this to an endpoint changes nothing until a permission is actually
  * restricted.
+ *
+ * Declaring a process here also gives the role gate something to resolve against:
+ * JwtAuthGuard reads the same metadata, so a role an admin has explicitly granted
+ * this process satisfies a `@Roles()` list it is not named on.
  */
 @Injectable()
 export class ProcessPermissionGuard implements CanActivate {
@@ -47,7 +51,7 @@ export class ProcessPermissionGuard implements CanActivate {
 
         const request = context.switchToHttp().getRequest<Request>();
         const user = request.user as any;
-        // RolesGuard runs first and populates request.user from the JWT (`sub`).
+        // JwtAuthGuard runs first and populates request.user from the JWT (`sub`).
         // With no identity there is nothing to resolve, so leave the decision to
         // the authentication guards rather than inventing a denial here.
         const userId = String(user?.sub ?? user?.id ?? '');

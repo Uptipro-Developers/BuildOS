@@ -9,14 +9,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RequireApp } from '../auth/decorators';
 import { SystemConfigService } from './system-config.service';
 import { ReportBuilderService } from '../reports/report-builder.service';
 import { ReportQueryService } from '../reports/report-query.service';
 
 @Controller('system-config')
-@UseGuards(RolesGuard)
 export class SystemConfigController {
   constructor(
     private configService: SystemConfigService,
@@ -26,6 +24,7 @@ export class SystemConfigController {
   // ── Company Profile ──
   @Get('profile')
   @Roles('admin')
+  @RequireApp('admin')
   async getProfile() {
     const profile = await this.configService.getCompanyProfile();
     return { success: true, data: profile };
@@ -33,6 +32,7 @@ export class SystemConfigController {
 
   @Put('profile')
   @Roles('admin')
+  @RequireApp('admin')
   async updateProfile(@Body() data: any) {
     const profile = await this.configService.updateCompanyProfile(data);
     return { success: true, data: profile, message: 'Profile updated' };
@@ -48,6 +48,7 @@ export class SystemConfigController {
 
   @Post('tax-configs')
   @Roles('admin')
+  @RequireApp('admin')
   async saveTaxConfig(@Body() data: any) {
     const config = await this.configService.saveTaxConfig(data);
     return { success: true, data: config, message: 'Tax config saved' };
@@ -55,6 +56,7 @@ export class SystemConfigController {
 
   @Delete('tax-configs/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async deleteTaxConfig(@Param('id') id: string) {
     await this.configService.deleteTaxConfig(id);
     return { success: true, message: 'Tax config deleted' };
@@ -70,6 +72,7 @@ export class SystemConfigController {
 
   @Post('approval-workflows')
   @Roles('admin')
+  @RequireApp('admin')
   async createApprovalWorkflow(@Body() data: any) {
     const workflow = await this.configService.createApprovalWorkflow(data);
     return { success: true, data: workflow, message: 'Workflow created' };
@@ -77,6 +80,7 @@ export class SystemConfigController {
 
   @Put('approval-workflows/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async updateApprovalWorkflow(@Param('id') id: string, @Body() data: any) {
     const workflow = await this.configService.updateApprovalWorkflow(id, data);
     return { success: true, data: workflow, message: 'Workflow updated' };
@@ -84,6 +88,7 @@ export class SystemConfigController {
 
   @Delete('approval-workflows/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async deleteApprovalWorkflow(@Param('id') id: string) {
     await this.configService.deleteApprovalWorkflow(id);
     return { success: true, message: 'Workflow deleted' };
@@ -99,6 +104,7 @@ export class SystemConfigController {
 
   @Post('holidays')
   @Roles('admin')
+  @RequireApp('admin')
   async createHoliday(@Body() data: any) {
     const holiday = await this.configService.createHoliday(data);
     return { success: true, data: holiday, message: 'Holiday created' };
@@ -106,6 +112,7 @@ export class SystemConfigController {
 
   @Delete('holidays/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async deleteHoliday(@Param('id') id: string) {
     await this.configService.deleteHoliday(id);
     return { success: true, message: 'Holiday deleted' };
@@ -121,6 +128,7 @@ export class SystemConfigController {
 
   @Post('salary-bands')
   @Roles('admin')
+  @RequireApp('admin')
   async createSalaryBand(@Body() data: any) {
     const band = await this.configService.createSalaryBand(data);
     return { success: true, data: band, message: 'Salary band created' };
@@ -128,6 +136,7 @@ export class SystemConfigController {
 
   @Put('salary-bands/:id')
   @Roles('admin')
+  @RequireApp('admin')
   async updateSalaryBand(@Param('id') id: string, @Body() data: any) {
     const band = await this.configService.updateSalaryBand(id, data);
     return { success: true, data: band, message: 'Salary band updated' };
@@ -136,6 +145,7 @@ export class SystemConfigController {
   // ── Document Settings ──
   @Get('document-settings')
   @Roles('admin')
+  @RequireApp('admin')
   async getDocumentSettings() {
     const settings = await this.configService.getDocumentSettings();
     return { success: true, data: settings };
@@ -152,6 +162,7 @@ export class SystemConfigController {
   // ── All Application Settings ──
   @Get('all')
   @Roles('admin')
+  @RequireApp('admin')
   async getAllSettings() {
     const settings = await this.configService.getApplicationSettings();
     return { success: true, data: settings };
@@ -159,7 +170,6 @@ export class SystemConfigController {
 }
 
 @Controller('reports')
-@UseGuards(RolesGuard)
 export class ReportsController {
   constructor(
     private reportService: ReportBuilderService,
@@ -176,6 +186,7 @@ export class ReportsController {
 
   @Post('definitions')
   @Roles('admin')
+  @RequireApp('admin')
   async createReportDefinition(@Body() data: any) {
     const definition = await this.reportService.createReportDefinition(data);
     return { success: true, data: definition, message: 'Report definition created' };
@@ -279,6 +290,7 @@ export class ReportsController {
   // ── Schedule Report ──
   @Put(':reportId/schedule')
   @Roles('admin')
+  @RequireApp('admin')
   async scheduleReport(
     @Param('reportId') reportId: string,
     @Body('schedule') schedule: string,

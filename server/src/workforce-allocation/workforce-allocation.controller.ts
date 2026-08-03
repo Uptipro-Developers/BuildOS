@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query } from '@nestjs/common';
 import { WorkforceAllocationService } from './workforce-allocation.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller()
 export class WorkforceAllocationController {
@@ -21,5 +22,6 @@ export class WorkforceAllocationController {
     update(@Param('id') id: string, @Body() body: any) { return this.svc.update(id, body); }
 
     @Delete('workforce-allocation/:id')
+    @RequiresProcess('p_workforce_allocation', 'delete')
     remove(@Param('id') id: string) { return this.svc.remove(id); }
 }

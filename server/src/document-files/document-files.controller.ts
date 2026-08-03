@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { DocumentFilesService } from './document-files.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('document-files')
 export class DocumentFilesController {
@@ -26,6 +27,7 @@ export class DocumentFilesController {
     }
 
     @Delete(':id')
+    @RequiresProcess('p_documents', 'delete')
     remove(@Param('id') id: string) {
         return this.service.remove(id);
     }

@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Param, Put, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
-import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RequireApp } from '../auth/decorators';
 import { OverrideState, PermissionsService } from './permissions.service';
 
 /** The JWT signs the user id as `sub`; older tokens used `id`. */
@@ -11,7 +10,6 @@ function actingUserId(req: Request): string {
 }
 
 @Controller()
-@UseGuards(RolesGuard)
 export class PermissionsController {
     constructor(private readonly permissions: PermissionsService) {}
 
@@ -29,6 +27,7 @@ export class PermissionsController {
 
     @Get('admin/users/:id/permissions')
     @Roles('admin')
+    @RequireApp('admin')
     getForUser(@Param('id') id: string) {
         return this.permissions.resolveForUser(id);
     }
@@ -39,6 +38,7 @@ export class PermissionsController {
      */
     @Put('admin/users/:id/permissions')
     @Roles('admin')
+    @RequireApp('admin')
     setForUser(
         @Param('id') id: string,
         @Body()

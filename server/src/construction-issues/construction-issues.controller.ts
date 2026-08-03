@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
 import { ConstructionIssuesService } from './construction-issues.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('construction-issues')
 export class ConstructionIssuesController {
@@ -26,6 +27,7 @@ export class ConstructionIssuesController {
     }
 
     @Delete(':id')
+    @RequiresProcess('p_site_issues', 'delete')
     remove(@Param('id') id: string) {
         return this.service.remove(id);
     }

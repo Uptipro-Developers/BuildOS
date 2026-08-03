@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { MaterialsService } from './materials.service';
 import { AdminExtrasService } from '../admin-extras/admin-extras.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller()
 export class MaterialsController {
@@ -21,6 +22,7 @@ export class MaterialsController {
     @Put('materials/:id')
     updateMaterial(@Param('id') id: string, @Body() body: any) { return this.svc.updateMaterial(id, body); }
     @Delete('materials/:id')
+    @RequiresProcess('p_materials', 'delete')
     deleteMaterial(@Param('id') id: string) { return this.svc.deleteMaterial(id); }
 
     // ── Stores ──

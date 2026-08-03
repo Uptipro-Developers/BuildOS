@@ -11,13 +11,11 @@ import {
   Request,
 } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 import { PayrollOrchestrationService } from './payroll-orchestration.service';
 import { PayrollValidationService } from './payroll-validation.service';
 import { LeaveBalanceService } from '../leave-requests/leave-balance.service';
 
 @Controller('payroll')
-@UseGuards(RolesGuard)
 export class PayrollController {
   constructor(
     private payrollService: PayrollOrchestrationService,

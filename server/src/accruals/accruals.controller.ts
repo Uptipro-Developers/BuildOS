@@ -39,6 +39,7 @@ export class AccrualsController {
     update(@Param('id') id: string, @Body() body: any) { return this.svc.update(id, body); }
 
     @Delete('accruals/:id')
+    @RequiresProcess('p_accruals', 'delete')
     remove(@Param('id') id: string) { return this.svc.remove(id); }
 
     @Post('accruals/:id/reverse')

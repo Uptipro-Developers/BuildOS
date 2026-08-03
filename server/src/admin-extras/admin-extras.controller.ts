@@ -5,11 +5,9 @@ import {
 import { AdminExtrasService } from './admin-extras.service';
 import { UserActivityService } from './user-activity.service';
 import { ReportSchedulerService } from '../reports/report-scheduler.service';
-import { Roles, Public } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RequireApp, Public } from '../auth/decorators';
 
 @Controller('admin')
-@UseGuards(RolesGuard)
 export class AdminExtrasController {
     constructor(
         private readonly svc: AdminExtrasService,
@@ -20,12 +18,14 @@ export class AdminExtrasController {
     // ── Per-user activity & requests (Admin → Users sidebar tabs) ──
     @Get('users/:id/activity')
     @Roles('admin')
+    @RequireApp('admin')
     getUserActivity(@Param('id') id: string, @Query('limit') limit?: number) {
         return this.userActivity.findUserActivity(id, limit ? Number(limit) : 50);
     }
 
     @Get('users/:id/requests')
     @Roles('admin')
+    @RequireApp('admin')
     getUserRequests(@Param('id') id: string) {
         return this.userActivity.findUserRequests(id);
     }
@@ -97,14 +97,17 @@ export class AdminExtrasController {
 
     @Get('reference-data')
     @Roles('admin')
+    @RequireApp('admin')
     getReferenceData() { return this.svc.referenceData(); }
 
     @Get('system-summary')
     @Roles('admin')
+    @RequireApp('admin')
     getSystemSummary() { return this.svc.systemSummary(); }
 
     @Get('activity-log')
     @Roles('admin')
+    @RequireApp('admin')
     getActivityLog() { return this.svc.activityLog(); }
 
     @Get('audit-logs')
@@ -116,24 +119,29 @@ export class AdminExtrasController {
     // ── Users ──
     @Post('users/invite')
     @Roles('admin')
+    @RequireApp('admin')
     inviteUser(@Body() body: { email: string; name: string; role?: string; assignedApps?: string[]; department?: string }) { return this.svc.inviteUser(body); }
     
     @Post('users/:id/resend-invite')
     @Roles('admin')
+    @RequireApp('admin')
     resendInvite(@Param('id') id: string) { return this.svc.resendInvite(id); }
     
     @Get('users')
     @Roles('admin')
+    @RequireApp('admin')
     getAllUsers(@Query('search') search?: string) { return this.svc.findAllUsers(search); }
 
     // ── Employee → User sync (Admin › Users › Pending Sync from HR) ──
     // Declared before 'users/:id' so "pending-sync" is not captured as an :id.
     @Get('users/pending-sync')
     @Roles('admin')
+    @RequireApp('admin')
     getPendingSyncEmployees() { return this.svc.findPendingSyncEmployees(); }
 
     @Post('employees/:id/sync')
     @Roles('admin')
+    @RequireApp('admin')
     syncEmployeeToUser(
         @Param('id') id: string,
         @Body() body: { email?: string; role?: string; assignedApps?: string[] },
@@ -141,44 +149,54 @@ export class AdminExtrasController {
 
     @Get('users/:id')
     @Roles('admin')
+    @RequireApp('admin')
     getUser(@Param('id') id: string) { return this.svc.findUser(id); }
     
     @Post('users')
     @Roles('admin')
+    @RequireApp('admin')
     createUser(@Body() body: any) { return this.svc.createUser(body); }
     
     @Put('users/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateUser(@Param('id') id: string, @Body() body: any) { return this.svc.updateUser(id, body); }
     
     @Delete('users/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteUser(@Param('id') id: string) { return this.svc.deleteUser(id); }
 
     // ── App Roles ──
     @Get('roles')
     @Roles('admin')
+    @RequireApp('admin')
     getAllRoles() { return this.svc.findAllRoles(); }
     
     @Get('roles/:id')
     @Roles('admin')
+    @RequireApp('admin')
     getRole(@Param('id') id: string) { return this.svc.findRole(id); }
     
     @Post('roles')
     @Roles('admin')
+    @RequireApp('admin')
     createRole(@Body() body: any) { return this.svc.createRole(body); }
     
     @Put('roles/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateRole(@Param('id') id: string, @Body() body: any) { return this.svc.updateRole(id, body); }
     
     @Delete('roles/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteRole(@Param('id') id: string) { return this.svc.deleteRole(id); }
 
     // ── Issue Types ──
     @Get('issue-types')
     @Roles('admin')
+    @RequireApp('admin')
     getIssueTypes() { return this.svc.findAllIssueTypes(); }
 
     // Public read so ESS employees (non-admin) can populate the "Log Issue"
@@ -189,19 +207,23 @@ export class AdminExtrasController {
     
     @Post('issue-types')
     @Roles('admin')
+    @RequireApp('admin')
     createIssueType(@Body() body: any) { return this.svc.createIssueType(body); }
     
     @Put('issue-types/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateIssueType(@Param('id') id: string, @Body() body: any) { return this.svc.updateIssueType(id, body); }
     
     @Delete('issue-types/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteIssueType(@Param('id') id: string) { return this.svc.deleteIssueType(id); }
 
     // ── Change Categories ──
     @Get('change-categories')
     @Roles('admin')
+    @RequireApp('admin')
     getChangeCategories() { return this.svc.findAllChangeCategories(); }
 
     // Public read so ESS employees (non-admin) can populate the change-request
@@ -212,53 +234,65 @@ export class AdminExtrasController {
     
     @Post('change-categories')
     @Roles('admin')
+    @RequireApp('admin')
     createChangeCategory(@Body() body: any) { return this.svc.createChangeCategory(body); }
     
     @Put('change-categories/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateChangeCategory(@Param('id') id: string, @Body() body: any) { return this.svc.updateChangeCategory(id, body); }
     
     @Delete('change-categories/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteChangeCategory(@Param('id') id: string) { return this.svc.deleteChangeCategory(id); }
 
     // ── Process Catalog ──
     @Get('process-catalog')
     @Roles('admin')
+    @RequireApp('admin')
     getProcessCatalog() { return this.svc.findProcessCatalog(); }
     
     @Post('process-catalog')
     @Roles('admin')
+    @RequireApp('admin')
     createProcessCatalogItem(@Body() body: any) { return this.svc.createProcessCatalogItem(body); }
     
     @Patch('process-catalog/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateProcessCatalogItem(@Param('id') id: string, @Body() body: any) { return this.svc.updateProcessCatalogItem(id, body); }
     
     @Delete('process-catalog/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteProcessCatalogItem(@Param('id') id: string) { return this.svc.deleteProcessCatalogItem(id); }
 
     // ── Process Workflows ──
     @Get('process-workflows')
     @Roles('admin')
+    @RequireApp('admin')
     getProcessWorkflows() { return this.svc.findProcessWorkflows(); }
     
     @Post('process-workflows')
     @Roles('admin')
+    @RequireApp('admin')
     createProcessWorkflow(@Body() body: any) { return this.svc.createProcessWorkflow(body); }
     
     @Patch('process-workflows/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateProcessWorkflow(@Param('id') id: string, @Body() body: any) { return this.svc.updateProcessWorkflow(id, body); }
     
     @Delete('process-workflows/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteProcessWorkflow(@Param('id') id: string) { return this.svc.deleteProcessWorkflow(id); }
 
     // ── General Settings ──
     @Get('general-settings')
     @Roles('admin')
+    @RequireApp('admin')
     getGeneralSettings() { return this.svc.getGeneralSettings(); }
 
     // Read-only, non-sensitive display preferences (currency, date/number
@@ -270,6 +304,7 @@ export class AdminExtrasController {
 
     @Put('general-settings')
     @Roles('admin')
+    @RequireApp('admin')
     updateGeneralSettings(@Body() body: any) { return this.svc.updateGeneralSettings(body); }
 
     // ── Store Levels ──
@@ -293,27 +328,33 @@ export class AdminExtrasController {
     // ── Company Profile ──
     @Get('company-profile')
     @Roles('admin')
+    @RequireApp('admin')
     getCompanyProfile() { return this.svc.getCompanyProfile(); }
     
     @Put('company-profile')
     @Roles('admin')
+    @RequireApp('admin')
     updateCompanyProfile(@Body() body: any) { return this.svc.updateCompanyProfile(body); }
 
     // ── Directors ──
     @Get('directors')
     @Roles('admin')
+    @RequireApp('admin')
     getAllDirectors() { return this.svc.findAllDirectors(); }
     
     @Post('directors')
     @Roles('admin')
+    @RequireApp('admin')
     createDirector(@Body() body: any) { return this.svc.createDirector(body); }
     
     @Put('directors/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateDirector(@Param('id') id: string, @Body() body: any) { return this.svc.updateDirector(id, body); }
 
     @Patch('directors/reorder')
     @Roles('admin')
+    @RequireApp('admin')
     reorderDirectors(@Body() body: { items?: Array<{ id: string; sequence: number }> } | Array<{ id: string; sequence: number }>) {
         const items = Array.isArray(body) ? body : (body?.items ?? []);
         return this.svc.reorderDirectors(items);
@@ -321,27 +362,33 @@ export class AdminExtrasController {
     
     @Delete('directors/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteDirector(@Param('id') id: string) { return this.svc.deleteDirector(id); }
 
     // ── Email Config ──
     @Get('email-config')
     @Roles('admin')
+    @RequireApp('admin')
     getEmailConfigs() { return this.svc.findEmailConfigs(); }
 
     @Get('email-config/variables')
     @Roles('admin')
+    @RequireApp('admin')
     getEmailConfigVariables() { return this.svc.getEmailTemplateVariables(); }
 
     @Post('email-config')
     @Roles('admin')
+    @RequireApp('admin')
     createEmailConfig(@Body() body: any) { return this.svc.createEmailConfig(body); }
     
     @Patch('email-config/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateEmailConfig(@Param('id') id: string, @Body() body: any) { return this.svc.updateEmailConfig(id, body); }
     
     @Delete('email-config/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteEmailConfig(@Param('id') id: string) { return this.svc.deleteEmailConfig(id); }
 
     // ── Units of Measurement ──
@@ -373,27 +420,33 @@ export class AdminExtrasController {
     // ── API Keys ──
     @Get('api-keys')
     @Roles('admin')
+    @RequireApp('admin')
     getApiKeys() { return this.svc.findApiKeys(); }
 
     @Post('api-keys')
     @Roles('admin')
+    @RequireApp('admin')
     createApiKey(@Body() body: any) { return this.svc.createApiKey(body); }
 
     @Delete('api-keys/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteApiKey(@Param('id') id: string) { return this.svc.deleteApiKey(id); }
 
     // ── Webhooks ──
     @Get('webhooks')
     @Roles('admin')
+    @RequireApp('admin')
     getWebhooks() { return this.svc.findWebhooks(); }
 
     @Post('webhooks')
     @Roles('admin')
+    @RequireApp('admin')
     createWebhook(@Body() body: any) { return this.svc.createWebhook(body); }
 
     @Delete('webhooks/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteWebhook(@Param('id') id: string) { return this.svc.deleteWebhook(id); }
 
     // ── Email Templates ──
@@ -402,14 +455,17 @@ export class AdminExtrasController {
 
     @Post('email-templates')
     @Roles('admin')
+    @RequireApp('admin')
     createEmailTemplate(@Body() body: any) { return this.svc.createEmailTemplate(body); }
 
     @Patch('email-templates/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateEmailTemplate(@Param('id') id: string, @Body() body: any) { return this.svc.updateEmailTemplate(id, body); }
 
     @Delete('email-templates/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteEmailTemplate(@Param('id') id: string) { return this.svc.deleteEmailTemplate(id); }
 
     // ── Notification Rules ──
@@ -418,14 +474,17 @@ export class AdminExtrasController {
 
     @Post('notification-rules')
     @Roles('admin')
+    @RequireApp('admin')
     createNotificationRule(@Body() body: any) { return this.svc.createNotificationRule(body); }
 
     @Patch('notification-rules/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateNotificationRule(@Param('id') id: string, @Body() body: any) { return this.svc.updateNotificationRule(id, body); }
 
     @Delete('notification-rules/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteNotificationRule(@Param('id') id: string) { return this.svc.deleteNotificationRule(id); }
 
     // ── Report Schedules ──
@@ -434,21 +493,25 @@ export class AdminExtrasController {
 
     @Post('report-schedules')
     @Roles('admin')
+    @RequireApp('admin')
     createReportSchedule(@Body() body: any) { return this.svc.createReportSchedule(body); }
 
     @Patch('report-schedules/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateReportSchedule(@Param('id') id: string, @Body() body: any) {
         return this.svc.updateReportSchedule(id, body);
     }
 
     @Delete('report-schedules/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteReportSchedule(@Param('id') id: string) { return this.svc.deleteReportSchedule(id); }
 
     /** Runs a schedule immediately and stamps its last-sent time. */
     @Post('report-schedules/:id/send-now')
     @Roles('admin')
+    @RequireApp('admin')
     sendReportScheduleNow(@Param('id') id: string) { return this.scheduler.sendNow(id); }
 
     /**
@@ -460,11 +523,13 @@ export class AdminExtrasController {
      */
     @Get('report-schedules/status')
     @Roles('admin')
+    @RequireApp('admin')
     getReportSchedulerStatus() { return this.scheduler.status(); }
 
     /** Forces a scheduler pass now, without waiting for the next tick. */
     @Post('report-schedules/run-due')
     @Roles('admin')
+    @RequireApp('admin')
     async runDueReportSchedules() {
         await this.scheduler.tick();
         return this.scheduler.status();
@@ -473,17 +538,21 @@ export class AdminExtrasController {
     // ── Report Templates ──
     @Get('report-templates')
     @Roles('admin')
+    @RequireApp('admin')
     getReportTemplates() { return this.svc.findReportTemplates(); }
 
     @Post('report-templates')
     @Roles('admin')
+    @RequireApp('admin')
     createReportTemplate(@Body() body: any) { return this.svc.createReportTemplate(body); }
 
     @Patch('report-templates/:id')
     @Roles('admin')
+    @RequireApp('admin')
     updateReportTemplate(@Param('id') id: string, @Body() body: any) { return this.svc.updateReportTemplate(id, body); }
 
     @Delete('report-templates/:id')
     @Roles('admin')
+    @RequireApp('admin')
     deleteReportTemplate(@Param('id') id: string) { return this.svc.deleteReportTemplate(id); }
 }

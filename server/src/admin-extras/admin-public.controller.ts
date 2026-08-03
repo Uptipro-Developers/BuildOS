@@ -1,10 +1,8 @@
 import { Body, Controller, Get, Put, Query, UseGuards } from '@nestjs/common';
-import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
+import { Roles, RequireApp } from '../auth/decorators';
 import { AdminExtrasService } from './admin-extras.service';
 
 @Controller()
-@UseGuards(RolesGuard)
 export class AdminPublicController {
     constructor(private readonly svc: AdminExtrasService) { }
 
@@ -47,12 +45,14 @@ export class AdminPublicController {
 
     @Get('company-profile')
     @Roles('admin')
+    @RequireApp('admin')
     getCompanyProfile() {
         return this.svc.getCompanyProfile();
     }
 
     @Put('company-profile')
     @Roles('admin')
+    @RequireApp('admin')
     updateCompanyProfile(@Body() body: any) {
         return this.svc.updateCompanyProfile(body);
     }

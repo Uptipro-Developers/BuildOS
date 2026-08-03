@@ -1,11 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { Roles } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 import { AdminExtrasService } from './admin-extras.service';
 
 @Controller()
-@UseGuards(RolesGuard)
 export class ApprovalsPublicController {
     constructor(private readonly svc: AdminExtrasService) { }
 

@@ -12,10 +12,8 @@ import {
 } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { Roles, Public } from '../auth/decorators';
-import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('tasks')
-@UseGuards(RolesGuard)
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
