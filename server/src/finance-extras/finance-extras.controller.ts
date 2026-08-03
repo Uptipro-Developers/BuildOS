@@ -89,6 +89,12 @@ export class FinanceExtrasController {
     // ── Payment Methods ──
     @Get('payment-methods')
     getPaymentMethods() { return this.svc.findPaymentMethods(); }
+    @Post('payment-methods')
+    createPaymentMethod(@Body() body: any) { return this.svc.createPaymentMethod(body); }
+    @Put('payment-methods/:id')
+    updatePaymentMethod(@Param('id') id: string, @Body() body: any) { return this.svc.updatePaymentMethod(id, body); }
+    @Delete('payment-methods/:id')
+    deletePaymentMethod(@Param('id') id: string) { return this.svc.deletePaymentMethod(id); }
     @Patch('payment-methods/:id/toggle')
     togglePaymentMethod(@Param('id') id: string) { return this.svc.togglePaymentMethod(id); }
 

@@ -17,6 +17,7 @@ import { getReferenceData } from "../../api/reference-data";
 import { fetchPurchaseOrders } from "../../api/purchase-orders";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { useNumbering } from "../../stores/numberingStore";
+import { useProcurementUnits } from "../../utils/useProcurementUnits";
 
 type GRNStatus = "pending" | "partial" | "completed" | "over_supply";
 
@@ -78,17 +79,6 @@ const statusConfig: Record<
     icon: "AlertTriangle",
   },
 };
-
-const GRN_UNITS = [
-  "Bags",
-  "Units",
-  "Metres",
-  "Tonnes",
-  "Sheets",
-  "Rolls",
-  "Litres",
-  "Cartons",
-];
 
 interface GRNItem {
   material: string;
@@ -157,6 +147,7 @@ function RecordDeliveryModal({
       .catch(() => {});
   }, [existingGrn?.warehouse]);
 
+  const units = useProcurementUnits();
   const [items, setItems] = useState<GRNItem[]>(
     existingGrn
       ? existingGrn.items
@@ -177,7 +168,7 @@ function RecordDeliveryModal({
             received: "",
             accepted: "",
             rejected: "0",
-            unit: GRN_UNITS[0],
+            unit: units[0],
             reason: "",
           },
         ],
@@ -192,7 +183,7 @@ function RecordDeliveryModal({
         received: "",
         accepted: "",
         rejected: "0",
-        unit: GRN_UNITS[0],
+        unit: units[0],
         reason: "",
       },
     ]);
@@ -389,11 +380,9 @@ function RecordDeliveryModal({
                           className="border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                         >
                           {/* Include the line's own unit so a catalogue unit
-                              outside GRN_UNITS still renders as selected. */}
+                              outside the configured list still renders as selected. */}
                           {Array.from(
-                            new Set(
-                              [...GRN_UNITS, item.unit].filter(Boolean),
-                            ),
+                            new Set([...units, item.unit].filter(Boolean)),
                           ).map((u) => (
                             <option key={u}>{u}</option>
                           ))}

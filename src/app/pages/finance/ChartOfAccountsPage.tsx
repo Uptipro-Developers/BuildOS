@@ -50,6 +50,45 @@ const fmt = (n: number) => {
   return n >= 0 ? abs : `(${abs})`;
 };
 
+/**
+ * Orders accounts as a tree in pre-order (each parent immediately followed by
+ * its children, siblings by code) so the row indentation actually lines
+ * children up under their parent. Accounts whose parent is missing are treated
+ * as roots, and a seen-set guards against cyclic parent references.
+ */
+function orderAccountsTree(list: Account[]): Account[] {
+  const byCode = (x: Account, y: Account) =>
+    x.code.localeCompare(y.code, undefined, { numeric: true });
+  const ids = new Set(list.map((a) => a.id));
+  const childrenOf = new Map<string, Account[]>();
+  for (const a of list) {
+    if (a.parentId && ids.has(a.parentId)) {
+      const bucket = childrenOf.get(a.parentId) ?? [];
+      bucket.push(a);
+      childrenOf.set(a.parentId, bucket);
+    }
+  }
+  for (const bucket of childrenOf.values()) bucket.sort(byCode);
+
+  const result: Account[] = [];
+  const seen = new Set<string>();
+  const visit = (a: Account) => {
+    if (seen.has(a.id)) return;
+    seen.add(a.id);
+    result.push(a);
+    for (const child of childrenOf.get(a.id) ?? []) visit(child);
+  };
+
+  const roots = list
+    .filter((a) => !a.parentId || !ids.has(a.parentId))
+    .sort(byCode);
+  for (const root of roots) visit(root);
+  // Defensive: surface any account left unvisited (e.g. a parent cycle).
+  for (const a of list) if (!seen.has(a.id)) result.push(a);
+  return result;
+}
+
+
 export function ChartOfAccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const { logChange } = useChangelog();
@@ -84,7 +123,7 @@ export function ChartOfAccountsPage() {
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
 
-  const filtered = accounts.filter((a) => {
+  const filtered = orderAccountsTree(accounts).filter((a) => {
     if (typeFilter !== "All" && a.type !== typeFilter) return false;
     if (
       search &&
@@ -198,8 +237,8 @@ export function ChartOfAccountsPage() {
       // top-level leaf, so parent ledgers were not identifiable in the table.
       const isParent = accounts.some((c) => c.parentId === a.id);
       return (
-        <div className="flex items-center" style={{ paddingLeft: `${depth * 16}px` }}>
-          {depth > 0 && <ChevronRight className="w-3 h-3 text-gray-300 mr-1 shrink-0" />}
+        <div className="flex items-center" style={{ paddingLeft: `${depth * 24}px` }}>
+          {depth > 0 && <ChevronRight className="w-3.5 h-3.5 text-gray-400 mr-1 shrink-0" />}
           <span className={`text-sm ${isParent ? "font-semibold" : ""} text-gray-900`}>{a.name}</span>
           {isParent && (
             <span className="ml-2 shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide rounded bg-emerald-50 text-emerald-700 border border-emerald-200">

@@ -433,8 +433,20 @@ export function SalaryStructurePage() {
   const [bands, setBands] = useState<SalaryBand[]>([]);
 
   useEffect(() => {
-    apiFetch("/salary-bands")
-      .then(setBands)
+    apiFetch<any[]>("/salary-bands")
+      .then((rows) =>
+        setBands(
+          rows.map((b) => ({
+            id: b.id,
+            gradeName: b.gradeName ?? b.name ?? "",
+            gradeLevel: b.gradeLevel ?? "",
+            department: b.department ?? "",
+            description: b.description ?? "",
+            basicSalary: b.basicSalary ?? 0,
+            components: Array.isArray(b.components) ? b.components : [],
+          })),
+        ),
+      )
       .catch((err) => {
         console.error("Failed to load salary bands:", err);
         setBands([]);
@@ -472,51 +484,91 @@ export function SalaryStructurePage() {
     setModalBand(band);
   };
 
-  const saveComponent = (bandId: string, comp: SalaryComponent) => {
-    const isExisting = bands
-      .find((b) => b.id === bandId)
-      ?.components.some((c) => c.id === comp.id);
+  const saveComponent = async (bandId: string, comp: SalaryComponent) => {
+    const band = bands.find((b) => b.id === bandId);
+    if (!band) return;
+    const exists = band.components.some((c) => c.id === comp.id);
+    const nextComponents = exists
+      ? band.components.map((c) => (c.id === comp.id ? comp : c))
+      : [...band.components, comp];
     setBands((prev) =>
-      prev.map((b) => {
-        if (b.id !== bandId) return b;
-        const exists = b.components.find((c) => c.id === comp.id);
-        return {
-          ...b,
-          components: exists
-            ? b.components.map((c) => (c.id === comp.id ? comp : c))
-            : [...b.components, comp],
-        };
-      }),
+      prev.map((b) => (b.id === bandId ? { ...b, components: nextComponents } : b)),
     );
     setModalBand(null);
     setEditComp(null);
-    toast.success(
-      isExisting ? `"${comp.name}" updated.` : `"${comp.name}" added.`,
-    );
+    try {
+      await apiFetch(`/salary-bands/${bandId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ components: nextComponents }),
+      });
+      toast.success(exists ? `"${comp.name}" updated.` : `"${comp.name}" added.`);
+    } catch (err) {
+      setBands((prev) => prev.map((b) => (b.id === bandId ? band : b)));
+      toast.error(
+        err instanceof Error ? err.message : `Failed to save "${comp.name}".`,
+      );
+    }
   };
 
-  const deleteComponent = (bandId: string, compId: string) => {
-    const name = bands
-      .find((b) => b.id === bandId)
-      ?.components.find((c) => c.id === compId)?.name;
+  const deleteComponent = async (bandId: string, compId: string) => {
+    const band = bands.find((b) => b.id === bandId);
+    if (!band) return;
+    const name = band.components.find((c) => c.id === compId)?.name;
+    const nextComponents = band.components.filter((c) => c.id !== compId);
     setBands((prev) =>
-      prev.map((b) =>
-        b.id !== bandId
-          ? b
-          : { ...b, components: b.components.filter((c) => c.id !== compId) },
-      ),
+      prev.map((b) => (b.id === bandId ? { ...b, components: nextComponents } : b)),
     );
     setDeleteTarget(null);
-    toast.success(name ? `"${name}" deleted.` : "Component deleted.");
+    try {
+      await apiFetch(`/salary-bands/${bandId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ components: nextComponents }),
+      });
+      toast.success(name ? `"${name}" deleted.` : "Component deleted.");
+    } catch (err) {
+      setBands((prev) => prev.map((b) => (b.id === bandId ? band : b)));
+      toast.error(
+        err instanceof Error ? err.message : "Failed to delete the component.",
+      );
+    }
   };
 
-  const addBand = () => {
+  const addBand = async () => {
     if (!newBand.gradeName.trim()) return;
     const gradeName = newBand.gradeName.trim();
-    setBands((p) => [...p, { ...newBand, id: `band-${Date.now()}`, components: [] }]);
-    setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0 });
-    setAddBandOpen(false);
-    toast.success(`Salary band "${gradeName}" created.`);
+    try {
+      const created = await apiFetch<any>("/salary-bands", {
+        method: "POST",
+        body: JSON.stringify({
+          name: gradeName,
+          gradeName,
+          gradeLevel: newBand.gradeLevel,
+          department: newBand.department,
+          description: newBand.description,
+          basicSalary: newBand.basicSalary,
+          components: [],
+        }),
+      });
+      setBands((p) => [
+        ...p,
+        {
+          id: created.id,
+          gradeName: created.gradeName ?? gradeName,
+          gradeLevel: created.gradeLevel ?? newBand.gradeLevel,
+          department: created.department ?? newBand.department,
+          description: created.description ?? newBand.description,
+          basicSalary: created.basicSalary ?? newBand.basicSalary,
+          components: Array.isArray(created.components) ? created.components : [],
+        },
+      ]);
+      setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0 });
+      setAddBandOpen(false);
+      toast.success(`Salary band "${gradeName}" created.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create the salary band.",
+      );
+    }
   };
 
   return (

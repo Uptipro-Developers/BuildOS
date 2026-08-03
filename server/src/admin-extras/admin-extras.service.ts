@@ -162,6 +162,18 @@ export class AdminExtrasService {
         { label: 'South African Rand', value: 'ZAR', meta: 'R' },
     ];
 
+    private readonly defaultUnits = [
+        { id: 'u-tonnes', name: 'Tonnes', abbreviation: 'Tonnes', category: 'Weight' },
+        { id: 'u-bags', name: 'Bags', abbreviation: 'Bags', category: 'Count' },
+        { id: 'u-metres', name: 'Metres', abbreviation: 'Metres', category: 'Length' },
+        { id: 'u-sheets', name: 'Sheets', abbreviation: 'Sheets', category: 'Count' },
+        { id: 'u-rolls', name: 'Rolls', abbreviation: 'Rolls', category: 'Count' },
+        { id: 'u-units', name: 'Units', abbreviation: 'Units', category: 'Count' },
+        { id: 'u-cartons', name: 'Cartons', abbreviation: 'Cartons', category: 'Count' },
+        { id: 'u-litres', name: 'Litres', abbreviation: 'Litres', category: 'Volume' },
+        { id: 'u-buckets', name: 'Buckets', abbreviation: 'Buckets', category: 'Count' },
+    ];
+
     private buildFullAdminPermissions(processCatalog: any[]) {
         const processPermissions = Object.fromEntries(
             (Array.isArray(processCatalog) ? processCatalog : []).map((proc: any) => [
@@ -521,7 +533,9 @@ export class AdminExtrasService {
                 ? parsed.storeLevels
                 : [...this.defaultStoreLevels],
             storeThresholds: Array.isArray(parsed?.storeThresholds) ? parsed.storeThresholds : [],
-            units: Array.isArray(parsed?.units) ? parsed.units : [],
+            units: Array.isArray(parsed?.units) && parsed.units.length
+                ? parsed.units
+                : [...this.defaultUnits],
             materialCategories: Array.isArray(parsed?.materialCategories) ? parsed.materialCategories : [],
         };
     }

@@ -51,6 +51,13 @@ import {
   createChartAccount,
   updateChartAccount,
   deleteChartAccount,
+  createTaxConfig,
+  updateTaxConfig,
+  deleteTaxConfig,
+  getPaymentMethods,
+  createPaymentMethod,
+  updatePaymentMethod,
+  deletePaymentMethod,
 } from "../../api/finance-extras";
 
 const DEFAULT_CHART_OF_ACCOUNTS = [
@@ -170,40 +177,69 @@ export function FinancialConfigurationPage() {
     }
   };
 
-  const saveTaxRate = () => {
+  const saveTaxRate = async () => {
     if (!taxForm) return;
     const { id, name, rate } = taxForm;
-    if (id) {
-      setTaxSettings((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, name, rate } : t)),
+    setBusy(true);
+    try {
+      if (id) {
+        await updateTaxConfig(id, { name, rate });
+        setTaxSettings((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, name, rate } : t)),
+        );
+        toast.success(`Tax rate "${name}" updated.`);
+      } else {
+        const created = await createTaxConfig({
+          name,
+          rate,
+          type: "General",
+          isActive: true,
+        });
+        setTaxSettings((prev) => [
+          ...prev,
+          {
+            id: created.id,
+            name: created.name,
+            rate: created.rate,
+            default: prev.length === 0,
+          },
+        ]);
+        toast.success(`Tax rate "${name}" added.`);
+      }
+      setTaxForm(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the tax rate.",
       );
-      toast.success(`Tax rate "${name}" updated.`);
-    } else {
-      setTaxSettings((prev) => [
-        ...prev,
-        { id: `tax-${Date.now()}`, name, rate, default: prev.length === 0 },
-      ]);
-      toast.success(`Tax rate "${name}" added.`);
+    } finally {
+      setBusy(false);
     }
-    setTaxForm(null);
   };
 
-  const savePaymentMethod = () => {
+  const savePaymentMethod = async () => {
     if (!methodForm) return;
     const { id, name } = methodForm;
-    if (id) {
-      setPaymentMethods((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, name } : m)),
+    setBusy(true);
+    try {
+      if (id) {
+        await updatePaymentMethod(id, { name });
+        setPaymentMethods((prev) =>
+          prev.map((m) => (m.id === id ? { ...m, name } : m)),
+        );
+        toast.success(`Payment method "${name}" updated.`);
+      } else {
+        const created = await createPaymentMethod({ name });
+        setPaymentMethods((prev) => [...prev, created]);
+        toast.success(`Payment method "${name}" added.`);
+      }
+      setMethodForm(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save the payment method.",
       );
-      toast.success(`Payment method "${name}" updated.`);
-    } else {
-      setPaymentMethods((prev) => [
-        ...prev,
-        { id: `pm-${Date.now()}`, name, enabled: true },
-      ]);
-      toast.success(`Payment method "${name}" added.`);
+    } finally {
+      setBusy(false);
     }
-    setMethodForm(null);
   };
 
   const confirmDelete = async () => {
@@ -215,8 +251,10 @@ export function FinancialConfigurationPage() {
         await deleteChartAccount(id);
         setChartOfAccounts((prev) => prev.filter((a) => a.id !== id));
       } else if (kind === "tax") {
+        await deleteTaxConfig(id);
         setTaxSettings((prev) => prev.filter((t) => t.id !== id));
       } else {
+        await deletePaymentMethod(id);
         setPaymentMethods((prev) => prev.filter((m) => m.id !== id));
       }
       toast.success(`"${name}" deleted.`);
@@ -231,8 +269,8 @@ export function FinancialConfigurationPage() {
   };
 
   useEffect(() => {
-    Promise.all([getChartAccounts(), getTaxConfigs()])
-      .then(([accounts, taxes]) => {
+    Promise.all([getChartAccounts(), getTaxConfigs(), getPaymentMethods()])
+      .then(([accounts, taxes, methods]) => {
         if (accounts.length > 0) {
           const byId = new Map(accounts.map((a) => [a.id, a]));
           const mappedAccounts = accounts.map((a) => ({
@@ -255,6 +293,10 @@ export function FinancialConfigurationPage() {
               default: idx === (firstActiveIndex >= 0 ? firstActiveIndex : 0),
             })),
           );
+        }
+
+        if (methods.length > 0) {
+          setPaymentMethods(methods);
         }
       })
       .catch((err) => {

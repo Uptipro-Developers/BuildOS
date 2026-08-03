@@ -32,12 +32,12 @@ const IMPACT_COLORS: Record<string, { bg: string; text: string }> = {
 
 export function IssuesOverviewPage() {
   const navigate = useNavigate();
-  const [issues, setIssues] = useState(mockIssues);
+  const [issues, setIssues] = useState<typeof mockIssues>([]);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  // Load issues across all projects from the backend, falling back to mock data.
+  // Load issues across all projects from the backend.
   useEffect(() => {
     let active = true;
     listIssues()

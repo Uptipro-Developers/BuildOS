@@ -4,7 +4,7 @@ import {
   formatCurrencyByGeneralSettings,
   getCurrencyCode,
 } from "../../utils/generalSettings";
-import { getBankAccounts, getTaxConfigs } from "../../api/finance-extras";
+import { getBankAccounts, getTaxConfigs, getPaymentMethods, togglePaymentMethod } from "../../api/finance-extras";
 import { createAccrualType, updateAccrualType, deleteAccrualType } from "../../api/accruals";
 import { apiFetch } from "../../api/client";
 import { Save, Plus, Edit, Trash2, Settings2, Info, CreditCard, Building2, X, CheckCircle, Percent, Palette, Download } from "lucide-react";
@@ -172,6 +172,7 @@ export function FinanceConfigPage() {
           setApprovalThreshold(String(cfg.approvalThreshold));
       })
       .catch(() => {});
+    getPaymentMethods().then(setPaymentMethods).catch(console.error);
   }, []);
 
   // Tax state
@@ -226,9 +227,13 @@ export function FinanceConfigPage() {
   }
 
   function toggleMethod(id: string) {
-    setPaymentMethods((prev) => prev.map((m) => m.id === id ? { ...m, enabled: !m.enabled } : m));
     const method = paymentMethods.find(m => m.id === id);
+    setPaymentMethods((prev) => prev.map((m) => m.id === id ? { ...m, enabled: !m.enabled } : m));
     if (method) {
+      togglePaymentMethod(id).catch(() => {
+        setPaymentMethods((prev) => prev.map((m) => m.id === id ? { ...m, enabled: method.enabled } : m));
+        toast.error(`Failed to update ${method.name}.`);
+      });
       logChange({ module: "Finance", action: method.enabled ? "Disabled" : "Enabled", entityType: "PaymentMethod", entityId: id, summary: `Payment method "${method.name}" ${method.enabled ? "disabled" : "enabled"}`, performedBy: "Sola Adeleke" });
       toast.success(`${method.name} ${method.enabled ? "disabled" : "enabled"}.`);
     }

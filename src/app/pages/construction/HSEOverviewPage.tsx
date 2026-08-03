@@ -19,28 +19,18 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   Expired: { bg: "#FDE8E6", text: "#B33A2E" },
 };
 
-const INCIDENTS_MOCK = [
-  {
-    id: "INC-001",
-    type: "Near Miss",
-    date: "2026-05-15",
-    projectId: "PRJ-001",
-    description: "Worker slipped on wet surface near foundation area",
-    severity: "Low",
-  },
-  {
-    id: "INC-002",
-    type: "First Aid",
-    date: "2026-05-10",
-    projectId: "PRJ-002",
-    description: "Minor cut from rebar end cap missing",
-    severity: "Low",
-  },
-];
+const RECENT_INCIDENTS: {
+  id: string;
+  type: string;
+  date: string;
+  projectId: string;
+  description: string;
+  severity: string;
+}[] = [];
 
 export function HSEOverviewPage() {
   const navigate = useNavigate();
-  const [hseMatrix, setHseMatrix] = useState(mockHseMatrix);
+  const [hseMatrix, setHseMatrix] = useState<typeof mockHseMatrix>([]);
   const [search, setSearch] = useState("");
   useEffect(() => {
     let active = true;
@@ -304,7 +294,7 @@ export function HSEOverviewPage() {
             Recent Incidents
           </h2>
           <div className="space-y-3">
-            {INCIDENTS_MOCK.map((inc) => {
+            {RECENT_INCIDENTS.map((inc) => {
               const project = projects.find((p) => p.id === inc.projectId);
               const sevColor =
                 inc.severity === "Low"
@@ -344,7 +334,7 @@ export function HSEOverviewPage() {
                 </div>
               );
             })}
-            {INCIDENTS_MOCK.length === 0 && (
+            {RECENT_INCIDENTS.length === 0 && (
               <p className="text-sm" style={{ color: "#718096" }}>
                 No incidents recorded
               </p>

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const FINANCE_CONFIG_KEY = 'finance-config';
@@ -178,14 +178,57 @@ export class FinanceExtrasService {
     }
 
     // ── Payment Methods ──
-    findPaymentMethods() {
-        return this.readSetting<Record<string, boolean>>(PAYMENT_METHODS_KEY, {});
+    private readonly defaultPaymentMethods = [
+        { id: 'pm-bank-transfer', name: 'Bank Transfer', enabled: true },
+        { id: 'pm-cash', name: 'Cash', enabled: true },
+        { id: 'pm-cheque', name: 'Cheque', enabled: false },
+    ];
+    async findPaymentMethods() {
+        const raw = await this.readSetting<any>(PAYMENT_METHODS_KEY, null);
+        if (Array.isArray(raw)) {
+            return raw
+                .filter((m) => m && m.id)
+                .map((m) => ({ id: String(m.id), name: String(m.name ?? ''), enabled: m.enabled !== false }));
+        }
+        // Legacy shape: Record<id, boolean> toggles layered over the defaults.
+        if (raw && typeof raw === 'object') {
+            return this.defaultPaymentMethods.map((m) => ({ ...m, enabled: raw[m.id] ?? m.enabled }));
+        }
+        return [...this.defaultPaymentMethods];
+    }
+    async createPaymentMethod(data: any) {
+        const name = String(data?.name ?? '').trim();
+        if (!name) throw new BadRequestException('Payment method name is required');
+        const methods = await this.findPaymentMethods();
+        const created = { id: `pm-${Date.now()}`, name, enabled: data?.enabled !== false };
+        await this.writeSetting(PAYMENT_METHODS_KEY, [...methods, created]);
+        return created;
+    }
+    async updatePaymentMethod(id: string, data: any) {
+        const methods = await this.findPaymentMethods();
+        const updated = methods.map((m) =>
+            m.id === id
+                ? {
+                    ...m,
+                    ...(data?.name !== undefined ? { name: String(data.name).trim() } : {}),
+                    ...(data?.enabled !== undefined ? { enabled: !!data.enabled } : {}),
+                }
+                : m,
+        );
+        await this.writeSetting(PAYMENT_METHODS_KEY, updated);
+        return updated.find((m) => m.id === id) ?? { id, ...data };
+    }
+    async deletePaymentMethod(id: string) {
+        const methods = await this.findPaymentMethods();
+        await this.writeSetting(PAYMENT_METHODS_KEY, methods.filter((m) => m.id !== id));
+        return { id, deleted: true };
     }
     async togglePaymentMethod(id: string) {
         const methods = await this.findPaymentMethods();
-        methods[id] = !methods[id];
-        await this.writeSetting(PAYMENT_METHODS_KEY, methods);
-        return { id, enabled: methods[id] };
+        const target = methods.find((m) => m.id === id);
+        const enabled = target ? !target.enabled : true;
+        await this.writeSetting(PAYMENT_METHODS_KEY, methods.map((m) => (m.id === id ? { ...m, enabled } : m)));
+        return { id, enabled };
     }
 
     // ── Report Templates ──

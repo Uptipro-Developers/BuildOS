@@ -21,7 +21,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
 
 export function QualityOverviewPage() {
   const navigate = useNavigate();
-  const [qualityNCRs, setQualityNCRs] = useState(mockQualityNCRs);
+  const [qualityNCRs, setQualityNCRs] = useState<typeof mockQualityNCRs>([]);
   const [search, setSearch] = useState("");
   useEffect(() => {
     let active = true;

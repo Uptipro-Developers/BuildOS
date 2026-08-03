@@ -1288,6 +1288,10 @@ model SalaryBand {
   maxSalary   Float
   midSalary   Float?
   description String?
+  gradeName   String?
+  department  String?
+  basicSalary Float?
+  components  Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

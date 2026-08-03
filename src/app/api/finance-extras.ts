@@ -88,6 +88,22 @@ export const updateTaxConfig = (id: string, data: Partial<TaxConfig>) =>
 export const deleteTaxConfig = (id: string) =>
     apiFetch<void>(`/tax-configs/${id}`, { method: 'DELETE' });
 
+// Payment Methods
+export interface PaymentMethod {
+    id: string;
+    name: string;
+    enabled: boolean;
+}
+export const getPaymentMethods = () => apiFetch<PaymentMethod[]>('/payment-methods');
+export const createPaymentMethod = (data: { name: string; enabled?: boolean }) =>
+    apiFetch<PaymentMethod>('/payment-methods', { method: 'POST', body: JSON.stringify(data) });
+export const updatePaymentMethod = (id: string, data: Partial<Omit<PaymentMethod, 'id'>>) =>
+    apiFetch<PaymentMethod>(`/payment-methods/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deletePaymentMethod = (id: string) =>
+    apiFetch<void>(`/payment-methods/${id}`, { method: 'DELETE' });
+export const togglePaymentMethod = (id: string) =>
+    apiFetch<{ id: string; enabled: boolean }>(`/payment-methods/${id}/toggle`, { method: 'PATCH' });
+
 // Process / Account Mappings (GL posting rules) — persisted as a JSON collection.
 export const getProcessMappings = () => apiFetch<any[]>('/process-mappings');
 export const saveProcessMappings = (mappings: any[]) =>

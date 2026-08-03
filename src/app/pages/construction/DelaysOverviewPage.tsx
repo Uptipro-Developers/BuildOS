@@ -20,7 +20,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
 
 export function DelaysOverviewPage() {
   const navigate = useNavigate();
-  const [delays, setDelays] = useState(mockDelays);
+  const [delays, setDelays] = useState<typeof mockDelays>([]);
   const [search, setSearch] = useState("");
   useEffect(() => {
     let active = true;

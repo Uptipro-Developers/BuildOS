@@ -28,6 +28,7 @@ import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
 import { useNumbering } from "../../stores/numberingStore";
+import { useProcurementUnits } from "../../utils/useProcurementUnits";
 import { toast } from "sonner";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 
@@ -136,17 +137,6 @@ function fmt(n: number) {
   return `${symbol}${n}`;
 }
 
-const PO_UNITS = [
-  "Tonnes",
-  "Bags",
-  "Metres",
-  "Sheets",
-  "Rolls",
-  "Units",
-  "Cartons",
-  "Litres",
-];
-
 interface POItem {
   material: string;
   qty: string;
@@ -199,8 +189,9 @@ function NewPOModal({
   const [prRef, setPrRef] = useState("");
   const [project, setProject] = useState("");
   const [deliveryDays, setDeliveryDays] = useState("7");
+  const units = useProcurementUnits();
   const [items, setItems] = useState<POItem[]>([
-    { material: "", qty: "", unit: PO_UNITS[0], unitCost: "" },
+    { material: "", qty: "", unit: units[0], unitCost: "" },
   ]);
 
   useEffect(() => {
@@ -227,7 +218,7 @@ function NewPOModal({
   const addItem = () =>
     setItems((p) => [
       ...p,
-      { material: "", qty: "", unit: PO_UNITS[0], unitCost: "" },
+      { material: "", qty: "", unit: units[0], unitCost: "" },
     ]);
   const removeItem = (i: number) =>
     setItems((p) => p.filter((_, j) => j !== i));
@@ -401,7 +392,9 @@ function NewPOModal({
                     onChange={(e) => updateItem(i, "unit", e.target.value)}
                     className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {PO_UNITS.map((u) => (
+                    {Array.from(
+                      new Set([...units, item.unit].filter(Boolean)),
+                    ).map((u) => (
                       <option key={u}>{u}</option>
                     ))}
                   </select>

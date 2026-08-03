@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { getClusters, type Cluster } from "../../api/clusters";
 import { safePercent } from "../../utils/number";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
@@ -95,6 +96,9 @@ export function ProjectsListPage() {
     "All",
   );
   const [clusterFilter, setClusterFilter] = useState<string>("All");
+  // The create form offered three hardcoded sample names, so a project could
+  // not be assigned to a real cluster.
+  const [clusterCatalogue, setClusterCatalogue] = useState<Cluster[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [sortField, setSortField] = useState<keyof Project | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -106,6 +110,12 @@ export function ProjectsListPage() {
   const [staffList, setStaffList] = useState<string[]>([]);
 
   // Load employees for the Project Manager dropdown.
+  useEffect(() => {
+    getClusters()
+      .then(setClusterCatalogue)
+      .catch(() => setClusterCatalogue([]));
+  }, []);
+
   useEffect(() => {
     let active = true;
     fetchEmployees({ status: "active" })
@@ -609,9 +619,9 @@ export function ProjectsListPage() {
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
                     <option value="">Select cluster</option>
-                    {["Lekki-VI", "Ikeja", "Apapa"].map((c) => (
-                      <option key={c} value={c}>
-                        {c}
+                    {clusterCatalogue.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
                       </option>
                     ))}
                   </select>

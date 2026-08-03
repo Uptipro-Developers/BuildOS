@@ -33,6 +33,7 @@ import {
   type SortConfig,
 } from "../../components/AdvancedFilter";
 import { useNumbering } from "../../stores/numberingStore";
+import { useProcurementUnits } from "../../utils/useProcurementUnits";
 import { getReferenceData } from "../../api/reference-data";
 import { fetchProjects } from "../../api/projects";
 import {
@@ -194,17 +195,6 @@ const PR_FILTER_FIELDS: FilterFieldDef[] = [
   },
 ];
 
-const PR_UNITS = [
-  "Tonnes",
-  "Bags",
-  "Metres",
-  "Sheets",
-  "Rolls",
-  "Units",
-  "Cartons",
-  "Litres",
-];
-
 // ── New PR modal ──────────────────────────────────────────────────────────────
 interface NewPRItemForm {
   material: string;
@@ -254,8 +244,9 @@ function NewPRModal({
   const [procType, setProcType] = useState<"direct" | "rfq">("direct");
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [daysToDeliver, setDaysToDeliver] = useState("7");
+  const units = useProcurementUnits();
   const [items, setItems] = useState<NewPRItemForm[]>([
-    { material: "", qty: "", unit: PR_UNITS[0], estimatedUnitCost: "" },
+    { material: "", qty: "", unit: units[0], estimatedUnitCost: "" },
   ]);
 
   // Projects come from /projects directly so the dropdown always reflects the
@@ -460,7 +451,7 @@ function NewPRModal({
                     {
                       material: "",
                       qty: "",
-                      unit: PR_UNITS[0],
+                      unit: units[0],
                       estimatedUnitCost: "",
                     },
                   ])
@@ -534,7 +525,9 @@ function NewPRModal({
                     }
                     className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {PR_UNITS.map((u) => (
+                    {Array.from(
+                      new Set([...units, it.unit].filter(Boolean)),
+                    ).map((u) => (
                       <option key={u}>{u}</option>
                     ))}
                   </select>

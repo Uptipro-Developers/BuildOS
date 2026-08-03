@@ -373,14 +373,21 @@ export class HrExtrasService {
         return this.prisma.salaryBand.findMany({ orderBy: { gradeLevel: 'asc' } });
     }
     createSalaryBand(data: any) {
+        // The design keys grade by gradeName; `name` stays the unique key, so
+        // fall back to gradeName when the caller only sends the design fields.
+        const name = String(data?.name ?? data?.gradeName ?? '').trim();
         return this.prisma.salaryBand.create({
             data: {
-                name: String(data?.name ?? '').trim(),
+                name,
                 gradeLevel: String(data?.gradeLevel ?? '').trim(),
                 minSalary: Number(data?.minSalary ?? 0),
                 maxSalary: Number(data?.maxSalary ?? 0),
                 midSalary: data?.midSalary != null ? Number(data.midSalary) : null,
                 description: data?.description != null ? String(data.description) : null,
+                gradeName: data?.gradeName != null ? String(data.gradeName) : null,
+                department: data?.department != null ? String(data.department) : null,
+                basicSalary: data?.basicSalary != null ? Number(data.basicSalary) : null,
+                components: Array.isArray(data?.components) ? data.components : undefined,
             },
         });
     }
@@ -392,6 +399,10 @@ export class HrExtrasService {
         if (data?.maxSalary !== undefined) patch.maxSalary = Number(data.maxSalary);
         if (data?.midSalary !== undefined) patch.midSalary = data.midSalary != null ? Number(data.midSalary) : null;
         if (data?.description !== undefined) patch.description = data.description != null ? String(data.description) : null;
+        if (data?.gradeName !== undefined) patch.gradeName = data.gradeName != null ? String(data.gradeName) : null;
+        if (data?.department !== undefined) patch.department = data.department != null ? String(data.department) : null;
+        if (data?.basicSalary !== undefined) patch.basicSalary = data.basicSalary != null ? Number(data.basicSalary) : null;
+        if (data?.components !== undefined) patch.components = Array.isArray(data.components) ? data.components : null;
         return this.prisma.salaryBand.update({ where: { id }, data: patch });
     }
     async deleteSalaryBand(id: string) {

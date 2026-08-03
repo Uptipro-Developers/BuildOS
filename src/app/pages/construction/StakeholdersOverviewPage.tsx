@@ -46,7 +46,9 @@ export function StakeholdersOverviewPage() {
   const { allocate } = useNumbering();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [localStakeholders, setLocalStakeholders] = useState(stakeholders);
+  const [localStakeholders, setLocalStakeholders] = useState<
+    typeof stakeholders
+  >([]);
   useEffect(() => {
     let active = true;
     listStakeholders()

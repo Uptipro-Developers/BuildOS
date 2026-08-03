@@ -6,6 +6,7 @@ import {
   ReceivedQuote as ApiReceivedQuote,
 } from "../../api/procurement-requests";
 import { getReferenceData } from "../../api/reference-data";
+import { useProcurementUnits } from "../../utils/useProcurementUnits";
 import {
   getCurrencySymbol,
   formatDateByGeneralSettings,
@@ -151,15 +152,6 @@ function fmt(n: number) {
   return `${symbol}${n}`;
 }
 
-const RQ_UNITS = [
-  "Tonnes",
-  "Bags",
-  "Metres",
-  "Sheets",
-  "Rolls",
-  "Units",
-  "Cartons",
-];
 interface DocItem {
   material: string;
   qty: string;
@@ -198,8 +190,9 @@ function RecordDocModal({
   const [validDays, setValidDays] = useState("10");
   const [notes, setNotes] = useState("");
   const [destinationStore, setDestinationStore] = useState("");
+  const units = useProcurementUnits();
   const [items, setItems] = useState<DocItem[]>([
-    { material: "", qty: "", unit: RQ_UNITS[0], unitPrice: "" },
+    { material: "", qty: "", unit: units[0], unitPrice: "" },
   ]);
 
   useEffect(() => {
@@ -229,7 +222,7 @@ function RecordDocModal({
   const addItem = () =>
     setItems((p) => [
       ...p,
-      { material: "", qty: "", unit: RQ_UNITS[0], unitPrice: "" },
+      { material: "", qty: "", unit: units[0], unitPrice: "" },
     ]);
   const removeItem = (i: number) =>
     setItems((p) => p.filter((_, j) => j !== i));
@@ -449,7 +442,9 @@ function RecordDocModal({
                     onChange={(e) => updateItem(i, "unit", e.target.value)}
                     className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {RQ_UNITS.map((u) => (
+                    {Array.from(
+                      new Set([...units, item.unit].filter(Boolean)),
+                    ).map((u) => (
                       <option key={u}>{u}</option>
                     ))}
                   </select>

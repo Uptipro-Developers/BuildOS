@@ -26,6 +26,7 @@ import {
 import { getReferenceData } from "../../api/reference-data";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { useNumbering } from "../../stores/numberingStore";
+import { useProcurementUnits } from "../../utils/useProcurementUnits";
 
 type SRStatus = "sent" | "viewed" | "quote_received" | "declined" | "expired";
 
@@ -123,17 +124,6 @@ const TABS: { key: SRStatus | "all"; label: string }[] = [
   { key: "expired", label: "Expired" },
 ];
 
-const UNITS = [
-  "Tonnes",
-  "Bags",
-  "Metres",
-  "Sheets",
-  "Rolls",
-  "Units",
-  "Cartons",
-  "Litres",
-];
-
 interface RFQItem {
   material: string;
   qty: string;
@@ -168,8 +158,9 @@ function NewRFQModal({
   const [project, setProject] = useState("");
   const [expiryDays, setExpiryDays] = useState("5");
   const [notes, setNotes] = useState("");
+  const units = useProcurementUnits();
   const [items, setItems] = useState<RFQItem[]>([
-    { material: "", qty: "", unit: UNITS[0] },
+    { material: "", qty: "", unit: units[0] },
   ]);
 
   useEffect(() => {
@@ -191,7 +182,7 @@ function NewRFQModal({
   }, []);
 
   const addItem = () =>
-    setItems((p) => [...p, { material: "", qty: "", unit: UNITS[0] }]);
+    setItems((p) => [...p, { material: "", qty: "", unit: units[0] }]);
   const removeItem = (i: number) =>
     setItems((p) => p.filter((_, j) => j !== i));
   const updateItem = (i: number, k: keyof RFQItem, v: string) =>
@@ -361,7 +352,9 @@ function NewRFQModal({
                     onChange={(e) => updateItem(i, "unit", e.target.value)}
                     className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {UNITS.map((u) => (
+                    {Array.from(
+                      new Set([...units, item.unit].filter(Boolean)),
+                    ).map((u) => (
                       <option key={u}>{u}</option>
                     ))}
                   </select>
