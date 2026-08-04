@@ -6,6 +6,7 @@ import {
   createPurchaseRequest,
   updatePurchaseRequest,
   deletePurchaseRequest,
+  createSentRFQ,
   PurchaseRequest as ApiPR,
 } from "../../api/procurement-requests";
 import {
@@ -37,6 +38,8 @@ import { useNumbering } from "../../stores/numberingStore";
 import { useProcurementUnits } from "../../utils/useProcurementUnits";
 import { getReferenceData } from "../../api/reference-data";
 import { fetchProjects } from "../../api/projects";
+import { getMaterialRequests } from "../../api/materials";
+import { baseMaterialRequestRef } from "../../utils/materialRequestRef";
 import {
   csvAmountHeader,
   getCurrencySymbol,
@@ -61,8 +64,20 @@ type SupplierStatus =
   | "paid"
   | "delivered";
 
+const VALID_SUPPLIER_STATUSES: SupplierStatus[] = [
+  "not_sent",
+  "request_sent",
+  "quote_received",
+  "po_created",
+  "approved",
+  "paid",
+  "delivered",
+];
+
 interface SupplierProgress {
   supplier: string;
+  /** Needed to send this supplier an RFQ — the server resolves the email by id. */
+  supplierId?: string;
   status: SupplierStatus;
   sentDate?: string;
   quoteRef?: string;
@@ -79,6 +94,8 @@ interface PRItem {
 
 interface PurchaseRequest {
   id: string;
+  /** The request's own human reference (PR-0019), used on RFQs and quotes. */
+  prRef: string;
   materialRequestRef: string;
   project: string;
   raisedBy: string;
@@ -109,10 +126,14 @@ function fromApi(r: ApiPR): PurchaseRequest {
     : "draft";
   return {
     id: r.id,
-    materialRequestRef: r.prRef ?? r.id,
+    prRef: r.prRef ?? r.id,
+    // The originating material request. This field showed `r.prRef` — the
+    // request's own reference — so the column headed "Material Request" never
+    // once displayed a material request.
+    materialRequestRef: r.mrRef ?? "",
     project: r.projectName ?? "Unknown Project",
     raisedBy: r.requestedBy ?? "Unknown",
-    procurementType: "rfq",
+    procurementType: r.procurementType === "direct" ? "direct" : "rfq",
     status,
     raisedDate: r.createdAt ? formatDateByGeneralSettings(r.createdAt) : "",
     requiredDate: r.daysToDeliver
@@ -124,7 +145,18 @@ function fromApi(r: ApiPR): PurchaseRequest {
         (sum, it) => sum + (it.qty ?? 0) * (it.unitPrice ?? 0),
         0,
       ) ?? 0,
-    suppliers: [],
+    // Was hardcoded empty, which left "Send to Suppliers" mapping over nothing.
+    suppliers: (r.suppliers ?? []).map((s) => ({
+      supplier: s.supplier,
+      supplierId: s.supplierId,
+      status: (VALID_SUPPLIER_STATUSES.includes(s.status as SupplierStatus)
+        ? s.status
+        : "not_sent") as SupplierStatus,
+      sentDate: s.sentDate,
+      quoteRef: s.quoteRef,
+      quoteAmount: s.quoteAmount,
+      poRef: s.poRef,
+    })),
     items: (r.items ?? []).map((it) => ({
       material: it.description ?? "",
       qty: it.qty ?? 0,
@@ -171,7 +203,9 @@ const TABS: { key: PRStatus | "all"; label: string }[] = [
 ];
 
 const PR_FILTER_FIELDS: FilterFieldDef[] = [
-  { key: "id", label: "PR Number", type: "text" },
+  // Filters on the reference, not the database id, which is what "PR Number"
+  // means to anyone using this screen.
+  { key: "prRef", label: "PR Number", type: "text" },
   { key: "project", label: "Project", type: "text" },
   { key: "materialRequestRef", label: "MR Ref", type: "text" },
   {
@@ -210,6 +244,10 @@ interface NewPRPayload {
   projectName: string;
   requestedBy: string;
   daysToDeliver: number;
+  /** The material request this covers, if it was raised against one. */
+  mrRef?: string;
+  procurementType: "direct" | "rfq";
+  suppliers: SupplierProgress[];
   items: {
     description: string;
     qty: number;
@@ -235,13 +273,17 @@ function NewPRModal({
 
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
+  /** Supplier ids by name — the RFQ send needs the id, the picker shows names. */
+  const [supplierIds, setSupplierIds] = useState<Record<string, string>>({});
   // The material catalogue, so a PR line can only reference a material that
   // already exists rather than a free-typed name.
   const [materialOptions, setMaterialOptions] = useState<
     { name: string; unit: string }[]
   >([]);
   const [project, setProject] = useState("");
-  const [mrRef, setMrRef] = useState("MR-0041");
+  const [mrRef, setMrRef] = useState("");
+  /** References of material requests that could justify this request. */
+  const [materialRequestRefs, setMaterialRequestRefs] = useState<string[]>([]);
   const [procType, setProcType] = useState<"direct" | "rfq">("direct");
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [daysToDeliver, setDaysToDeliver] = useState("7");
@@ -265,6 +307,9 @@ function NewPRModal({
       .then((data) => {
         const supplierNames = data.suppliers.map((s) => s.name);
         setSuppliers(supplierNames);
+        setSupplierIds(
+          Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
+        );
         setSelectedSuppliers((prev) =>
           prev.length ? prev : supplierNames.slice(0, 1),
         );
@@ -274,6 +319,18 @@ function NewPRModal({
             .filter((m) => m.name),
         );
       })
+      .catch(() => {});
+
+    getMaterialRequests()
+      .then((rows) =>
+        setMaterialRequestRefs([
+          ...new Set(
+            rows
+              .map((r) => baseMaterialRequestRef(r.reference))
+              .filter((ref): ref is string => Boolean(ref)),
+          ),
+        ]),
+      )
       .catch(() => {});
   }, []);
 
@@ -288,10 +345,11 @@ function NewPRModal({
   }
 
   const { allocate } = useNumbering();
+  // The material request is optional: a purchase request can be raised on its
+  // own. It was previously required, against a field prefilled with a made-up
+  // reference, so the only way to satisfy it was to submit the placeholder.
   const valid =
-    project &&
-    mrRef.trim() &&
-    items.every((it) => it.material.trim() && it.qty.trim());
+    project && items.every((it) => it.material.trim() && it.qty.trim());
 
   async function save() {
     if (!valid || !selectedSuppliers.length) return;
@@ -306,6 +364,16 @@ function NewPRModal({
       projectName: project,
       requestedBy: getAuthUserName() || "Current User",
       daysToDeliver: parseInt(daysToDeliver) || 7,
+      // The form has always collected these three; nothing was ever sent, so a
+      // request created here opened with no suppliers and "Send to Suppliers"
+      // had nothing to send to.
+      mrRef: mrRef.trim() || undefined,
+      procurementType: procType,
+      suppliers: selectedSuppliers.map((name) => ({
+        supplier: name,
+        supplierId: supplierIds[name],
+        status: "not_sent" as SupplierStatus,
+      })),
       items: items.map((it) => ({
         description: it.material,
         qty: parseFloat(it.qty) || 0,
@@ -351,14 +419,24 @@ function NewPRModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                MR Reference
+                Material Request
               </label>
-              <input
+              {/* Chosen from the real list rather than typed. A free-text
+                  reference defaulted to "MR-0041" and was never validated, so it
+                  could name a request that does not exist — or, as shipped, one
+                  that never did. */}
+              <select
                 value={mrRef}
                 onChange={(e) => setMrRef(e.target.value)}
-                placeholder="e.g. MR-0041"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">None — raised directly</option>
+                {materialRequestRefs.map((ref) => (
+                  <option key={ref} value={ref}>
+                    {ref}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -586,10 +664,12 @@ function SendToSuppliersModal({
   pr,
   onClose,
   onSend,
+  sending,
 }: {
   pr: PurchaseRequest;
   onClose: () => void;
   onSend: () => void;
+  sending: boolean;
 }) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -608,7 +688,7 @@ function SendToSuppliersModal({
         <div className="px-6 py-5 space-y-4">
           <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm">
             <p className="font-medium text-blue-800">
-              {pr.id} · {pr.project}
+              {pr.prRef} · {pr.project}
             </p>
             <p className="text-xs text-blue-600 mt-0.5">
               {pr.procurementType === "rfq"
@@ -652,9 +732,11 @@ function SendToSuppliersModal({
               onSend();
               onClose();
             }}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 flex items-center gap-2"
+            disabled={sending || pr.suppliers.length === 0}
+            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <Send className="w-4 h-4" /> Confirm & Send
+            <Send className="w-4 h-4" />{" "}
+            {sending ? "Sending…" : "Confirm & Send"}
           </button>
         </div>
       </div>
@@ -676,6 +758,8 @@ export function PurchaseRequestsPage() {
   const [activeTab, setActiveTab] = useState<PRStatus | "all">("all");
   const [showNewPR, setShowNewPR] = useState(false);
   const [sendFor, setSendFor] = useState<PurchaseRequest | null>(null);
+  /** Id of the request currently being sent, so the button can't be double-fired. */
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [viewPR, setViewPR] = useState<PurchaseRequest | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PurchaseRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -708,7 +792,7 @@ export function PurchaseRequestsPage() {
     try {
       await deletePurchaseRequest(deleteTarget.id);
       setPrList((prev) => prev.filter((pr) => pr.id !== deleteTarget.id));
-      toast.success(`Purchase request ${deleteTarget.id} deleted.`);
+      toast.success(`Purchase request ${deleteTarget.prRef} deleted.`);
       setDeleteTarget(null);
     } catch (err) {
       toast.error(
@@ -732,11 +816,13 @@ export function PurchaseRequestsPage() {
 
   const columns: Column<PurchaseRequest>[] = [
     {
-      key: "id",
+      key: "prRef",
       label: "PR ID",
       sortable: true,
       filterable: true,
-      render: (pr) => <span className="font-mono text-sm">{pr.id}</span>,
+      // The request's reference, not its database id. This column rendered
+      // `pr.id` — a cuid — under the heading "PR ID".
+      render: (pr) => <span className="font-mono text-sm">{pr.prRef}</span>,
     },
     {
       key: "project",
@@ -747,7 +833,11 @@ export function PurchaseRequestsPage() {
       render: (pr) => (
         <div>
           <p className="font-medium text-gray-900">{pr.project}</p>
-          <p className="text-xs text-gray-400">{pr.materialRequestRef}</p>
+          {pr.materialRequestRef && (
+            <p className="text-xs text-gray-400">
+              from {pr.materialRequestRef}
+            </p>
+          )}
         </div>
       ),
     },
@@ -1005,31 +1095,96 @@ export function PurchaseRequestsPage() {
     }
   }
 
-  function sendToSuppliers(id: string) {
+  /**
+   * Sends the request out to its suppliers as RFQs.
+   *
+   * This used to call `setPrList` and nothing else: no RFQ record was created,
+   * no supplier was emailed, nothing reached the SabiQuot portal, and the status
+   * reverted on the next refresh. It was the break in the middle of the chain —
+   * a request could be approved and a quote could be recorded, but there was no
+   * point at which BuildOS actually asked anyone for one.
+   *
+   * One RFQ row is written per supplier, all sharing this request's `prRef`;
+   * that shared reference is what groups the responses back together for quote
+   * comparison. The server allocates each `rfqRef`, emails the supplier a portal
+   * link and fires the `rfq.sent` webhook. Direct procurement goes out the same
+   * way — the supplier is already chosen, but they still have to send a price
+   * back, and an RFQ is how a price gets into BuildOS.
+   */
+  async function sendToSuppliers(id: string) {
+    const pr = prList.find((p) => p.id === id);
+    if (!pr || sendingTo) return;
+    if (pr.suppliers.length === 0) {
+      toast.error("This request has no suppliers to send to.");
+      return;
+    }
+
+    setSendingTo(id);
+    const previous = prList;
     const now = formatDateByGeneralSettings(new Date());
-    setPrList((prev) =>
-      prev.map((pr) =>
-        pr.id !== id
-          ? pr
-          : {
-              ...pr,
-              status: "sent_to_suppliers" as PRStatus,
-              suppliers: pr.suppliers.map((s) => ({
-                ...s,
-                status: "request_sent" as SupplierStatus,
-                sentDate: now,
-              })),
-            },
-      ),
-    );
-    logChange({
-      module: "procurement",
-      action: "sent_to_suppliers",
-      entityType: "purchase_request",
-      entityId: id,
-      summary: `Sent PR ${id} to suppliers`,
-      performedBy: "Amaka Osei",
-    });
+    const items = pr.items.map((it) => ({
+      material: it.material,
+      qty: it.qty,
+      unit: it.unit,
+    }));
+    const label =
+      pr.procurementType === "direct" ? "Direct Procurement" : "RFQ";
+
+    try {
+      // Sent one at a time so a failure part-way through is reported with the
+      // supplier it happened on, and so the numbering sequence is not raced.
+      const sent: SupplierProgress[] = [];
+      for (const s of pr.suppliers) {
+        const rfq = await createSentRFQ({
+          prRef: pr.prRef,
+          supplierName: s.supplier,
+          supplierId: s.supplierId,
+          status: "Sent",
+          items,
+          sentDate: new Date().toISOString(),
+          notes: `${label} for ${pr.prRef}${pr.materialRequestRef ? ` (from ${pr.materialRequestRef})` : ""}.`,
+        });
+        sent.push({
+          ...s,
+          status: "request_sent",
+          sentDate: now,
+          quoteRef: rfq.rfqRef,
+        });
+      }
+
+      await updatePurchaseRequest(id, {
+        status: "sent_to_suppliers",
+        suppliers: sent,
+      });
+
+      setPrList((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? { ...p, status: "sent_to_suppliers" as PRStatus, suppliers: sent }
+            : p,
+        ),
+      );
+      logChange({
+        module: "procurement",
+        action: "sent_to_suppliers",
+        entityType: "purchase_request",
+        entityId: id,
+        summary: `Sent ${pr.prRef} to ${sent.length} supplier${sent.length > 1 ? "s" : ""}`,
+        performedBy: authUser.name || "Unknown",
+      });
+      toast.success(
+        `${pr.prRef} sent to ${sent.length} supplier${sent.length > 1 ? "s" : ""}.`,
+      );
+    } catch (err) {
+      setPrList(previous);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not send the request. Please try again.",
+      );
+    } finally {
+      setSendingTo(null);
+    }
   }
 
   function handleExport() {
@@ -1045,7 +1200,7 @@ export function PurchaseRequestsPage() {
         "Status",
       ],
       filtered.map((pr) => [
-        pr.id,
+        pr.prRef,
         pr.project,
         pr.raisedBy,
         pr.project,
@@ -1067,7 +1222,7 @@ export function PurchaseRequestsPage() {
         action: "created",
         entityType: "purchase_request",
         entityId: pr.id,
-        summary: `Created PR ${pr.id} for ${pr.project}`,
+        summary: `Created PR ${pr.prRef} for ${pr.project}`,
         performedBy: authUser.name || "Current User",
       });
     } catch (e) {
@@ -1148,7 +1303,7 @@ export function PurchaseRequestsPage() {
         keyExtractor={(pr) => pr.id}
         searchPlaceholder="Search PRs, projects, references…"
         searchFields={[
-          (pr) => pr.id,
+          (pr) => pr.prRef,
           (pr) => pr.project,
           (pr) => pr.raisedBy,
           (pr) => pr.materialRequestRef,
@@ -1174,7 +1329,8 @@ export function PurchaseRequestsPage() {
         <SendToSuppliersModal
           pr={sendFor}
           onClose={() => setSendFor(null)}
-          onSend={() => sendToSuppliers(sendFor.id)}
+          sending={sendingTo === sendFor.id}
+          onSend={() => void sendToSuppliers(sendFor.id)}
         />
       )}
 
@@ -1184,7 +1340,7 @@ export function PurchaseRequestsPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
                 <h2 className="text-base font-semibold text-gray-900">
-                  {viewPR.id}
+                  {viewPR.prRef}
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {viewPR.project} · raised by {viewPR.raisedBy}
@@ -1201,7 +1357,9 @@ export function PurchaseRequestsPage() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-xs text-gray-500">Material request</p>
-                  <p className="text-gray-900">{viewPR.materialRequestRef}</p>
+                  <p className="text-gray-900">
+                    {viewPR.materialRequestRef || "Raised directly"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Procurement type</p>
@@ -1269,7 +1427,7 @@ export function PurchaseRequestsPage() {
         title="Delete purchase request"
         description={
           deleteTarget
-            ? `Delete ${deleteTarget.id} for ${deleteTarget.project}? This cannot be undone.`
+            ? `Delete ${deleteTarget.prRef} for ${deleteTarget.project}? This cannot be undone.`
             : ""
         }
         confirmLabel="Delete"

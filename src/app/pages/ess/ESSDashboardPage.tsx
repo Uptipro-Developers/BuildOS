@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router";
 import {
   FileText,
@@ -32,20 +32,96 @@ interface Notification {
   read: boolean;
 }
 
-const statusConfig: Record<string, { badge: string; icon: React.ReactNode }> = {
-  pending: {
-    badge: "bg-amber-100 text-amber-700",
-    icon: <Clock className="w-3.5 h-3.5" />,
+interface StatusDisplay {
+  label: string;
+  badge: string;
+  icon: React.ReactNode;
+}
+
+const PENDING_BADGE = "bg-amber-100 text-amber-700";
+const PENDING_ICON = <Clock className="w-3.5 h-3.5" />;
+
+/**
+ * How each purchase-request status is shown.
+ *
+ * This has to cover the whole vocabulary the procurement module writes —
+ * `draft`, `pending_approval`, `sent_to_suppliers`, `quotes_received`,
+ * `po_created` and `cancelled` as well as the three obvious ones. It previously
+ * held only pending/approved/rejected, and the lookup below was dereferenced
+ * unguarded, so a single request in any other state threw during render and the
+ * whole ESS module showed the router's error screen. `draft` is the server-side
+ * default for a purchase request, so that was every request raised from a
+ * material request.
+ */
+const statusConfig: Record<string, StatusDisplay> = {
+  draft: {
+    label: "Draft",
+    badge: "bg-gray-100 text-gray-600",
+    icon: <FileText className="w-3.5 h-3.5" />,
+  },
+  pending: { label: "Pending", badge: PENDING_BADGE, icon: PENDING_ICON },
+  pending_approval: {
+    label: "Pending approval",
+    badge: PENDING_BADGE,
+    icon: PENDING_ICON,
+  },
+  sent_to_suppliers: {
+    label: "Sent to suppliers",
+    badge: "bg-blue-100 text-blue-700",
+    icon: PENDING_ICON,
+  },
+  quotes_received: {
+    label: "Quotes received",
+    badge: "bg-purple-100 text-purple-700",
+    icon: PENDING_ICON,
   },
   approved: {
+    label: "Approved",
+    badge: "bg-green-100 text-green-700",
+    icon: <CheckCircle className="w-3.5 h-3.5" />,
+  },
+  po_created: {
+    label: "PO created",
     badge: "bg-green-100 text-green-700",
     icon: <CheckCircle className="w-3.5 h-3.5" />,
   },
   rejected: {
+    label: "Rejected",
+    badge: "bg-red-100 text-red-700",
+    icon: <AlertTriangle className="w-3.5 h-3.5" />,
+  },
+  cancelled: {
+    label: "Cancelled",
     badge: "bg-red-100 text-red-700",
     icon: <AlertTriangle className="w-3.5 h-3.5" />,
   },
 };
+
+/**
+ * Shown for a status this page does not know about. Listing the vocabulary above
+ * is not enough on its own — procurement can add a state at any time, and a
+ * dashboard must not be the thing that breaks when it does.
+ */
+function statusDisplay(status: string): StatusDisplay {
+  return (
+    statusConfig[status] ?? {
+      label: status.replace(/_/g, " ") || "Unknown",
+      badge: "bg-gray-100 text-gray-600",
+      icon: <Clock className="w-3.5 h-3.5" />,
+    }
+  );
+}
+
+/** Statuses that count as "still waiting on somebody" on the summary tiles. */
+const PENDING_STATUSES = new Set([
+  "draft",
+  "pending",
+  "pending_approval",
+  "sent_to_suppliers",
+  "quotes_received",
+]);
+
+const DEFAULT_NOTIF = { dot: "bg-gray-400", bg: "bg-gray-50" };
 
 const notifConfig: Record<string, { dot: string; bg: string }> = {
   approval: { dot: "bg-green-500", bg: "bg-green-50" },
@@ -58,9 +134,23 @@ export function ESSDashboardPage() {
   const navigate = useNavigate();
   const {
     name: authName,
+    email: authEmail,
     role: authRole,
     initials: authInitials,
   } = useAuthUser();
+
+  /** Whether the signed-in user raised a record, matched on name or email. */
+  const raisedByMe = useCallback(
+    (...candidates: unknown[]) => {
+      const key = (authName || authEmail || "").trim().toLowerCase();
+      if (!key) return false;
+      return candidates.some(
+        (c) => String(c ?? "").trim().toLowerCase() === key,
+      );
+    },
+    [authName, authEmail],
+  );
+
   const [allProjects, setAllProjects] = useState<any[]>([]);
   const [allRequests, setAllRequests] = useState<RecentRequest[]>([]);
   const [notifications] = useState<Notification[]>([]);
@@ -73,23 +163,35 @@ export function ESSDashboardPage() {
     getPurchaseRequests()
       .then((data) =>
         setAllRequests(
-          data.map((r) => ({
-            id: r.prRef || r.id,
-            type: "Material Request",
-            title: r.title,
-            project: r.projectName || "—",
-            date: r.createdAt ? r.createdAt.slice(0, 10) : "",
-            status: (r.status || "pending").toLowerCase(),
-          })),
+          data
+            // This is the signed-in employee's dashboard, so it shows what they
+            // raised rather than every purchase request in the company. Matching
+            // My Requests, an unidentifiable user sees nothing rather than
+            // everything.
+            .filter((r) => raisedByMe(r.requestedBy, (r as any).createdBy))
+            .map((r) => ({
+              id: r.prRef || r.id,
+              // These come from `/purchase-requests`. Labelling them "Material
+              // Request" put the wrong name on every row.
+              type: "Purchase Request",
+              title: r.title,
+              project: r.projectName || "—",
+              // Procurement stores these as slugs ("pending_approval"); older
+              // rows may carry the spaced form.
+              status: (r.status || "draft").toLowerCase().replace(/\s+/g, "_"),
+              date: r.createdAt ? r.createdAt.slice(0, 10) : "",
+            })),
         ),
       )
       .catch(() => {});
-  }, []);
+  }, [raisedByMe]);
 
   const recentRequests = allRequests.slice(0, 5);
-  const pendingCount = allRequests.filter((r) => r.status === "pending").length;
+  const pendingCount = allRequests.filter((r) =>
+    PENDING_STATUSES.has(r.status),
+  ).length;
   const approvedCount = allRequests.filter(
-    (r) => r.status === "approved",
+    (r) => r.status === "approved" || r.status === "po_created",
   ).length;
   const totalRequests = allRequests.length;
 
@@ -188,7 +290,7 @@ export function ESSDashboardPage() {
               </p>
             )}
             {recentRequests.map((r) => {
-              const sc = statusConfig[r.status];
+              const sc = statusDisplay(r.status);
               return (
                 <div
                   key={r.id}
@@ -201,7 +303,7 @@ export function ESSDashboardPage() {
                         {r.id}
                       </span>
                       <span
-                        className={`text-xs px-1.5 py-0.5 rounded font-medium ${r.type === "Material Request" ? "bg-blue-50 text-blue-700" : "bg-purple-50 text-purple-700"}`}
+                        className={`text-xs px-1.5 py-0.5 rounded font-medium ${r.type === "Purchase Request" ? "bg-purple-50 text-purple-700" : "bg-blue-50 text-blue-700"}`}
                       >
                         {r.type}
                       </span>
@@ -218,7 +320,7 @@ export function ESSDashboardPage() {
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${sc.badge}`}
                     >
-                      {r.status}
+                      {sc.label}
                     </span>
                   </div>
                 </div>
@@ -306,7 +408,7 @@ export function ESSDashboardPage() {
                 </p>
               )}
               {notifications.map((n) => {
-                const nc = notifConfig[n.type];
+                const nc = notifConfig[n.type] ?? DEFAULT_NOTIF;
                 return (
                   <div
                     key={n.id}

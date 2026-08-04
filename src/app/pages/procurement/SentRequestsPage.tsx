@@ -1,5 +1,5 @@
 import { notifyLoadFailure } from "../../utils/loadFailure";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
@@ -21,20 +21,24 @@ import {
 import {
   getSentRFQs,
   createSentRFQ,
+  getPurchaseRequests,
   SentRFQ as ApiSentRFQ,
   updateSentRFQ,
 } from "../../api/procurement-requests";
 import { getReferenceData } from "../../api/reference-data";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
-import { useNumbering } from "../../stores/numberingStore";
 import { useProcurementUnits } from "../../utils/useProcurementUnits";
 
 type SRStatus = "sent" | "viewed" | "quote_received" | "declined" | "expired";
 
 interface SentRequest {
   id: string;
+  /** The RFQ's own human reference (RFQ-0011), allocated by the server. */
+  rfqRef: string;
+  /** The purchase request being competed. Rows sharing one are one RFQ. */
   prRef: string;
   vendor: string;
+  supplierId?: string;
   vendorEmail: string;
   project: string;
   sentDate: string;
@@ -60,8 +64,12 @@ function fromApi(r: ApiSentRFQ): SentRequest {
     : "sent";
   return {
     id: r.id,
-    prRef: r.rfqRef,
+    rfqRef: r.rfqRef,
+    // Was `r.rfqRef`: the column headed "PR Reference" showed the RFQ's own
+    // reference, because the purchase-request link was never stored at all.
+    prRef: r.prRef ?? "",
     vendor: r.supplierName,
+    supplierId: r.supplierId,
     vendorEmail: "",
     project: "",
     sentDate: r.sentDate,
@@ -147,6 +155,10 @@ function NewRFQModal({
   };
 
   const [vendors, setVendors] = useState<string[]>([]);
+  /** Supplier ids by name — the server needs the id to email the RFQ out. */
+  const [vendorIds, setVendorIds] = useState<Record<string, string>>({});
+  /** References of purchase requests this RFQ can be competing. */
+  const [prRefs, setPrRefs] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   // The material catalogue, so an RFQ can only be raised for materials that
   // already exist rather than a free-typed name a vendor can't match to stock.
@@ -170,6 +182,9 @@ function NewRFQModal({
         const vendorNames = data.suppliers.map((s) => s.name);
         const projectNames = data.projects.map((p) => p.name);
         setVendors(vendorNames);
+        setVendorIds(
+          Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
+        );
         setProjects(projectNames);
         setVendor((prev) => prev || vendorNames[0] || "");
         setProject((prev) => prev || projectNames[0] || "");
@@ -180,6 +195,23 @@ function NewRFQModal({
         );
       })
       .catch(() => {});
+
+    // Only approved requests can be competed — sourcing something that has not
+    // been authorised is the thing the approval step exists to prevent.
+    getPurchaseRequests()
+      .then((rows) =>
+        setPrRefs(
+          rows
+            .filter((r) =>
+              ["approved", "sent_to_suppliers", "quotes_received"].includes(
+                (r.status ?? "").toLowerCase().replace(/\s+/g, "_"),
+              ),
+            )
+            .map((r) => r.prRef)
+            .filter(Boolean),
+        ),
+      )
+      .catch(() => {});
   }, []);
 
   const addItem = () =>
@@ -189,19 +221,22 @@ function NewRFQModal({
   const updateItem = (i: number, k: keyof RFQItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
 
-  const { allocate } = useNumbering();
   const valid =
     vendor &&
     prRef.trim() &&
     items.every((it) => it.material.trim() && it.qty.trim());
 
-  async function handleSave() {
+  function handleSave() {
     if (!valid) return;
-    const nextId = await allocate("RFQ");
     onSave({
-      id: nextId,
+      // Both references come back from the server: it allocates the RFQ number
+      // from the numbering config. Allocating one here as well consumed a second
+      // number that was then thrown away.
+      id: "",
+      rfqRef: "",
       prRef: prRef.trim(),
       vendor,
+      supplierId: vendorIds[vendor],
       vendorEmail,
       project,
       sentDate: fmtDate(today),
@@ -261,12 +296,27 @@ function NewRFQModal({
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 PR Reference <span className="text-red-500">*</span>
               </label>
-              <input
+              {/* Chosen from the approved requests, not typed. Free text here
+                  produced RFQs that named a request which may not exist, and
+                  the reference is what groups the returning quotes for
+                  comparison. */}
+              <select
                 value={prRef}
                 onChange={(e) => setPrRef(e.target.value)}
-                placeholder="PR-0019"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select an approved request…</option>
+                {prRefs.map((ref) => (
+                  <option key={ref} value={ref}>
+                    {ref}
+                  </option>
+                ))}
+              </select>
+              {prRefs.length === 0 && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  No approved purchase requests yet.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -609,11 +659,13 @@ export function SentRequestsPage() {
               };
               const isOpen = expanded === r.id;
               return (
-                <>
-                  <tr
-                    key={r.id}
-                    className="hover:bg-gray-50/70 transition-colors"
-                  >
+                // The key belongs on the fragment, which is what this callback
+                // returns. On the inner <tr> React saw an unkeyed list and fell
+                // back to matching rows by position, so the expanded row could
+                // follow the index rather than the request when the list is
+                // filtered or re-sorted.
+                <Fragment key={r.id}>
+                  <tr className="hover:bg-gray-50/70 transition-colors">
                     <td className="px-3 py-3 text-gray-400">
                       <button onClick={() => setExpanded(isOpen ? null : r.id)}>
                         {isOpen ? (
@@ -624,10 +676,10 @@ export function SentRequestsPage() {
                       </button>
                     </td>
                     <td className="px-4 py-3 font-mono font-medium text-gray-800 text-xs">
-                      {r.id}
+                      {r.rfqRef}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">
-                      {r.prRef}
+                      {r.prRef || "—"}
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-800 text-sm">
@@ -734,7 +786,7 @@ export function SentRequestsPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
           </tbody>
@@ -746,8 +798,12 @@ export function SentRequestsPage() {
           onSave={async (rfq) => {
             try {
               const created = await createSentRFQ({
-                rfqRef: rfq.prRef,
+                // The RFQ's own reference is allocated server-side from the
+                // numbering config; what belongs here is the request being
+                // competed, which used to be passed as `rfqRef` and dropped.
+                prRef: rfq.prRef,
                 supplierName: rfq.vendor,
+                supplierId: rfq.supplierId,
                 status: "sent",
                 items: rfq.items,
                 sentDate: rfq.sentDate,

@@ -84,9 +84,16 @@ export function MyTasksPage() {
   useEffect(() => {
     fetchEmployees()
       .then((emps) => {
-        const names = emps
-          .map((e) => `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim())
-          .filter(Boolean);
+        // De-duplicated: the picker is keyed on the name and tasks are matched
+        // by name too, so two employees who share one produced duplicate React
+        // keys and two dropdown entries that did exactly the same thing.
+        const names = [
+          ...new Set(
+            emps
+              .map((e) => `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim())
+              .filter(Boolean),
+          ),
+        ];
         setEmployees(names);
         setCurrentUser((prev) => {
           if (prev) return prev;

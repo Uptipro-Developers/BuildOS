@@ -11,6 +11,7 @@ export function mapPO(p: any) {
         id: p.id,
         prRef: p.prRef ?? '',
         mrRef: p.mrRef ?? '',
+        quoteRef: p.quoteRef ?? '',
         supplierId: p.supplierId ?? p.supplier?.id ?? '',
         supplier: p.supplier?.name ?? '',
         supplierContact: p.supplier?.contactPerson

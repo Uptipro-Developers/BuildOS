@@ -40,8 +40,32 @@ export class ProcurementRequestsService {
         // `PR-${Date.now()}` ignored that configuration and produced references
         // like PR-1785770844706, which match no convention and cannot be cited.
         const { reference: prRef } = await this.numbering.allocate('PurchaseRequest');
-        return this.prisma.purchaseRequest.create({ data: { ...data, prRef } }).then((pr) => {
+        const prData: any = {
+            prRef,
+            title: data.title,
+            projectId: data.projectId ?? null,
+            projectName: data.projectName ?? null,
+            status: data.status ?? undefined,
+            priority: data.priority ?? undefined,
+            requestedBy: data.requestedBy,
+            daysToDeliver: data.daysToDeliver != null ? Number(data.daysToDeliver) : null,
+            items: Array.isArray(data.items) ? data.items : [],
+            notes: data.notes ?? null,
+            // The material request this was raised from, and how it is to be
+            // sourced. Both were previously expressible only as prose in `notes`.
+            mrRef: data.mrRef ? String(data.mrRef) : null,
+            procurementType: data.procurementType === 'direct' ? 'direct' : 'rfq',
+            suppliers: Array.isArray(data.suppliers) ? data.suppliers : [],
+        };
+        return this.prisma.purchaseRequest.create({ data: prData }).then(async (pr) => {
             this.webhookService.triggerWebhook('purchase-request.created', pr).catch(() => {});
+            // Close the loop the other way, so the material request can show what
+            // became of it rather than stopping at "In Procurement".
+            if (pr.mrRef) {
+                await this.prisma.materialRequest
+                    .updateMany({ where: { reference: pr.mrRef }, data: { prRef: pr.prRef } })
+                    .catch(() => undefined);
+            }
             return pr;
         });
     }
@@ -95,6 +119,10 @@ export class ProcurementRequestsService {
             status: data.status ?? 'Sent',
             items: Array.isArray(data.items) ? data.items : [],
             notes: data.notes ?? null,
+            // The purchase request being competed. This whitelist previously
+            // omitted it, so the reference the UI collected was silently dropped
+            // and every RFQ came back detached from its request.
+            prRef: data.prRef ? String(data.prRef) : null,
             rfqRef,
             sentDate: parseFlexDate(data.sentDate) ?? new Date(),
             expiryDate: parseFlexDate(data.expiryDate) ?? null,
@@ -133,8 +161,32 @@ export class ProcurementRequestsService {
     findQuote(id: string) {
         return this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
     }
+    /**
+     * Records a supplier's quote.
+     *
+     * Whitelisted rather than spread straight into Prisma: this is one of the
+     * service-key endpoints the SabiQuot portal posts to, and an unrecognised
+     * field in that payload would otherwise fail the whole write.
+     */
     createQuote(data: any) {
-        return this.prisma.receivedQuote.create({ data });
+        return this.prisma.receivedQuote.create({
+            data: {
+                rfqRef: data.rfqRef ? String(data.rfqRef) : null,
+                // What the quote is for. Quote comparison groups on this.
+                prRef: data.prRef ? String(data.prRef) : null,
+                supplierName: data.supplierName,
+                supplierId: data.supplierId ?? null,
+                status: data.status ?? 'Received',
+                items: Array.isArray(data.items) ? data.items : [],
+                receivedDate: parseFlexDate(data.receivedDate) ?? new Date(),
+                validUntil: parseFlexDate(data.validUntil) ?? null,
+                totalValue: Number(data.totalValue) || 0,
+                notes: data.notes ?? null,
+                projectName: data.projectName ?? null,
+                destinationStore: data.destinationStore ?? null,
+                storeLevel: data.storeLevel ?? null,
+            },
+        });
     }
     updateQuote(id: string, data: any) {
         return this.prisma.receivedQuote.update({ where: { id }, data });

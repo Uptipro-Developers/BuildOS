@@ -1,12 +1,18 @@
 import { notifyLoadFailure } from "../../utils/loadFailure";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { toast } from "sonner";
 import {
   getReceivedQuotes,
   createReceivedQuote,
+  updateReceivedQuote,
+  getSentRFQs,
   ReceivedQuote as ApiReceivedQuote,
+  SentRFQ as ApiSentRFQ,
 } from "../../api/procurement-requests";
+import { createPurchaseOrder } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
+import { fetchSuppliers } from "../../api/suppliers";
+import { getAuthUserName } from "../../utils/useAuthUser";
 import { useProcurementUnits } from "../../utils/useProcurementUnits";
 import {
   getCurrencySymbol,
@@ -53,6 +59,8 @@ interface VendorDoc {
   rfqRef: string;
   prRef: string;
   vendor: string;
+  /** The Supplier record behind `vendor` — a purchase order is keyed on it. */
+  supplierId?: string;
   project: string;
   docType: VendorDocType;
   receivedDate: string;
@@ -90,9 +98,15 @@ function fromApi(r: ApiReceivedQuote): VendorDoc {
   return {
     id: r.id,
     rfqRef: r.rfqRef,
-    prRef: "",
+    // These four were hardcoded blank because the columns did not exist. `prRef`
+    // in particular is what quote comparison groups on, so every stored quote
+    // came back ungroupable and the comparison view was permanently empty.
+    prRef: r.prRef ?? "",
     vendor: r.supplierName,
-    project: "",
+    supplierId: r.supplierId,
+    project: r.projectName ?? "",
+    destinationStore: r.destinationStore ?? undefined,
+    storeLevel: r.storeLevel ?? undefined,
     docType: "quote",
     receivedDate: r.receivedDate,
     validUntil: r.validUntil,
@@ -177,6 +191,8 @@ function RecordDocModal({
 
   const docType: VendorDocType = "quote";
   const [vendors, setVendors] = useState<string[]>([]);
+  /** Supplier ids by name, so the saved quote carries the id and not just a label. */
+  const [vendorIds, setVendorIds] = useState<Record<string, string>>({});
   const [projects, setProjects] = useState<string[]>([]);
   const [stores, setStores] = useState<{ name: string; level: string }[]>([]);
   // The material catalogue, so a line item can only reference a material
@@ -187,6 +203,8 @@ function RecordDocModal({
   const [vendor, setVendor] = useState("");
   const [rfqRef, setRfqRef] = useState("");
   const [prRef, setPrRef] = useState("");
+  /** RFQs already sent, so a quote can be attached to the one it answers. */
+  const [sentRfqs, setSentRfqs] = useState<ApiSentRFQ[]>([]);
   const [project, setProject] = useState("");
   const [validDays, setValidDays] = useState("10");
   const [notes, setNotes] = useState("");
@@ -200,6 +218,9 @@ function RecordDocModal({
     getReferenceData()
       .then((data) => {
         const vendorNames = data.suppliers.map((s) => s.name);
+        setVendorIds(
+          Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
+        );
         const projectNames = data.projects.map((p) => p.name);
         const storeOptions = data.stores.map((s) => ({
           name: s.name,
@@ -218,7 +239,23 @@ function RecordDocModal({
         );
       })
       .catch(() => {});
+
+    getSentRFQs()
+      .then((rows) => setSentRfqs(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
   }, []);
+
+  /**
+   * Attaches the quote to the RFQ it answers, carrying that RFQ's supplier and
+   * purchase-request reference across.
+   */
+  function selectRfq(ref: string) {
+    setRfqRef(ref);
+    const rfq = sentRfqs.find((r) => r.rfqRef === ref);
+    if (!rfq) return;
+    setPrRef(rfq.prRef ?? "");
+    if (rfq.supplierName) setVendor(rfq.supplierName);
+  }
 
   const addItem = () =>
     setItems((p) => [
@@ -250,6 +287,7 @@ function RecordDocModal({
       rfqRef: rfqRef.trim() || "—",
       prRef: prRef.trim() || "—",
       vendor,
+      supplierId: vendorIds[vendor],
       project,
       docType,
       receivedDate: fmtDate(today),
@@ -327,12 +365,22 @@ function RecordDocModal({
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 RFQ Reference
               </label>
-              <input
+              {/* Picked from the RFQs actually sent, not typed. A quote answers
+                  an RFQ, and choosing it is what supplies the purchase-request
+                  reference below — which the comparison view groups on. Typed
+                  free-hand, one transposed digit silently orphaned the quote. */}
+              <select
                 value={rfqRef}
-                onChange={(e) => setRfqRef(e.target.value)}
-                placeholder="RFQ-0011"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+                onChange={(e) => selectRfq(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Unsolicited — no RFQ</option>
+                {sentRfqs.map((r) => (
+                  <option key={r.id} value={r.rfqRef}>
+                    {r.rfqRef} · {r.supplierName}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -342,8 +390,14 @@ function RecordDocModal({
                 value={prRef}
                 onChange={(e) => setPrRef(e.target.value)}
                 placeholder="PR-0019"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                readOnly={Boolean(rfqRef)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm read-only:bg-gray-50 read-only:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <p className="text-xs text-gray-400 mt-0.5">
+                {rfqRef
+                  ? "Taken from the selected RFQ."
+                  : "Quotes sharing a PR reference can be compared side by side."}
+              </p>
             </div>
             {docType === "quote" && (
               <div>
@@ -772,60 +826,98 @@ function CreatePOFromQuoteModal({
         : `${symbol}${n}`;
   };
   const today = formatDateByGeneralSettings(new Date());
-  // Import suppliers from SuppliersPage
-  // (If not possible, copy the suppliers array here or import from a shared module)
-  const allSuppliers = [
-    {
-      name: "CemCo Nigeria Ltd",
-      contactPerson: "Tunde Adeyemi",
-      phone: "+234 80 4521 7890",
-    },
-    {
-      name: "SteelMart International",
-      contactPerson: "Kene Obi",
-      phone: "+234 81 2233 4455",
-    },
-    {
-      name: "ElectraHub",
-      contactPerson: "Femi Addo",
-      phone: "+234 70 9988 7766",
-    },
-    {
-      name: "PlumbTech Ltd",
-      contactPerson: "Lawal Musa",
-      phone: "+234 81 5566 7788",
-    },
-    {
-      name: "BuildPlus Supplies",
-      contactPerson: "Ngozi Eze",
-      phone: "+234 80 7788 9900",
-    },
-    {
-      name: "Alpha Aggregates",
-      contactPerson: "Emeka Nwosu",
-      phone: "+234 80 3344 5566",
-    },
-    {
-      name: "TileWorld",
-      contactPerson: "Bisi Akinola",
-      phone: "+234 70 8877 6655",
-    },
-  ];
-  const supplierInfo = allSuppliers.find((s) => s.name === doc.vendor);
-  const defaultContact = supplierInfo
-    ? `${supplierInfo.contactPerson} (${supplierInfo.phone})`
-    : "";
   const [expectedDate, setExpectedDate] = useState("");
-  const [supplierContact, setSupplierContact] = useState(defaultContact);
+  const [supplierContact, setSupplierContact] = useState("");
   const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  /**
+   * Resolved supplier for this quote. The supplier id is what the purchase
+   * order is actually keyed on, so it has to be looked up before an order can be
+   * placed at all. This modal previously carried a hardcoded seven-supplier
+   * array copied out of the design mock, and matched the vendor name against it.
+   */
+  const [supplier, setSupplier] = useState<{
+    id: string;
+    contactPerson: string;
+    phone: string;
+  } | null>(null);
+
+  useEffect(() => {
+    fetchSuppliers()
+      .then((rows) => {
+        const match =
+          (doc.supplierId && rows.find((s) => s.id === doc.supplierId)) ||
+          rows.find((s) => s.name === doc.vendor);
+        if (!match) return;
+        setSupplier({
+          id: match.id,
+          contactPerson: match.contactPerson,
+          phone: match.phone,
+        });
+        setSupplierContact((prev) =>
+          prev ||
+          [match.contactPerson, match.phone].filter(Boolean).join(" — "),
+        );
+      })
+      .catch((err) => notifyLoadFailure("suppliers", err));
+  }, [doc.supplierId, doc.vendor]);
 
   // Preview only. This used to call getNextId during render, which consumed a
   // sequence number on every re-render — typing in any field above burned PO
   // numbers. The real reference is taken once, when the PO is confirmed.
   const nextPO = peekNextId("PurchaseOrder");
 
+  /**
+   * Awards the quote — that is, actually raises the purchase order.
+   *
+   * This used to be `onDone(await allocate("PurchaseOrder"))`: it took a number
+   * off the sequence, flipped a local flag and toasted "Purchase Order PO-0007
+   * created." No order was written, the quote's status was not saved, and the
+   * number was burned. The award is the hinge of the whole flow, and it was the
+   * one step that did nothing.
+   */
   async function handleCreate() {
-    onDone(await allocate("PurchaseOrder"));
+    if (!expectedDate || submitting) return;
+    if (!supplier) {
+      toast.error(
+        `${doc.vendor} is not in the supplier list, so an order cannot be raised against them.`,
+      );
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const poRef = await allocate("PurchaseOrder");
+      await createPurchaseOrder({
+        prRef: doc.prRef && doc.prRef !== "—" ? doc.prRef : undefined,
+        // What was awarded, and to whom, at the price that was quoted.
+        quoteRef: doc.id,
+        supplierId: supplier.id,
+        status: "draft",
+        createdBy: getAuthUserName() || "Current User",
+        expectedDate: new Date(expectedDate).toISOString(),
+        totalValue: doc.totalAmount,
+        items: doc.items.map((it) => ({
+          material: it.material,
+          qty: it.qty,
+          unit: it.unit,
+          unitCost: it.unitPrice,
+        })),
+      });
+      // The decision has to outlive the page, or the same quote can be awarded
+      // twice.
+      await updateReceivedQuote(doc.id, { status: "po_created" }).catch(
+        () => undefined,
+      );
+      onDone(poRef);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not raise the purchase order. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -957,11 +1049,12 @@ function CreatePOFromQuoteModal({
             Cancel
           </button>
           <button
-            onClick={handleCreate}
-            disabled={!expectedDate}
+            onClick={() => void handleCreate()}
+            disabled={!expectedDate || submitting}
             className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <ShoppingCart className="w-4 h-4" /> Create PO
+            <ShoppingCart className="w-4 h-4" />{" "}
+            {submitting ? "Creating…" : "Create PO"}
           </button>
         </div>
       </div>
@@ -1378,11 +1471,12 @@ export function ReceivedQuotesPage() {
               };
               const isOpen = expanded === d.id;
               return (
-                <>
-                  <tr
-                    key={d.id}
-                    className="hover:bg-gray-50/70 transition-colors"
-                  >
+                // The key belongs on the fragment this callback returns, not on
+                // the inner <tr>. React saw an unkeyed list and matched rows by
+                // position, so the expanded row could follow the index rather
+                // than the quote when the list is filtered or re-sorted.
+                <Fragment key={d.id}>
+                  <tr className="hover:bg-gray-50/70 transition-colors">
                     <td className="px-3 py-3 text-gray-400">
                       <button onClick={() => setExpanded(isOpen ? null : d.id)}>
                         {isOpen ? (
@@ -1657,7 +1751,7 @@ export function ReceivedQuotesPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
           </tbody>
@@ -1670,13 +1764,20 @@ export function ReceivedQuotesPage() {
             try {
               const created = await createReceivedQuote({
                 rfqRef: doc.rfqRef,
+                // Without this the quote is stored detached from the request it
+                // answers and can never be compared against its rivals.
+                prRef: doc.prRef && doc.prRef !== "—" ? doc.prRef : undefined,
                 supplierName: doc.vendor,
+                supplierId: doc.supplierId,
                 status: "pending_review",
                 items: doc.items,
                 receivedDate: doc.receivedDate,
                 validUntil: doc.validUntil,
                 totalValue: doc.totalAmount,
                 notes: doc.notes,
+                projectName: doc.project || undefined,
+                destinationStore: doc.destinationStore,
+                storeLevel: doc.storeLevel,
               });
               setDocs((prev) => [fromApi(created), ...prev]);
             } catch (e) {
@@ -1691,14 +1792,18 @@ export function ReceivedQuotesPage() {
         <CreatePOFromQuoteModal
           doc={createPODoc}
           onClose={() => setCreatePODoc(null)}
-          onDone={(poId) => {
+          onDone={(poRef) => {
+            // The modal has already written the order and the quote's status;
+            // this only brings the table in line with what was stored.
             setDocs((prev) =>
               prev.map((x) =>
                 x.id === createPODoc!.id ? { ...x, status: "po_created" } : x,
               ),
             );
             setCreatePODoc(null);
-            toast.success(`Purchase Order ${poId} created.`);
+            toast.success(`Purchase Order ${poRef} created.`, {
+              description: `Raised for ${createPODoc!.vendor} from quote ${createPODoc!.id}.`,
+            });
           }}
         />
       )}

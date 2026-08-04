@@ -1,9 +1,24 @@
 import { apiFetch } from './client';
 
+/** One supplier's progress through the sourcing of a purchase request. */
+export interface PRSupplier {
+    supplier: string;
+    supplierId?: string;
+    status: string;
+    sentDate?: string;
+    quoteRef?: string;
+    quoteAmount?: number;
+    poRef?: string;
+}
+
 export interface PurchaseRequest {
     id: string; prRef: string; title: string; projectId?: string;
     projectName?: string; status: string; priority: string;
     requestedBy?: string; daysToDeliver?: number; items: any[]; notes?: string;
+    /** Reference of the material request this was raised from, if any. */
+    mrRef?: string;
+    procurementType?: 'direct' | 'rfq';
+    suppliers?: PRSupplier[];
     createdAt: string;
 }
 export interface PurchaseInvoice {
@@ -16,11 +31,18 @@ export interface SentRFQ {
     id: string; rfqRef: string; supplierName: string; supplierId?: string;
     status: string; items: any[]; sentDate: string; expiryDate?: string;
     notes?: string; createdAt: string;
+    /** The purchase request being competed. Rows sharing one are one RFQ. */
+    prRef?: string;
 }
 export interface ReceivedQuote {
     id: string; rfqRef: string; supplierName: string; supplierId?: string;
     status: string; items: any[]; receivedDate: string; validUntil?: string;
     totalValue: number; notes?: string; createdAt: string;
+    /** What is being quoted for. Quote comparison groups on this. */
+    prRef?: string;
+    projectName?: string;
+    destinationStore?: string;
+    storeLevel?: string;
 }
 
 // Purchase Requests

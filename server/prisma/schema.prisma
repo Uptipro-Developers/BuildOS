@@ -426,9 +426,16 @@ model SupplierMaterial {
 // ─────────────── PURCHASE ORDERS ───────────────
 
 model PurchaseOrder {
-  id            String          @id @default(cuid())
-  prRef         String?
-  mrRef         String?
+  id    String  @id @default(cuid())
+  prRef String?
+  mrRef String?
+
+  /// The ReceivedQuote that was awarded, when this order came out of a quote
+  /// comparison. This is the record of *which* supplier won and at what price,
+  /// and there was previously nowhere to put it — so an award could not be
+  /// represented even though the UI offered the button.
+  quoteRef String?
+
   status        POStatus        @default(draft)
   paymentStatus POPaymentStatus @default(unpaid)
   sentToFinance Boolean         @default(false)
@@ -766,8 +773,13 @@ model MaterialRequest {
   neededBy     DateTime?
   approvedAt   DateTime?
   notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+
+  /// Reference of the PurchaseRequest raised from this request, so the material
+  /// request can show what became of it instead of stopping at "In Procurement".
+  prRef String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model MaterialReturn {
@@ -803,8 +815,25 @@ model PurchaseRequest {
   daysToDeliver Int?
   items         Json     @default("[]")
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+
+  /// Reference of the MaterialRequest this was raised from, when it came through
+  /// Procurement › Material Requests rather than being raised standalone. The
+  /// link previously existed only inside the `notes` prose ("Raised from Material
+  /// Request MR-0007"), which nothing could query or follow.
+  mrRef String?
+
+  /// How this request is being sourced: "rfq" to compete it across suppliers, or
+  /// "direct" for a single named supplier. Chosen when the request is raised and
+  /// it decides whether RFQs are sent, so it has to survive the round trip.
+  procurementType String @default("rfq")
+
+  /// Per-supplier progress: `{ supplier, supplierId?, status, sentDate?,
+  /// quoteRef?, quoteAmount?, poRef? }`. Held as JSON rather than a table because
+  /// it is only ever read back with the request it belongs to.
+  suppliers Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PurchaseInvoice {
@@ -835,8 +864,17 @@ model SentRFQ {
   sentDate     DateTime  @default(now())
   expiryDate   DateTime?
   notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+
+  /// The PurchaseRequest this RFQ was competed for. One row is one supplier, so
+  /// an RFQ sent to five suppliers is five rows sharing a prRef — this is what
+  /// groups them back into a single sourcing event for quote comparison. The UI
+  /// collected it before and the server dropped it on the floor.
+  prRef String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([prRef])
 }
 
 model ReceivedQuote {
@@ -850,8 +888,22 @@ model ReceivedQuote {
   validUntil   DateTime?
   totalValue   Float     @default(0)
   notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+
+  /// The PurchaseRequest being quoted for. Quote comparison groups on this, so
+  /// without it the comparison view had nothing to group and was empty for every
+  /// stored quote.
+  prRef String?
+
+  /// Where the goods should land once ordered, carried from the quote onto the
+  /// purchase order.
+  projectName      String?
+  destinationStore String?
+  storeLevel       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([prRef])
 }
 
 // ─────────────── CONSTRUCTION EXTRAS ───────────────

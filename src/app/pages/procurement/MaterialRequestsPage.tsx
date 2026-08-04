@@ -39,6 +39,10 @@ import { getReferenceData } from "../../api/reference-data";
 import { getUnits } from "../../api/admin-extras";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import { createPurchaseRequest } from "../../api/procurement-requests";
+import {
+  itemReference,
+  baseMaterialRequestRef,
+} from "../../utils/materialRequestRef";
 
 type ReqStatus =
   "pending" | "approved" | "rejected" | "in_procurement" | "fulfilled";
@@ -120,23 +124,12 @@ function fromApiMR(r: ApiMR): LocalMR {
   };
 }
 
-/**
- * MaterialRequest.reference is UNIQUE in the schema, so a multi-item request
- * cannot store one shared reference across its rows. Each row is written as
- * `<requestRef>/<n>` instead, and the base reference is what the UI groups on.
- */
-const ITEM_REF_SEPARATOR = "/";
+// The `<requestRef>/<n>` convention now lives in utils/materialRequestRef so
+// Purchase Requests can resolve it too. Re-exported because this module was the
+// published home of `itemReference`.
+export { itemReference };
 
-export function itemReference(requestRef: string, index: number): string {
-  return `${requestRef}${ITEM_REF_SEPARATOR}${index + 1}`;
-}
-
-function baseReference(reference: string): string {
-  const cut = reference.lastIndexOf(ITEM_REF_SEPARATOR);
-  if (cut <= 0) return reference;
-  // Only strip the suffix when it really is an item counter.
-  return /^\d+$/.test(reference.slice(cut + 1)) ? reference.slice(0, cut) : reference;
-}
+const baseReference = baseMaterialRequestRef;
 
 /**
  * Collapses the API's one-row-per-material records into the multi-item requests
@@ -773,19 +766,31 @@ function RaisePRModal({
 }: {
   req: LocalMR;
   onClose: () => void;
-  onDone: (prId: string, type: "direct" | "rfq", suppliers: string[]) => void;
+  // The type and supplier selection used to be handed back here for the caller
+  // to do something with, and it did nothing with them. They are now stored on
+  // the purchase request itself, so the reference is all this needs to report.
+  onDone: (prId: string) => void;
 }) {
   const [procType, setProcType] = useState<"direct" | "rfq">("direct");
   const [suppliers, setSuppliers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const { allocate } = useNumbering();
+  /**
+   * Supplier ids by name. The picker works in names because that is what it
+   * shows, but the purchase request stores ids as well — an RFQ can only be
+   * emailed to a supplier the server can look up.
+   */
+  const [supplierIds, setSupplierIds] = useState<Record<string, string>>({});
 
   useEffect(() => {
     getReferenceData()
       .then((data) => {
         const supplierNames = data.suppliers.map((s) => s.name);
         setSuppliers(supplierNames);
+        setSupplierIds(
+          Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
+        );
         setSelected((prev) => (prev.length ? prev : supplierNames.slice(0, 1)));
       })
       .catch(() => {});
@@ -813,6 +818,16 @@ function RaisePRModal({
         projectName: req.project,
         requestedBy: getAuthUserName() || "Current User",
         notes: `Raised from Material Request ${req.id} (${procType === "direct" ? "Direct Procurement" : "RFQ"}, supplier${selected.length > 1 ? "s" : ""}: ${selected.join(", ")}).`,
+        // The sourcing decision made here used to live only in the sentence
+        // above, so the purchase request opened with no suppliers and no memory
+        // of whether it was meant to be competed or placed directly.
+        mrRef: req.id,
+        procurementType: procType,
+        suppliers: selected.map((name) => ({
+          supplier: name,
+          supplierId: supplierIds[name],
+          status: "not_sent",
+        })),
         items: req.items.map((it) => ({
           description: it.material,
           qty: it.qty,
@@ -820,7 +835,7 @@ function RaisePRModal({
           unitPrice: 0,
         })),
       });
-      onDone(created.prRef ?? created.id, procType, selected);
+      onDone(created.prRef ?? created.id);
       onClose();
     } catch (error) {
       toast.error(
@@ -1442,7 +1457,7 @@ export function MaterialRequestsPage() {
         <RaisePRModal
           req={raisePRFor}
           onClose={() => setRaisePRFor(null)}
-          onDone={(prId, _type, _suppliers) => {
+          onDone={(prId) => {
             void persistStatus(raisePRFor, "in_procurement");
             setPrToast(prId);
             setTimeout(() => setPrToast(null), 5000);
