@@ -4,6 +4,7 @@ import {
   getAttendance,
   createAttendanceRecord,
   updateAttendanceRecord,
+  type AttendanceRecord,
 } from "../../api/hr-extras";
 import { fetchEmployees } from "../../api/employees";
 import {
@@ -105,14 +106,37 @@ export function AttendancePage() {
     Promise.all([fetchEmployees(), getAttendance()])
       .then(([employees, attendance]) => {
         const todayStr = new Date().toDateString();
-        const attByEmployee = new Map(
-          attendance
-            .filter((r) => new Date(r.date).toDateString() === todayStr)
-            .map((r) => [r.employeeId, r]),
+        const todays = attendance.filter(
+          (r) => new Date(r.date).toDateString() === todayStr,
         );
+        // Prefer the most complete record per employee: a clock-out (which
+        // carries the worked hours) beats a lone clock-in, which beats a bare
+        // status mark. Without this a duplicate row — e.g. HR marking someone
+        // after they had already clocked in via ESS — could win the key and hide
+        // the clocked-out hours.
+        const rank = (r: AttendanceRecord) =>
+          r.clockOut ? 3 : r.clockIn ? 2 : 1;
+        const attByEmployee = new Map<string, AttendanceRecord>();
+        for (const r of todays) {
+          if (!r.employeeId) continue;
+          const current = attByEmployee.get(r.employeeId);
+          if (!current || rank(r) > rank(current)) {
+            attByEmployee.set(r.employeeId, r);
+          }
+        }
         setRecords(
           employees.map((e) => {
             const rec = attByEmployee.get(e.id);
+            // Derive the hours from the clock times when the stored value is
+            // missing or zero but both times exist, so the difference between
+            // clock-in and clock-out always renders (older records, or a value
+            // that never got computed, would otherwise show a dash).
+            const hrs =
+              rec?.hoursWorked && rec.hoursWorked > 0
+                ? rec.hoursWorked
+                : rec?.clockIn && rec?.clockOut
+                  ? hoursBetween(rec.clockIn, rec.clockOut)
+                  : 0;
             return {
               id: e.id,
               recordId: rec?.id,
@@ -128,7 +152,7 @@ export function AttendancePage() {
                   ? (rec.status as AttStatus)
                   : "present"
                 : "unmarked",
-              hrs: rec?.hoursWorked ?? 0,
+              hrs,
             };
           }),
         );

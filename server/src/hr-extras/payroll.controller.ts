@@ -14,6 +14,7 @@ import { Roles } from '../auth/decorators';
 import { PayrollOrchestrationService } from './payroll-orchestration.service';
 import { PayrollValidationService } from './payroll-validation.service';
 import { LeaveBalanceService } from '../leave-requests/leave-balance.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('payroll')
 export class PayrollController {
@@ -25,6 +26,7 @@ export class PayrollController {
 
   // ── Payroll Processing ──
   @Post('process')
+  @RequiresProcess('p_payroll', 'create')
   @Roles('admin', 'hr-manager', 'finance-manager')
   async processPayroll(
     @Body() body: { periodId: string; employeeIds: string[] },

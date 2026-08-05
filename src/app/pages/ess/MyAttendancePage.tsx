@@ -15,6 +15,7 @@ import {
   type MyAttendanceToday,
 } from "../../api/hr-extras";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
+import { logActivity } from "../../utils/activityLog";
 
 /**
  * Self-service clock in / out.
@@ -67,6 +68,14 @@ export function MyAttendancePage() {
           ? `Clocked in at ${record.clockIn}.`
           : `Clocked out at ${record.clockOut} — ${record.hoursWorked ?? 0}h recorded.`,
       );
+      logActivity({
+        action: action === "in" ? "Clocked in" : "Clocked out",
+        module: "ESS",
+        description:
+          action === "in"
+            ? `At ${record.clockIn}`
+            : `At ${record.clockOut} — ${record.hoursWorked ?? 0}h`,
+      });
       load();
     } catch (err) {
       toast.error(

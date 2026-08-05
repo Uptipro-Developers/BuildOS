@@ -11,6 +11,7 @@ import {
 import { getIssues, createIssue } from "../../api/hr-extras";
 import { getPublicIssueTypes } from "../../api/admin-extras";
 import { useAuthUser } from "../../utils/useAuthUser";
+import { logActivity } from "../../utils/activityLog";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 
 type IssueType = string;
@@ -135,6 +136,11 @@ export function LogIssuesPage() {
       await loadIssues();
       setShowModal(false);
       toast.success("Issue logged successfully.");
+      logActivity({
+        action: "Logged issue",
+        module: "ESS",
+        description: form.title.trim(),
+      });
     } catch (err) {
       console.error(err);
       toast.error("Failed to log issue. Please try again.");

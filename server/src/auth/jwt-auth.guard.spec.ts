@@ -62,6 +62,7 @@ function makeServiceKeys(validKey?: string) {
  */
 function makePrisma(
     roles: { name: string; isSuper?: boolean; appScope?: string[] }[] = [],
+    opts: { isEmployee?: boolean } = {},
 ) {
     return {
         // Presence tracking touches this on every authenticated request.
@@ -74,6 +75,12 @@ function makePrisma(
                     appScope: r.appScope ?? [],
                 })),
             ),
+        },
+        // Backs the employee-tag fallback for tokens issued before the tag existed.
+        employee: {
+            findFirst: jest
+                .fn()
+                .mockResolvedValue(opts.isEmployee ? { id: 'emp-1' } : null),
         },
     } as unknown as ConstructorParameters<typeof JwtAuthGuard>[3];
 }
@@ -170,6 +177,43 @@ describe('JwtAuthGuard', () => {
             authorization: `Bearer ${token({ sub: 'u1', role: 'admin' })}`,
         });
         await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('satisfies an @Roles(employee) gate via the token employee tag, whatever the role', async () => {
+        // A Project Manager who is also an employee must be able to raise their own
+        // requests even though "project manager" is not named on the gate.
+        const meta = { roles: ['admin', 'employee'] };
+        const guard = makeGuard(meta);
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({
+                sub: 'u1',
+                role: 'Project Manager',
+                employeeId: 'emp-1',
+                isEmployee: true,
+            })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('satisfies an @Roles(employee) gate for a legacy token via the employee lookup', async () => {
+        // Token predates the tag; the guard resolves the Employee record directly.
+        const meta = { roles: ['admin', 'employee'] };
+        const guard = makeGuard(meta, {
+            prisma: makePrisma([], { isEmployee: true }),
+        });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({ sub: 'u1', role: 'Project Manager' })}`,
+        });
+        await expect(guard.canActivate(context)).resolves.toBe(true);
+    });
+
+    it('still denies an @Roles(employee) gate for a non-employee (403)', async () => {
+        const meta = { roles: ['admin', 'employee'] };
+        const guard = makeGuard(meta, { prisma: makePrisma([], { isEmployee: false }) });
+        const { context } = makeContext(meta, {
+            authorization: `Bearer ${token({ sub: 'u1', role: 'contractor' })}`,
+        });
+        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('rejects a token issued before a revocation marker (401)', async () => {

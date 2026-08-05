@@ -25,6 +25,8 @@ interface AuthTokenPayload extends JwtPayload {
     roles?: string | string[];
     permissions?: string[];
     assignedApps?: string[];
+    employeeId?: string;
+    isEmployee?: boolean;
 }
 
 /**
@@ -254,6 +256,17 @@ export class JwtAuthGuard implements CanActivate {
             return;
         }
 
+        // An `employee` gate names a person's relationship to the company, not a
+        // named role, so it is satisfied by anyone who is an employee — whatever
+        // their role (Admin, Project Manager, …). Employees raise their own
+        // requests (leave, claims, expenses), and gating those on the literal
+        // `employee` slug rejected every employee whose role was something else
+        // ("does not have required role(s): admin, employee"). This is the org's
+        // "employee tag": a linked Employee record, carried on the token.
+        if (needed.includes(canonical('employee')) && (await this.isEmployee(payload))) {
+            return;
+        }
+
         // The `@Roles()` lists name a fixed set of built-in slugs, so a role an
         // admin created ("Procurement Officer"), or a built-in one simply not named
         // on the endpoint, could never satisfy one no matter what had been granted —
@@ -266,6 +279,34 @@ export class JwtAuthGuard implements CanActivate {
         throw new ForbiddenException(
             `User does not have required role(s): ${requiredRoles.join(', ')}`,
         );
+    }
+
+    /**
+     * Whether the caller is an employee of the company.
+     *
+     * Fast path: the token carries the tag (set at issue time from the linked
+     * Employee record). Fallback: resolve the Employee directly, so sessions
+     * issued before the tag existed still work without forcing a re-login. The
+     * fallback only runs on an `employee`-gated route whose static role list the
+     * caller did not already satisfy, so it is off the hot path.
+     */
+    private async isEmployee(payload: AuthTokenPayload): Promise<boolean> {
+        if (payload.isEmployee === true || payload.employeeId) return true;
+        if (!payload.sub && !payload.email) return false;
+        try {
+            const employee = await this.prisma.employee.findFirst({
+                where: {
+                    OR: [
+                        ...(payload.sub ? [{ userId: payload.sub }] : []),
+                        ...(payload.email ? [{ email: payload.email }] : []),
+                    ],
+                },
+                select: { id: true },
+            });
+            return Boolean(employee);
+        } catch {
+            return false;
+        }
     }
 
     /**

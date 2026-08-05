@@ -20,6 +20,7 @@ import { ApprovalPipeline } from "./ApprovalPipeline";
 import type { PipelineStep } from "./ApprovalPipeline";
 import { fetchEmployees } from "../api/employees";
 import { useAuthUser } from "../utils/useAuthUser";
+import { logActivity } from "../utils/activityLog";
 import { listAppTasks, updateAppTask, toBoardStatus } from "../api/app-tasks";
 
 type TaskStatus =
@@ -238,10 +239,20 @@ export function MyTasksView({
 
   function applyUpdate(id: string, updates: Partial<MyTask>) {
     setLoadingTaskId(id);
+    const task = tasks.find((t) => t.id === id);
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, ...updates } : t)),
     );
     updateAppTask(id, updates as Record<string, any>)
+      .then(() => {
+        if (updates.status) {
+          logActivity({
+            action: `Task ${updates.status}`,
+            module: app ? app.charAt(0).toUpperCase() + app.slice(1) : "Tasks",
+            description: task?.name,
+          });
+        }
+      })
       .catch((err) => {
         toast.error(
           err instanceof Error ? err.message : "Could not update the task.",

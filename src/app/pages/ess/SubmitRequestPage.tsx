@@ -42,6 +42,7 @@ import { createLeaveRequest } from "../../api/leave-requests";
 import { createMaterialRequest } from "../../api/materials";
 import { fetchProjects } from "../../api/projects";
 import { useAuthUser } from "../../utils/useAuthUser";
+import { logActivity } from "../../utils/activityLog";
 
 // Shared material catalogue with stock status — mirrors Storefront inventory
 type StockLevel = "in_stock" | "low_stock" | "out_of_stock";
@@ -565,11 +566,6 @@ function MaterialForm({
       : `This will request ${formState.quantity} ${formState.unit} of ${formState.material} for ${formState.project}. It will be routed for approval once submitted.`;
 
   async function submitRequest() {
-    if (requestKind === "service") {
-      // No backend target for service requests yet — keep optimistic ack.
-      onSuccess("SVC-" + String(Math.floor(1000 + Math.random() * 8999)));
-      return;
-    }
     setSubmitting(true);
     try {
       // The reference comes from the MaterialRequest sequence in Settings →
@@ -578,6 +574,44 @@ function MaterialForm({
       // supplied reference, so allocating here is what makes the configured
       // convention land on the record.
       const { reference } = await allocateNumber("MaterialRequest");
+      const priority =
+        formState.priority === "high"
+          ? "High"
+          : formState.priority === "low"
+            ? "Low"
+            : "Normal";
+
+      if (requestKind === "service") {
+        // Service requests reuse the Material Request pipeline (Line Manager →
+        // Procurement → Approved) so they persist, surface under My Requests, and
+        // route for approval like every other ESS request. There is no separate
+        // service-request entity, so the service nature is carried in the fields.
+        const created: any = await createMaterialRequest({
+          reference,
+          materialName: formState.serviceType,
+          unit: "Service",
+          qty: 1,
+          storeName: "General Store",
+          projectName: formState.project,
+          priority,
+          // ISO, not the raw date-only value, which Prisma's DateTime rejects.
+          neededBy: formState.serviceDate
+            ? new Date(formState.serviceDate).toISOString()
+            : undefined,
+          purpose: [
+            "Service request",
+            formState.serviceProvider && `Provider: ${formState.serviceProvider}`,
+            formState.estimatedCost && `Est. cost: ${formState.estimatedCost}`,
+          ]
+            .filter(Boolean)
+            .join(" — "),
+          notes: formState.comments || undefined,
+          requestedBy: authUser.name || authUser.email || "Employee",
+        });
+        onSuccess(created?.reference ?? created?.id ?? "SVC");
+        return;
+      }
+
       const created: any = await createMaterialRequest({
         reference,
         materialName: formState.material,
@@ -585,12 +619,7 @@ function MaterialForm({
         qty: Number(formState.quantity),
         storeName: "General Store",
         projectName: formState.project,
-        priority:
-          formState.priority === "high"
-            ? "High"
-            : formState.priority === "low"
-              ? "Low"
-              : "Normal",
+        priority,
         purpose: formState.comments,
         requestedBy: authUser.name || authUser.email || "Employee",
       });
@@ -599,7 +628,7 @@ function MaterialForm({
       toast.error(
         err instanceof Error
           ? err.message
-          : "Failed to submit material request. Please try again.",
+          : "Failed to submit request. Please try again.",
       );
     } finally {
       setSubmitting(false);
@@ -1478,6 +1507,16 @@ export function SubmitRequestPage() {
       is submitted. */
   const [workflows, setWorkflows] = useState<ProcessWorkflow[]>([]);
 
+  // Records the submission to Activity History, then shows the success screen.
+  function recordSubmission(type: string, id: string) {
+    logActivity({
+      action: `Submitted ${type}`,
+      module: "ESS",
+      description: id ? `Reference ${id}` : undefined,
+    });
+    setSuccessState({ type, id });
+  }
+
   useEffect(() => {
     getProcessWorkflows()
       .then((rows) => setWorkflows(Array.isArray(rows) ? rows : []))
@@ -1612,7 +1651,7 @@ export function SubmitRequestPage() {
               <MaterialForm
                 projects={projectOptions}
                 onSuccess={(id) =>
-                  setSuccessState({ type: "Material Request", id })
+                  recordSubmission("Material Request", id)
                 }
               />
             )}
@@ -1620,28 +1659,28 @@ export function SubmitRequestPage() {
               <ExpenseForm
                 projects={projectOptions}
                 onSuccess={(id) =>
-                  setSuccessState({ type: "Finance Request", id })
+                  recordSubmission("Finance Request", id)
                 }
               />
             )}
             {tab === "leave" && (
               <LeaveForm
                 onSuccess={(id) =>
-                  setSuccessState({ type: "Leave Request", id })
+                  recordSubmission("Leave Request", id)
                 }
               />
             )}
             {tab === "issue" && (
               <IssueForm
                 onSuccess={(id) =>
-                  setSuccessState({ type: "Issue Reported", id })
+                  recordSubmission("Issue Reported", id)
                 }
               />
             )}
             {tab === "change" && (
               <ChangeRequestForm
                 onSuccess={(id) =>
-                  setSuccessState({ type: "Change Request", id })
+                  recordSubmission("Change Request", id)
                 }
               />
             )}

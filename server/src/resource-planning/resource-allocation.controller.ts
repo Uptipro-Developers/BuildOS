@@ -19,6 +19,7 @@ export class ResourceAllocationController {
 
   // ── CRUD Operations ──
   @Post()
+  @RequiresProcess('p_resources', 'create')
   @Roles('admin', 'project-manager', 'resource-manager')
   async create(@Body() createDto: any) {
     const allocation = await this.resourceAllocationService.create(createDto);
@@ -48,6 +49,7 @@ export class ResourceAllocationController {
   }
 
   @Put(':id')
+  @RequiresProcess('p_resources', 'edit')
   @Roles('admin', 'project-manager', 'resource-manager')
   async update(@Param('id') id: string, @Body() updateDto: any) {
     const allocation = await this.resourceAllocationService.update(id, updateDto);

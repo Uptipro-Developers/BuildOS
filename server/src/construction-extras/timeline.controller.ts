@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { Roles } from '../auth/decorators';
 import { TimelineService } from './timeline.service';
+import { RequiresProcess } from '../permissions/require-permission.decorator';
 
 @Controller('timelines')
 export class TimelineController {
@@ -30,6 +31,7 @@ export class TimelineController {
 
   // ── Phase Management ──
   @Post(':timelineId/phases')
+  @RequiresProcess('p_projects', 'edit')
   @Roles('admin', 'project-manager')
   async addPhase(@Param('timelineId') timelineId: string, @Body() phaseDto: any) {
     const timeline = await this.timelineService.addPhase(timelineId, phaseDto);
@@ -37,6 +39,7 @@ export class TimelineController {
   }
 
   @Put(':timelineId/phases/:phaseId')
+  @RequiresProcess('p_projects', 'edit')
   @Roles('admin', 'project-manager')
   async updatePhase(
     @Param('timelineId') timelineId: string,
@@ -48,6 +51,7 @@ export class TimelineController {
   }
 
   @Delete(':timelineId/phases/:phaseId')
+  @RequiresProcess('p_projects', 'edit')
   @Roles('admin', 'project-manager')
   async removePhase(
     @Param('timelineId') timelineId: string,

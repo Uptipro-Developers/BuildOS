@@ -341,7 +341,28 @@ export class AuthService {
         // of ESS by the guard's app check. Mirrors PermissionsService.resolveForUser.
         assignedApps = Array.from(new Set(['ess', ...assignedApps]));
 
-        const payload = { sub: user.id, email: user.email, role: user.role, assignedApps };
+        // Resolve the linked employee so the token carries (a) `employeeId` for
+        // employee-scoped writes (leave, claims, expenses) that read it off the
+        // request, and (b) `isEmployee` — the tag the auth guard uses to satisfy an
+        // `@Roles('employee')` gate regardless of the user's named role. Without it a
+        // "Project Manager" who is also an employee was rejected from raising their
+        // own requests ("does not have required role(s): admin, employee").
+        const linkedEmployee = await this.prisma.employee
+            .findFirst({
+                where: { OR: [{ userId: user.id }, { email: user.email }] },
+                select: { id: true },
+            })
+            .catch(() => null);
+
+        const payload = {
+            sub: user.id,
+            email: user.email,
+            role: user.role,
+            assignedApps,
+            ...(linkedEmployee?.id
+                ? { employeeId: linkedEmployee.id, isEmployee: true }
+                : {}),
+        };
         const accessTtl = this.getAccessTokenTtl();
         const refreshTtl = this.getRefreshTokenTtl();
 

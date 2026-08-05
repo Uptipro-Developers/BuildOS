@@ -8,6 +8,7 @@ import {
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
 import { fetchOrgUnits } from "../../api/org-units";
+import { getAppRoles } from "../../api/admin-extras";
 import { useNumbering } from "../../stores/numberingStore";
 import { useClickOutside } from "../../utils/useClickOutside";
 import {
@@ -272,6 +273,7 @@ function AddEmployeeModal({
   onSave,
   onClose,
   departments,
+  roleOptions,
   activeEmployees,
   orgUnits,
   saving,
@@ -279,6 +281,7 @@ function AddEmployeeModal({
   onSave: (f: AddEmpForm) => void;
   onClose: () => void;
   departments: { id: string; name: string }[];
+  roleOptions: string[];
   activeEmployees: { id: string; firstName: string; lastName: string }[];
   orgUnits: string[];
   saving: boolean;
@@ -340,7 +343,12 @@ function AddEmployeeModal({
                 <input value={form.middleName} onChange={(e) => set("middleName", e.target.value)} className={inputClass} />
               </FormField>
               <FormField label="Role / Position" required error={errors.role}>
-                <input value={form.role} onChange={(e) => set("role", e.target.value)} className={cls("role")} />
+                {/* Roles created in Admin are the source of truth; on sync the
+                    chosen role becomes the user's system role. */}
+                <select value={form.role} onChange={(e) => set("role", e.target.value)} className={`${cls("role")} bg-white`}>
+                  <option value="">Select role…</option>
+                  {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
               </FormField>
               <FormField label="Department">
                 <select value={form.departmentId} onChange={(e) => set("departmentId", e.target.value)} className={`${inputClass} bg-white`}>
@@ -501,6 +509,8 @@ export function EmployeesPage() {
   >([]);
   /** Org units for the form's Org Unit select, from the HR org structure. */
   const [orgUnits, setOrgUnits] = useState<string[]>([]);
+  /** System roles from Admin — the source of truth for an employee's role. */
+  const [roleOptions, setRoleOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -513,6 +523,15 @@ export function EmployeesPage() {
         ),
       )
       .catch(() => setOrgUnits([]));
+    getAppRoles()
+      .then((roles) =>
+        setRoleOptions(
+          (Array.isArray(roles) ? roles : [])
+            .map((r: any) => String(r?.name ?? "").trim())
+            .filter(Boolean),
+        ),
+      )
+      .catch(() => setRoleOptions([]));
   }, []);
 
   function loadEmployees() {
@@ -935,6 +954,7 @@ export function EmployeesPage() {
           onSave={handleAddEmployee}
           onClose={() => setShowAddModal(false)}
           departments={departments}
+          roleOptions={roleOptions}
           activeEmployees={empList.filter((e) => e.status === "active")}
           orgUnits={orgUnits}
           saving={creatingEmployee}

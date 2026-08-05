@@ -155,6 +155,12 @@ const APPLICATIONS = [
     icon: "👥",
   },
   {
+    key: "storefront",
+    label: "Storefront",
+    color: "bg-teal-100 text-teal-700",
+    icon: "🏪",
+  },
+  {
     key: "admin",
     label: "Admin",
     color: "bg-indigo-100 text-indigo-700",
