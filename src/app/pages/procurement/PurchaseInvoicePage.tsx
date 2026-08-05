@@ -9,6 +9,8 @@ import { useChangelog } from "../../stores/changelogStore";
 import {
   getPurchaseInvoices,
   createPurchaseInvoice,
+  updatePurchaseInvoice,
+  deletePurchaseInvoice,
   PurchaseInvoice as ApiPurchaseInvoice,
 } from "../../api/procurement-requests";
 import {
@@ -189,15 +191,31 @@ export function PurchaseInvoicePage() {
     setForm({ ...BLANK_FORM, lines: [BLANK_LINE()] });
   }
 
-  function updateStatus(id: string, newStatus: InvoiceStatus) {
+  async function updateStatus(id: string, newStatus: InvoiceStatus) {
+    const previous = invoices;
     setInvoices((prev) => prev.map((inv) => inv.id === id ? { ...inv, status: newStatus } : inv));
-    logChange({ module: "Procurement", action: "StatusChanged", entityType: "PurchaseInvoice", entityId: id, summary: `Invoice ${id} status changed to ${newStatus}`, performedBy: "Current User" });
+    try {
+      await updatePurchaseInvoice(id, { status: newStatus });
+      logChange({ module: "Procurement", action: "StatusChanged", entityType: "PurchaseInvoice", entityId: id, summary: `Invoice ${id} status changed to ${newStatus}`, performedBy: "Current User" });
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Could not update the invoice. Please try again.");
+      setInvoices(previous);
+    }
   }
 
-  function deleteInvoice(id: string, invoiceNo: string) {
+  async function deleteInvoice(id: string, invoiceNo: string) {
+    const previous = invoices;
     setInvoices((prev) => prev.filter((inv) => inv.id !== id));
-    logChange({ module: "Procurement", action: "Deleted", entityType: "PurchaseInvoice", entityId: id, summary: `Invoice ${invoiceNo} deleted`, performedBy: "Current User" });
     setExpanded((prev) => prev === id ? null : prev);
+    try {
+      await deletePurchaseInvoice(id);
+      logChange({ module: "Procurement", action: "Deleted", entityType: "PurchaseInvoice", entityId: id, summary: `Invoice ${invoiceNo} deleted`, performedBy: "Current User" });
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : "Could not delete the invoice. Please try again.");
+      setInvoices(previous);
+    }
   }
 
   function handleExport() {

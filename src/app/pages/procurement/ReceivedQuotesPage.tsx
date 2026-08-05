@@ -121,6 +121,7 @@ function fromApi(r: ApiReceivedQuote): VendorDoc {
             unit?: string;
             unitPrice?: number;
             total?: number;
+            negotiations?: NegotiationRound[];
           }[]
         ).map((it) => ({
           material: it.materialName ?? it.material ?? "",
@@ -128,6 +129,7 @@ function fromApi(r: ApiReceivedQuote): VendorDoc {
           unit: it.unit ?? "Units",
           unitPrice: it.unitPrice ?? 0,
           total: it.total ?? (it.qty ?? 0) * (it.unitPrice ?? 0),
+          negotiations: it.negotiations,
         }))
       : [],
     notes: r.notes,
@@ -1283,6 +1285,19 @@ export function ReceivedQuotesPage() {
     itemIndex: number;
   } | null>(null);
 
+  // Persist a status change; revert the optimistic update if the write fails.
+  const updateStatus = async (id: string, status: DocStatus) => {
+    const previous = docs;
+    setDocs((p) => p.map((x) => (x.id === id ? { ...x, status } : x)));
+    try {
+      await updateReceivedQuote(id, { status });
+    } catch (e) {
+      console.error(e);
+      toast.error("Could not update the submission. Please try again.");
+      setDocs(previous);
+    }
+  };
+
   // Group all submissions by prRef for comparison
   const submissionGroups = docs.reduce<Record<string, VendorDoc[]>>(
     (acc, d) => {
@@ -1543,15 +1558,7 @@ export function ReceivedQuotesPage() {
                           )}
                         {d.status === "pending_review" && (
                           <button
-                            onClick={() =>
-                              setDocs((prev) =>
-                                prev.map((x) =>
-                                  x.id === d.id
-                                    ? { ...x, status: "approved" }
-                                    : x,
-                                ),
-                              )
-                            }
+                            onClick={() => updateStatus(d.id, "approved")}
                             className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-xs font-medium"
                           >
                             <CheckCircle className="w-3.5 h-3.5" /> Approve
@@ -1559,15 +1566,7 @@ export function ReceivedQuotesPage() {
                         )}
                         {d.status === "pending_review" && (
                           <button
-                            onClick={() =>
-                              setDocs((prev) =>
-                                prev.map((x) =>
-                                  x.id === d.id
-                                    ? { ...x, status: "rejected" }
-                                    : x,
-                                ),
-                              )
-                            }
+                            onClick={() => updateStatus(d.id, "rejected")}
                             className="flex items-center gap-1 text-red-500 hover:text-red-700 text-xs font-medium"
                           >
                             <XCircle className="w-3.5 h-3.5" /> Reject
@@ -1827,22 +1826,25 @@ export function ReceivedQuotesPage() {
           doc={negotiateItem.doc}
           itemIndex={negotiateItem.itemIndex}
           onClose={() => setNegotiateItem(null)}
-          onSave={(rounds) => {
+          onSave={async (rounds) => {
+            const { doc, itemIndex } = negotiateItem;
+            const newItems = doc.items.map((it, idx) =>
+              idx === itemIndex ? { ...it, negotiations: rounds } : it,
+            );
+            const previous = docs;
             setDocs((prev) =>
               prev.map((d) =>
-                d.id === negotiateItem.doc.id
-                  ? {
-                      ...d,
-                      items: d.items.map((it, idx) =>
-                        idx === negotiateItem.itemIndex
-                          ? { ...it, negotiations: rounds }
-                          : it,
-                      ),
-                    }
-                  : d,
+                d.id === doc.id ? { ...d, items: newItems } : d,
               ),
             );
             setNegotiateItem(null);
+            try {
+              await updateReceivedQuote(doc.id, { items: newItems });
+            } catch (e) {
+              console.error(e);
+              toast.error("Could not save the negotiation. Please try again.");
+              setDocs(previous);
+            }
           }}
         />
       )}
