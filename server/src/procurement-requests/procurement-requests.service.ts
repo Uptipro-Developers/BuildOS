@@ -212,8 +212,29 @@ export class ProcurementRequestsService {
             },
         });
     }
-    updateQuote(id: string, data: any) {
-        return this.prisma.receivedQuote.update({ where: { id }, data });
+    async updateQuote(id: string, data: any) {
+        const quote = await this.prisma.receivedQuote.update({ where: { id }, data });
+        // Mirror a buyer counter-offer to the supplier's portal. Only the negotiate
+        // action sends items carrying negotiation rounds; status-only updates don't.
+        const rounds = Array.isArray(data.items)
+            ? data.items.flatMap((it: any) =>
+                  Array.isArray(it?.negotiations) ? it.negotiations : [],
+              )
+            : [];
+        if (rounds.length) {
+            const latest = rounds[rounds.length - 1];
+            this.webhookService
+                .triggerWebhook('quote.negotiated', {
+                    id: quote.id,
+                    supplierId: quote.supplierId,
+                    supplierName: quote.supplierName,
+                    proposedAmount: Number(latest?.proposedAmount) || 0,
+                    comment: latest?.comment ?? null,
+                    round: latest?.round ?? rounds.length,
+                })
+                .catch(() => {});
+        }
+        return quote;
     }
     deleteQuote(id: string) {
         return this.prisma.receivedQuote.delete({ where: { id } });
