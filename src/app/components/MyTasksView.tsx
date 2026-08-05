@@ -47,7 +47,9 @@ interface MyTask {
 }
 
 export interface MyTasksViewProps {
-  app: string;
+  /** Scope the board to a single app. Omit (as ESS does) to show every task
+   *  assigned to the employee across all apps. */
+  app?: string;
   accentColor?: string;
   ringColor?: string;
   accentClass?: string;
@@ -164,7 +166,7 @@ export function MyTasksView({
     listAppTasks()
       .then((rows) => {
         const forApp = rows
-          .filter((t) => t.app === app)
+          .filter((t) => (app ? t.app === app : true))
           .map((t) => ({
             id: t.id,
             name: t.name,
