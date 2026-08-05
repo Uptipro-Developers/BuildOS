@@ -321,8 +321,8 @@ function RecordDeliveryModal({
                 </button>
               )}
             </div>
-            <div className="rounded-lg border border-gray-200 overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="rounded-lg border border-gray-200 overflow-x-auto">
+              <table className="min-w-[720px] w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
                     <th className="text-left px-3 py-2">Material</th>

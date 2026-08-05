@@ -253,8 +253,8 @@ export function DailyReportsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-[#E2E8F0] overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white rounded-lg border border-[#E2E8F0] overflow-x-auto">
+        <table className="min-w-[720px] w-full">
           <thead>
             <tr className="border-b border-[#E2E8F0] bg-gray-50/50">
               <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3">

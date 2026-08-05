@@ -828,7 +828,12 @@ function CreatePOFromQuoteModal({
         : `${symbol}${n}`;
   };
   const today = formatDateByGeneralSettings(new Date());
-  const [expectedDate, setExpectedDate] = useState("");
+  // Default to a week out so the PO can be raised immediately; still editable.
+  const [expectedDate, setExpectedDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
   const [supplierContact, setSupplierContact] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1228,7 +1233,10 @@ function CompareQuotesModal({
             Close
           </button>
           {quotes
-            .filter((q) => q.status === "pending_review")
+            .filter(
+              (q) =>
+                q.status === "pending_review" || q.status === "approved",
+            )
             .map((q) => (
               <button
                 key={q.id}
@@ -1436,8 +1444,8 @@ export function ReceivedQuotesPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <table className="min-w-[720px] w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="w-8 px-3 py-3" />
@@ -1548,7 +1556,8 @@ export function ReceivedQuotesPage() {
                           <Eye className="w-3.5 h-3.5" /> View
                         </button>
                         {d.docType === "quote" &&
-                          d.status === "pending_review" && (
+                          (d.status === "pending_review" ||
+                            d.status === "approved") && (
                             <button
                               onClick={() => setCreatePODoc(d)}
                               className="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium"

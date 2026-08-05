@@ -750,8 +750,8 @@ export function EmployeesPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+        <table className="min-w-[720px] w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-left">
               {(

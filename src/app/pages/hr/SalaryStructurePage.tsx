@@ -758,8 +758,8 @@ export function SalaryStructurePage() {
                             No {ctype}s configured
                           </p>
                         ) : (
-                          <div className="rounded-lg border overflow-hidden bg-white">
-                            <table className="w-full text-sm">
+                          <div className="rounded-lg border overflow-x-auto bg-white">
+                            <table className="min-w-[720px] w-full text-sm">
                               <thead>
                                 <tr className="bg-gray-50 border-b">
                                   <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">

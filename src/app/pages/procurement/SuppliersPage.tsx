@@ -883,8 +883,8 @@ export function SuppliersPage() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
                   Price List
                 </p>
-                <div className="rounded-xl border overflow-hidden">
-                  <table className="w-full text-sm">
+                <div className="rounded-xl border overflow-x-auto">
+                  <table className="min-w-[720px] w-full text-sm">
                     <thead className="bg-gray-50 border-b">
                       <tr>
                         <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">
@@ -929,8 +929,8 @@ export function SuppliersPage() {
                   Recent Purchase Orders
                 </p>
                 {profileOrders.length > 0 ? (
-                  <div className="rounded-xl border overflow-hidden">
-                    <table className="w-full text-sm">
+                  <div className="rounded-xl border overflow-x-auto">
+                    <table className="min-w-[720px] w-full text-sm">
                       <thead className="bg-gray-50 border-b">
                         <tr>
                           <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">

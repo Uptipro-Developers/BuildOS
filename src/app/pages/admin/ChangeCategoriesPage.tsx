@@ -232,8 +232,8 @@ export function ChangeCategoriesPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <table className="min-w-[720px] w-full text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
             <tr>
               <th className="px-4 py-3 text-left font-medium w-8">#</th>

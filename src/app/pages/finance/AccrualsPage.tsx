@@ -375,8 +375,8 @@ export function AccrualsPage() {
                     <Plus className="w-3 h-3" /> Add Line
                   </button>
                 </div>
-                <div className="border border-gray-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-sm">
+                <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                  <table className="min-w-[720px] w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-100">
                       <tr>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Account</th>
