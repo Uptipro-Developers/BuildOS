@@ -26,6 +26,7 @@ import {
   updateSentRFQ,
 } from "../../api/procurement-requests";
 import { getReferenceData } from "../../api/reference-data";
+import { fetchSuppliers } from "../../api/suppliers";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { useProcurementUnits } from "../../utils/useProcurementUnits";
 
@@ -70,7 +71,9 @@ function fromApi(r: ApiSentRFQ): SentRequest {
     prRef: r.prRef ?? "",
     vendor: r.supplierName,
     supplierId: r.supplierId,
-    vendorEmail: "",
+    // Was hardcoded blank, so the email column in the table below was always
+    // empty no matter what had been entered.
+    vendorEmail: r.contactEmail ?? "",
     project: "",
     sentDate: r.sentDate,
     expiryDate: r.expiryDate ?? "",
@@ -154,9 +157,14 @@ function NewRFQModal({
     return fmtDate(d);
   };
 
-  const [vendors, setVendors] = useState<string[]>([]);
-  /** Supplier ids by name — the server needs the id to email the RFQ out. */
-  const [vendorIds, setVendorIds] = useState<Record<string, string>>({});
+  /**
+   * The supplier list, carrying the contact email so the address field can be
+   * prefilled. Reference data only exposes id and name, which is why the email
+   * box sat empty with a placeholder for the raiser to retype by hand.
+   */
+  const [vendorList, setVendorList] = useState<
+    { id: string; name: string; email: string }[]
+  >([]);
   /** References of purchase requests this RFQ can be competing. */
   const [prRefs, setPrRefs] = useState<string[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
@@ -177,16 +185,26 @@ function NewRFQModal({
   ]);
 
   useEffect(() => {
+    fetchSuppliers()
+      .then((rows) => {
+        const list = rows.map((s) => ({
+          id: s.id,
+          name: s.name,
+          email: s.email ?? "",
+        }));
+        setVendorList(list);
+        // Preselect the first supplier and its address together, so the form
+        // opens in a consistent state rather than with a vendor chosen and the
+        // email box blank.
+        setVendor((prev) => prev || list[0]?.name || "");
+        setVendorEmail((prev) => prev || list[0]?.email || "");
+      })
+      .catch((err) => notifyLoadFailure("suppliers", err));
+
     getReferenceData()
       .then((data) => {
-        const vendorNames = data.suppliers.map((s) => s.name);
         const projectNames = data.projects.map((p) => p.name);
-        setVendors(vendorNames);
-        setVendorIds(
-          Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
-        );
         setProjects(projectNames);
-        setVendor((prev) => prev || vendorNames[0] || "");
         setProject((prev) => prev || projectNames[0] || "");
         setMaterialOptions(
           (data.materials ?? [])
@@ -214,6 +232,18 @@ function NewRFQModal({
       .catch(() => {});
   }, []);
 
+  const selectedVendor = vendorList.find((v) => v.name === vendor);
+
+  /**
+   * Switching supplier moves the address with it. Leaving a previous supplier's
+   * email in the box is worse than blanking it — the RFQ would look correctly
+   * addressed and go to the wrong company.
+   */
+  function selectVendor(name: string) {
+    setVendor(name);
+    setVendorEmail(vendorList.find((v) => v.name === name)?.email ?? "");
+  }
+
   const addItem = () =>
     setItems((p) => [...p, { material: "", qty: "", unit: units[0] }]);
   const removeItem = (i: number) =>
@@ -236,8 +266,8 @@ function NewRFQModal({
       rfqRef: "",
       prRef: prRef.trim(),
       vendor,
-      supplierId: vendorIds[vendor],
-      vendorEmail,
+      supplierId: selectedVendor?.id,
+      vendorEmail: vendorEmail.trim(),
       project,
       sentDate: fmtDate(today),
       expiryDate: addDays(parseInt(expiryDays) || 5),
@@ -273,11 +303,13 @@ function NewRFQModal({
               </label>
               <select
                 value={vendor}
-                onChange={(e) => setVendor(e.target.value)}
+                onChange={(e) => selectVendor(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {vendors.map((v) => (
-                  <option key={v}>{v}</option>
+                {vendorList.map((v) => (
+                  <option key={v.id} value={v.name}>
+                    {v.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -286,11 +318,19 @@ function NewRFQModal({
                 Vendor Email
               </label>
               <input
+                type="email"
                 value={vendorEmail}
                 onChange={(e) => setVendorEmail(e.target.value)}
                 placeholder="sales@vendor.ng"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <p className="text-xs text-gray-400 mt-0.5">
+                {selectedVendor?.email
+                  ? vendorEmail === selectedVendor.email
+                    ? "From the supplier record. Edit to send elsewhere."
+                    : "Overrides the supplier's filed address."
+                  : "No address on file for this supplier — enter one to send."}
+              </p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -804,6 +844,8 @@ export function SentRequestsPage() {
                 prRef: rfq.prRef,
                 supplierName: rfq.vendor,
                 supplierId: rfq.supplierId,
+                // The address shown in the form is the address used to send.
+                contactEmail: rfq.vendorEmail || undefined,
                 status: "sent",
                 items: rfq.items,
                 sentDate: rfq.sentDate,

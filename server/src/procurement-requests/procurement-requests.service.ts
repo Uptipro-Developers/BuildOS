@@ -5,6 +5,18 @@ import { MailQueueService } from '../queue/mail-queue.service';
 import { supplierPortalLink } from '../common/supplier-portal';
 import { NumberingService } from '../numbering/numbering.service';
 
+/**
+ * A trimmed email address, or null.
+ *
+ * Blank is not an override — an untouched form field must fall through to the
+ * supplier's filed address rather than store an empty string that later reads as
+ * "send it nowhere".
+ */
+function normaliseEmail(raw: any): string | null {
+    const s = String(raw ?? '').trim();
+    return s.length > 0 ? s : null;
+}
+
 /** Accepts ISO (YYYY-MM-DD) or DD/MM/YYYY date strings; returns a Date or null. */
 function parseFlexDate(raw: any): Date | null {
     if (!raw) return null;
@@ -123,23 +135,35 @@ export class ProcurementRequestsService {
             // omitted it, so the reference the UI collected was silently dropped
             // and every RFQ came back detached from its request.
             prRef: data.prRef ? String(data.prRef) : null,
+            // The address to send to, when the raiser overrode the supplier's
+            // filed one. Nothing stored this before, so the form's "Vendor Email"
+            // box was collected and thrown away.
+            contactEmail: normaliseEmail(data.contactEmail),
             rfqRef,
             sentDate: parseFlexDate(data.sentDate) ?? new Date(),
             expiryDate: parseFlexDate(data.expiryDate) ?? null,
         };
         return this.prisma.sentRFQ.create({ data: rfqData }).then(async (rfq) => {
             this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => {});
-            if (data.supplierId) {
-                const supplier = await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null);
-                if (supplier?.email) {
-                    const portalUrl = supplierPortalLink('rfq', rfq.id, String(rfqRef));
-                    this.mailQueue.enqueueEmail({
-                        to: supplier.email,
-                        subject: `New RFQ from BuildOS — ${rfqRef}`,
-                        text: `Dear ${supplier.contactPerson || supplier.name},\n\nYou have received a new Request for Quotation (${rfqRef}) from BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${rfqRef}`,
-                        html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>You have received a new <strong>Request for Quotation</strong> (<code>${rfqRef}</code>) from BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${rfqRef}</p>`,
-                    }).catch(() => {});
-                }
+
+            const supplier = data.supplierId
+                ? await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null)
+                : null;
+            // An explicit address wins over the supplier's filed one — that is
+            // the whole point of letting it be edited. Sending is no longer
+            // conditional on `supplierId`: an RFQ addressed by hand still has
+            // somewhere to go.
+            const recipient = rfqData.contactEmail ?? supplier?.email ?? null;
+
+            if (recipient) {
+                const greetingName = supplier?.contactPerson || supplier?.name || rfq.supplierName;
+                const portalUrl = supplierPortalLink('rfq', rfq.id, String(rfqRef));
+                this.mailQueue.enqueueEmail({
+                    to: recipient,
+                    subject: `New RFQ from BuildOS — ${rfqRef}`,
+                    text: `Dear ${greetingName},\n\nYou have received a new Request for Quotation (${rfqRef}) from BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${rfqRef}`,
+                    html: `<p>Dear ${greetingName},</p><p>You have received a new <strong>Request for Quotation</strong> (<code>${rfqRef}</code>) from BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${rfqRef}</p>`,
+                }).catch(() => {});
             }
             return rfq;
         });

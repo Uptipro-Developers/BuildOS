@@ -33,6 +33,8 @@ export interface SentRFQ {
     notes?: string; createdAt: string;
     /** The purchase request being competed. Rows sharing one are one RFQ. */
     prRef?: string;
+    /** Where it was sent, when that differs from the supplier's filed address. */
+    contactEmail?: string;
 }
 export interface ReceivedQuote {
     id: string; rfqRef: string; supplierName: string; supplierId?: string;

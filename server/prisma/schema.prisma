@@ -871,6 +871,12 @@ model SentRFQ {
   /// collected it before and the server dropped it on the floor.
   prRef String?
 
+  /// Where this RFQ was actually sent, when it differs from the supplier's
+  /// filed address — a project-specific sales contact, say. Defaults to the
+  /// supplier's email in the form. Stored so the list shows the address that was
+  /// used and a resend goes back to the same person.
+  contactEmail String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
