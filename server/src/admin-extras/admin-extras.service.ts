@@ -1198,6 +1198,19 @@ export class AdminExtrasService {
      * A process with no configured workflow denies everyone, which is the safe
      * reading: nothing has been delegated yet.
      */
+    /**
+     * Whether the user holds a super/admin role, which carries unconditional
+     * approver rights. Used to relax separation of duties (self-approval) for
+     * admins while keeping it in force for everyone else.
+     */
+    async isSuperUser(userId?: string): Promise<boolean> {
+        if (!userId) return false;
+        return this.permissions
+            .resolveForUser(userId)
+            .then((p) => p.isSuper)
+            .catch(() => false);
+    }
+
     async assertMayApprove(
         forUser: { userId?: string; name?: string; email?: string; role?: string },
         processId: string,
@@ -1512,14 +1525,19 @@ export class AdminExtrasService {
         // the whole company's list can still hide Approve/Reject per row. The
         // module queues fetch unfiltered, and without this each one rendered
         // approval buttons on every row for anyone who could open the page.
+        //
+        // Separation of duties (a requester may not decide their own request) is
+        // relaxed only for super/admin roles — they may approve an item they also
+        // raised, but must still be the configured approver (mayApprove stands).
+        const isSuperUser = await this.isSuperUser(forUser.userId);
         const stamped = sorted.map((row: any) => {
             const requestedBy = this.normalizeIdentity(row.requestedBy);
             const isRequester = Boolean(requestedBy) && identities.includes(requestedBy);
             return {
                 ...row,
                 // A requester may never decide their own request, whatever the
-                // configuration says.
-                canApprove: mayApprove(row) && !isRequester,
+                // configuration says — unless they hold a super/admin role.
+                canApprove: mayApprove(row) && (!isRequester || isSuperUser),
                 isRequester,
             };
         });
@@ -1660,9 +1678,22 @@ export class AdminExtrasService {
     ) {
         const status = String(data?.status ?? '').toLowerCase();
         const decides = status === 'approved' || status === 'rejected';
-        /** Enforces the configuration for a decision on `processId`. */
-        const guard = async (processId: string) => {
-            if (decides && forUser) await this.assertMayApprove(forUser, processId);
+        /**
+         * Enforces the configuration for a decision on `processId`: the caller
+         * must be a named approver, and — unless they hold a super/admin role —
+         * may not decide an item they raised themselves.
+         */
+        const guard = async (processId: string, requestedBy?: string) => {
+            if (!decides || !forUser) return;
+            await this.assertMayApprove(forUser, processId);
+            const raisedBy = this.normalizeIdentity(requestedBy);
+            if (!raisedBy) return;
+            const identities = await this.resolveIdentities(forUser);
+            if (identities.includes(raisedBy) && !(await this.isSuperUser(forUser.userId))) {
+                throw new ForbiddenException(
+                    'You raised this, so it must be approved by someone else.',
+                );
+            }
         };
 
         // Try to find and update in leave-requests
@@ -1702,6 +1733,47 @@ export class AdminExtrasService {
                 data: {
                     status: status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Submitted',
                     approvedAt: status === 'approved' ? new Date() : undefined,
+                },
+            });
+        }
+
+        // Try to find and update in material requests. Status is stored lowercase
+        // to match the Material Requests page normaliser.
+        const materialRequest = await this.prisma.materialRequest.findUnique({ where: { id } }).catch(() => null);
+        if (materialRequest) {
+            await guard('p_material_requests', materialRequest.requestedBy);
+            return this.prisma.materialRequest.update({
+                where: { id },
+                data: {
+                    status: status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'pending',
+                    approvedBy: status === 'approved' ? forUser?.name ?? null : undefined,
+                    approvedAt: status === 'approved' ? new Date() : undefined,
+                },
+            });
+        }
+
+        // Try to find and update in purchase requests. Rejection maps to the
+        // page's own "cancelled" state (there is no separate rejected status).
+        const purchaseRequest = await this.prisma.purchaseRequest.findUnique({ where: { id } }).catch(() => null);
+        if (purchaseRequest) {
+            await guard('p_purchase_requests', purchaseRequest.requestedBy);
+            return this.prisma.purchaseRequest.update({
+                where: { id },
+                data: {
+                    status: status === 'approved' ? 'approved' : status === 'rejected' ? 'cancelled' : 'pending_approval',
+                },
+            });
+        }
+
+        // Try to find and update in purchase orders. A PO has no "approved" state;
+        // approval confirms it and rejection cancels it (POStatus enum).
+        const purchaseOrder = await this.prisma.purchaseOrder.findUnique({ where: { id } }).catch(() => null);
+        if (purchaseOrder) {
+            await guard('p_purchase_orders', purchaseOrder.createdBy);
+            return this.prisma.purchaseOrder.update({
+                where: { id },
+                data: {
+                    status: status === 'approved' ? 'confirmed' : status === 'rejected' ? 'cancelled' : undefined,
                 },
             });
         }

@@ -99,7 +99,11 @@ export class MaterialsController {
             const mine = [identity.name, identity.email]
                 .map((v) => String(v ?? '').trim().toLowerCase())
                 .filter(Boolean);
-            if (raisedBy && mine.includes(raisedBy)) {
+            // Admins/super roles may decide their own request (e.g. for testing
+            // and small-team operation); everyone else is held to separation of
+            // duties.
+            const isSuper = await this.adminExtras.isSuperUser(identity.userId);
+            if (raisedBy && mine.includes(raisedBy) && !isSuper) {
                 throw new ForbiddenException(
                     'You raised this request, so it must be approved by someone else.',
                 );
