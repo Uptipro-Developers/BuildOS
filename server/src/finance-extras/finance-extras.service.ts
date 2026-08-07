@@ -90,7 +90,7 @@ export class FinanceExtrasService {
                 },
                 { totalDebit: 0, totalCredit: 0 }
             );
-            console.log('TESTING TOTAL & ACCOUNT', allJournal, account, total)
+            console.log('TESTING TOTAL & ACCOUNT', total)
 
 
             const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
