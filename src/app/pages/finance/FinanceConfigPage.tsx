@@ -5,7 +5,16 @@ import {
   formatCurrencyByGeneralSettings,
   getCurrencyCode,
 } from "../../utils/generalSettings";
-import { getBankAccounts, getTaxConfigs, getPaymentMethods, togglePaymentMethod } from "../../api/finance-extras";
+import {
+  getBankAccounts,
+  createBankAccount,
+  updateBankAccount,
+  getTaxConfigs,
+  createTaxConfig,
+  updateTaxConfig,
+  getPaymentMethods,
+  togglePaymentMethod,
+} from "../../api/finance-extras";
 import { createAccrualType, updateAccrualType, deleteAccrualType } from "../../api/accruals";
 import { apiFetch } from "../../api/client";
 import { Save, Plus, Edit, Trash2, Settings2, Info, CreditCard, Building2, X, CheckCircle, Percent, Palette, Download } from "lucide-react";
@@ -122,7 +131,10 @@ export function FinanceConfigPage() {
   // General settings state
   const [currency, setCurrency] = useState("USD");
   const [fiscalYearStart, setFiscalYearStart] = useState("January");
-  const [approvalThreshold, setApprovalThreshold] = useState("100000");
+  // Blank means "no threshold": every expense goes to a manager. Defaulting to
+  // a number would have set a live auto-approval limit the first time anyone
+  // pressed Save without touching the field.
+  const [approvalThreshold, setApprovalThreshold] = useState("");
 
   // Bank account modal
   const [showBankModal, setShowBankModal] = useState(false);
@@ -171,6 +183,12 @@ export function FinanceConfigPage() {
         if (cfg?.fiscalYearStart) setFiscalYearStart(cfg.fiscalYearStart);
         if (cfg?.approvalThreshold !== undefined && cfg?.approvalThreshold !== null)
           setApprovalThreshold(String(cfg.approvalThreshold));
+        // The tax identifiers were local state seeded with example values: they
+        // were never loaded and never saved, so every visit showed the same two
+        // placeholders regardless of what had been typed before.
+        if (typeof cfg?.companyTIN === "string") setCompanyTIN(cfg.companyTIN);
+        if (typeof cfg?.vatRegNumber === "string")
+          setVatRegNumber(cfg.vatRegNumber);
       })
       .catch(() => {});
     getPaymentMethods().then(setPaymentMethods).catch((err) => notifyLoadFailure("payment methods", err));
@@ -178,8 +196,8 @@ export function FinanceConfigPage() {
 
   // Tax state
   const [taxEntries, setTaxEntries] = useState<TaxEntry[]>([]);
-  const [companyTIN, setCompanyTIN] = useState("12345678-0001");
-  const [vatRegNumber, setVatRegNumber] = useState("VAT-NG-00987654");
+  const [companyTIN, setCompanyTIN] = useState("");
+  const [vatRegNumber, setVatRegNumber] = useState("");
   const [showTaxModal, setShowTaxModal] = useState(false);
   const [taxEditId, setTaxEditId] = useState<string | null>(null);
   const [taxForm, setTaxForm] = useState<{
@@ -207,7 +225,10 @@ export function FinanceConfigPage() {
       body: JSON.stringify({
         currency,
         fiscalYearStart,
-        approvalThreshold: parseFloat(approvalThreshold),
+        // Blank stores 0, which the server reads as "no threshold".
+        approvalThreshold: parseFloat(approvalThreshold) || 0,
+        companyTIN,
+        vatRegNumber,
       }),
     }).then(() => {
       setSaved(true);
@@ -248,27 +269,28 @@ export function FinanceConfigPage() {
     ) {
       return;
     }
-    const acc: BankAccount = {
-      id: `b${Date.now()}`,
-      name: bankForm.name,
-      bank: bankForm.bank,
+    const isFirst = bankAccounts.length === 0;
+    createBankAccount({
+      accountName: bankForm.name,
+      bankName: bankForm.bank,
       accountNumber: bankForm.accountNumber,
       currency: bankForm.currency,
       balance: parseFloat(bankForm.balance || "0"),
-      isDefault: bankAccounts.length === 0,
-    };
-    apiFetch("/bank-accounts", {
-      method: "POST",
-      body: JSON.stringify({
-        accountName: bankForm.name,
-        bankName: bankForm.bank,
-        accountNumber: bankForm.accountNumber,
-        currency: bankForm.currency,
-        balance: parseFloat(bankForm.balance || "0"),
-        isDefault: bankAccounts.length === 0,
-      }),
+      isDefault: isFirst,
     })
-      .then(() => {
+      .then((created) => {
+        // The row is built from the response, not from a `b${Date.now()}`
+        // placeholder: an id the server never issued made every later action on
+        // the new account address a record that does not exist.
+        const acc: BankAccount = {
+          id: created.id,
+          name: created.accountName ?? bankForm.name,
+          bank: created.bankName ?? bankForm.bank,
+          accountNumber: created.accountNumber ?? bankForm.accountNumber,
+          currency: created.currency ?? bankForm.currency,
+          balance: created.balance ?? parseFloat(bankForm.balance || "0"),
+          isDefault: created.isDefault ?? isFirst,
+        };
         setBankAccounts([...bankAccounts, acc]);
         logChange({ module: "Finance", action: "Created", entityType: "BankAccount", entityId: acc.id, summary: `Bank account "${acc.name}" (${acc.bank}) added`, performedBy: "Sola Adeleke" });
         setShowBankModal(false);
@@ -283,21 +305,60 @@ export function FinanceConfigPage() {
       });
   }
 
-  function setDefault(id: string) {
-    setBankAccounts((prev) => prev.map((b) => ({ ...b, isDefault: b.id === id })));
-    const acc = bankAccounts.find(b => b.id === id);
-    if (acc) {
+  /**
+   * Marks one account as the default and clears the flag on the others.
+   *
+   * This only ever updated local state behind a success toast, so the default
+   * reverted on the next load.
+   */
+  async function setDefault(id: string) {
+    const acc = bankAccounts.find((b) => b.id === id);
+    if (!acc) return;
+    const previous = bankAccounts;
+    const next = bankAccounts.map((b) => ({ ...b, isDefault: b.id === id }));
+    setBankAccounts(next);
+
+    try {
+      // The flag is exclusive, so the account losing it has to be written too.
+      await Promise.all(
+        previous
+          .filter((b) => b.isDefault !== (b.id === id))
+          .map((b) => updateBankAccount(b.id, { isDefault: b.id === id })),
+      );
       logChange({ module: "Finance", action: "Set as Default", entityType: "BankAccount", entityId: id, summary: `Bank account "${acc.name}" set as default`, performedBy: "Sola Adeleke" });
       toast.success(`"${acc.name}" set as default account.`);
+    } catch (err) {
+      setBankAccounts(previous);
+      toast.error(
+        err instanceof Error
+          ? `Could not set the default account. ${err.message}`
+          : "Could not set the default account.",
+      );
     }
   }
 
-  function toggleTax(id: string) {
-    setTaxEntries((prev) => prev.map((t) => t.id === id ? { ...t, enabled: !t.enabled } : t));
-    const tax = taxEntries.find(t => t.id === id);
-    if (tax) {
-      logChange({ module: "Finance", action: tax.enabled ? "Disabled" : "Enabled", entityType: "TaxRule", entityId: id, summary: `Tax rule "${tax.name}" ${tax.enabled ? "disabled" : "enabled"}`, performedBy: "Sola Adeleke" });
-      toast.success(`Tax rule "${tax.name}" ${tax.enabled ? "disabled" : "enabled"}.`);
+  /** Enables or disables a tax rule. Was local state and a toast only. */
+  async function toggleTax(id: string) {
+    const tax = taxEntries.find((t) => t.id === id);
+    if (!tax) return;
+    const enabled = !tax.enabled;
+    setTaxEntries((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, enabled } : t)),
+    );
+
+    try {
+      await updateTaxConfig(id, { isActive: enabled });
+      logChange({ module: "Finance", action: enabled ? "Enabled" : "Disabled", entityType: "TaxRule", entityId: id, summary: `Tax rule "${tax.name}" ${enabled ? "enabled" : "disabled"}`, performedBy: "Sola Adeleke" });
+      toast.success(`Tax rule "${tax.name}" ${enabled ? "enabled" : "disabled"}.`);
+    } catch (err) {
+      setTaxEntries((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, enabled: tax.enabled } : t)),
+      );
+      toast.error(
+        err instanceof Error
+          ? `Could not update "${tax.name}". ${err.message}`
+          : `Could not update "${tax.name}".`,
+      );
     }
   }
 
@@ -321,19 +382,31 @@ export function FinanceConfigPage() {
 
   function saveTax() {
     if (!taxForm.name.trim()) return;
-    const entry = {
-      ...taxForm,
+    const entry: TaxEntry = {
+      id: taxEditId ?? "",
+      name: taxForm.name,
+      type: taxForm.type,
       rate: parseFloat(taxForm.rate || "0"),
-      enabled: true,
+      glCode: taxForm.glCode,
+      appliesTo: taxForm.appliesTo,
+      enabled: taxEntries.find((t) => t.id === taxEditId)?.enabled ?? true,
     };
+    // The record's own field names. The form's glCode/appliesTo/enabled were
+    // sent verbatim, which the server does not recognise as columns.
+    const payload = {
+      name: entry.name,
+      type: entry.type,
+      rate: entry.rate,
+      code: entry.glCode,
+      description: entry.appliesTo,
+      isActive: entry.enabled,
+    };
+
     if (taxEditId) {
-      apiFetch(`/tax-configs/${taxEditId}`, {
-        method: "PATCH",
-        body: JSON.stringify(entry),
-      })
+      updateTaxConfig(taxEditId, payload)
         .then(() => {
           setTaxEntries((prev) =>
-            prev.map((t) => (t.id === taxEditId ? { ...t, ...entry } : t)),
+            prev.map((t) => (t.id === taxEditId ? { ...entry, id: taxEditId } : t)),
           );
           logChange({ module: "Finance", action: "Updated", entityType: "TaxRule", entityId: taxEditId, summary: `Tax rule "${entry.name}" updated`, performedBy: "Sola Adeleke" });
           setShowTaxModal(false);
@@ -346,14 +419,12 @@ export function FinanceConfigPage() {
           console.error(err);
         });
     } else {
-      apiFetch("/tax-configs", {
-        method: "POST",
-        body: JSON.stringify(entry),
-      })
-        .then(() => {
-          const taxId = `t${Date.now()}`;
-          setTaxEntries((prev) => [...prev, { id: taxId, ...entry }]);
-          logChange({ module: "Finance", action: "Created", entityType: "TaxRule", entityId: taxId, summary: `Tax rule "${entry.name}" created`, performedBy: "Sola Adeleke" });
+      createTaxConfig(payload)
+        .then((created) => {
+          // Keyed by the id the server issued: a local `t${Date.now()}` meant
+          // editing or toggling the rule before a reload addressed nothing.
+          setTaxEntries((prev) => [...prev, { ...entry, id: created.id }]);
+          logChange({ module: "Finance", action: "Created", entityType: "TaxRule", entityId: created.id, summary: `Tax rule "${entry.name}" created`, performedBy: "Sola Adeleke" });
           setShowTaxModal(false);
           toast.success(`Tax rule "${entry.name}" created.`);
         })
@@ -621,11 +692,13 @@ export function FinanceConfigPage() {
             <input
               value={approvalThreshold}
               onChange={(e) => setApprovalThreshold(e.target.value)}
-              placeholder="e.g. 100000"
+              placeholder="Leave blank for no threshold"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
             <p className="text-xs text-gray-400 mt-1">
-              Expenses above this amount require manager approval
+              Expenses above this amount require manager approval; at or below
+              it they are approved on submission. Blank sends every expense for
+              approval.
             </p>
           </div>
         </div>

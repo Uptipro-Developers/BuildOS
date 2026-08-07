@@ -345,6 +345,21 @@ export const getEmailTemplates = () =>
 export const getNotificationRules = () =>
     apiFetch<NotificationRuleConfig[]>('/admin/notification-rules');
 
+/**
+ * The events a notification rule can fire on.
+ *
+ * The rule editor took the event as free text, which could never match
+ * anything the system emits; rules are now attached to one of these.
+ */
+export interface NotificationEventDef {
+    key: string;
+    label: string;
+    app: string;
+    description: string;
+}
+export const getNotificationEvents = () =>
+    apiFetch<NotificationEventDef[]>('/admin/notification-events');
+
 // Email Config
 export interface EmailConfigRecord {
     id: string;

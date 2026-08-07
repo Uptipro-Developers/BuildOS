@@ -122,3 +122,9 @@ export const togglePaymentMethod = (id: string) =>
 export const getProcessMappings = () => apiFetch<any[]>('/process-mappings');
 export const saveProcessMappings = (mappings: any[]) =>
     apiFetch<any[]>('/process-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) });
+
+// Fiscal years. Written as one collection: closing a year and making another
+// current is a single change to the register.
+export const getFiscalYears = () => apiFetch<any[]>('/fiscal-years');
+export const saveFiscalYears = (fiscalYears: any[]) =>
+    apiFetch<any[]>('/fiscal-years', { method: 'PUT', body: JSON.stringify({ fiscalYears }) });

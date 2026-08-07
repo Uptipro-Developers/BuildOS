@@ -35,6 +35,30 @@ export class ConstructionExtrasService {
         return list;
     }
 
+    /**
+     * Project roles and their permissions, from Construction › Settings.
+     *
+     * These lived only in React state, so adding a role, editing its
+     * permissions or deleting one lasted until the next page refresh.
+     */
+    getProjectRoles() {
+        return this.readSetting<any[]>('construction-project-roles', []);
+    }
+    async saveProjectRoles(roles: any[]) {
+        const list = (Array.isArray(roles) ? roles : [])
+            .filter((role) => role && String(role.id ?? '').trim())
+            .map((role) => ({
+                id: String(role.id),
+                name: String(role.name ?? '').trim(),
+                description: String(role.description ?? '').trim(),
+                permissions: Array.isArray(role.permissions)
+                    ? role.permissions.map((p: unknown) => String(p))
+                    : [],
+            }));
+        await this.writeSetting('construction-project-roles', list);
+        return list;
+    }
+
     // ── Project Documents ──
     findAllDocs(projectId?: string) {
         return this.prisma.projectDocument.findMany({

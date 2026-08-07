@@ -1,6 +1,10 @@
 import { createContext, useContext, useState, useCallback, useMemo, useEffect, type ReactNode } from "react";
 import { fetchAccruals, fetchAccrualTypes } from "../api/accruals";
-import { getChartAccounts } from "../api/finance-extras";
+import {
+  getChartAccounts,
+  getFiscalYears,
+  saveFiscalYears,
+} from "../api/finance-extras";
 import type {
   Account, AccountType, FiscalYear,
   Accrual, TxnType, AccrualTypeConfig,
@@ -25,7 +29,13 @@ interface FinanceContextValue {
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
   fiscalYears: FiscalYear[];
-  setFiscalYears: React.Dispatch<React.SetStateAction<FiscalYear[]>>;
+  /**
+   * Replaces the fiscal year register and persists it.
+   *
+   * Resolves once stored, and rejects if the write fails, so the caller can
+   * report it rather than showing a change that only ever existed on screen.
+   */
+  saveFiscalYears: (next: FiscalYear[]) => Promise<void>;
   accruals: Accrual[];
   setAccruals: React.Dispatch<React.SetStateAction<Accrual[]>>;
   accrualTypeConfigs: AccrualTypeConfig[];
@@ -69,6 +79,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   // it were the org's real chart of accounts until the fetch landed.
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  // Persisted server-side: the register, the current year and the close audit
+  // trail all used to live in this state alone and were lost on a refresh.
   const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
   // Accruals and their type catalogue are persisted server-side. They used to be
   // seeded from a hardcoded array and mirrored into localStorage, so nothing a
@@ -81,8 +93,22 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const persistFiscalYears = useCallback(async (next: FiscalYear[]) => {
+    const stored = await saveFiscalYears(next);
+    setFiscalYears(
+      Array.isArray(stored) ? (stored as FiscalYear[]) : next,
+    );
+  }, []);
+
   useEffect(() => {
     reloadAccruals().catch(() => setAccruals([]));
+
+    getFiscalYears()
+      .then((rows) => {
+        if (Array.isArray(rows)) setFiscalYears(rows as FiscalYear[]);
+      })
+      .catch(() => setFiscalYears([]));
+
     fetchAccrualTypes()
       .then(setAccrualTypeConfigs)
       .catch(() => setAccrualTypeConfigs([]));
@@ -263,12 +289,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({
     accounts, setAccounts,
     transactions, setTransactions,
-    fiscalYears, setFiscalYears,
+    fiscalYears, saveFiscalYears: persistFiscalYears,
     accruals, setAccruals, reloadAccruals,
     accrualTypeConfigs, setAccrualTypeConfigs,
     getAccountBalance, getAccountsByType, getDescendantIds,
     getTrialBalance, getBalanceSheet, getIncomeStatement,
-  }), [accounts, transactions, fiscalYears, accruals, reloadAccruals, accrualTypeConfigs, getAccountBalance, getAccountsByType, getDescendantIds, getTrialBalance, getBalanceSheet, getIncomeStatement]);
+  }), [accounts, transactions, fiscalYears, persistFiscalYears, accruals, reloadAccruals, accrualTypeConfigs, getAccountBalance, getAccountsByType, getDescendantIds, getTrialBalance, getBalanceSheet, getIncomeStatement]);
 
   return (
     <FinanceContext.Provider value={value}>

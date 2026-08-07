@@ -4,6 +4,7 @@ import { WebhookService } from '../integrations/webhook.service';
 import { MailQueueService } from '../queue/mail-queue.service';
 import { supplierPortalLink } from '../common/supplier-portal';
 import { NumberingService } from '../numbering/numbering.service';
+import { NotificationDispatchService } from '../notifications/notification-dispatch.service';
 
 /**
  * A trimmed email address, or null.
@@ -35,6 +36,7 @@ export class ProcurementRequestsService {
         private webhookService: WebhookService,
         private mailQueue: MailQueueService,
         private numbering: NumberingService,
+        private notifications: NotificationDispatchService,
     ) {}
 
     // ── Purchase Requests ──
@@ -71,6 +73,15 @@ export class ProcurementRequestsService {
         };
         return this.prisma.purchaseRequest.create({ data: prData }).then(async (pr) => {
             this.webhookService.triggerWebhook('purchase-request.created', pr).catch(() => {});
+            // Whoever the Admin › Notifications rules name for this event.
+            void this.notifications.dispatch('purchase-request.created', {
+                title: 'Purchase request raised',
+                message: `${pr.prRef} — ${pr.title} (raised by ${pr.requestedBy})`,
+                actionUrl: '/apps/procurement/purchase-requests',
+                relatedId: pr.id,
+                relatedType: 'PurchaseRequest',
+                vars: { reference: pr.prRef, title: pr.title, requestedBy: pr.requestedBy },
+            });
             // Close the loop the other way, so the material request can show what
             // became of it rather than stopping at "In Procurement".
             if (pr.mrRef) {
@@ -145,6 +156,14 @@ export class ProcurementRequestsService {
         };
         return this.prisma.sentRFQ.create({ data: rfqData }).then(async (rfq) => {
             this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => {});
+            void this.notifications.dispatch('rfq.sent', {
+                title: 'RFQ sent',
+                message: `${rfq.rfqRef} sent to ${rfq.supplierName}`,
+                actionUrl: '/apps/procurement/sent-requests',
+                relatedId: rfq.id,
+                relatedType: 'SentRFQ',
+                vars: { reference: rfq.rfqRef, supplier: rfq.supplierName },
+            });
 
             const supplier = data.supplierId
                 ? await this.prisma.supplier.findUnique({ where: { id: data.supplierId } }).catch(() => null)

@@ -5,12 +5,15 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-
-const HR_SETUP_KEY = 'hr-setup';
+// One definition of the settings key, shared with the typed reader payroll uses.
+import { HR_SETUP_KEY, HrSetupService } from './hr-setup.service';
 
 @Injectable()
 export class HrExtrasService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private hrSetup: HrSetupService,
+    ) { }
 
     // ── Attendance ──
     findAllAttendance(employeeId?: string, date?: string) {
@@ -221,6 +224,59 @@ export class HrExtrasService {
     }
     createPeriod(data: any) {
         return this.prisma.payrollPeriod.create({ data });
+    }
+
+    /**
+     * Proposes the payroll period that follows the last one, from the
+     * configured payroll frequency.
+     *
+     * "Payroll Frequency" in HR Setup was stored and read by nothing: periods
+     * had to be named and dated by hand every time, and a Bi-Weekly or Weekly
+     * organisation got no help at all.
+     */
+    async nextPeriod() {
+        const setup = await this.hrSetup.read();
+        const frequency = setup.payrollFrequency;
+
+        const last = await this.prisma.payrollPeriod.findFirst({
+            orderBy: { endDate: 'desc' },
+        });
+
+        // The day after the last period, or the start of this month on a fresh
+        // installation.
+        const start = last
+            ? new Date(new Date(last.endDate).getTime() + 24 * 60 * 60 * 1000)
+            : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        start.setHours(0, 0, 0, 0);
+
+        // Weekly and bi-weekly runs begin on the configured week start day, so a
+        // payroll week is the week HR Setup names rather than whichever day the
+        // previous period happened to end on. "Week Start Day" was collected and
+        // read by nothing until now.
+        if (frequency === 'Weekly' || frequency === 'Bi-Weekly') {
+            const targetDow = setup.weekStartDay === 'Sunday' ? 0 : 1;
+            const shift = (targetDow - start.getDay() + 7) % 7;
+            start.setDate(start.getDate() + shift);
+        }
+
+        const end = new Date(start);
+        if (frequency === 'Weekly') {
+            end.setDate(end.getDate() + 6);
+        } else if (frequency === 'Bi-Weekly') {
+            end.setDate(end.getDate() + 13);
+        } else {
+            // Monthly: through the last day of the starting month.
+            end.setMonth(end.getMonth() + 1);
+            end.setDate(0);
+        }
+
+        const iso = (d: Date) => d.toISOString().slice(0, 10);
+        const name =
+            frequency === 'Monthly'
+                ? start.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+                : `${iso(start)} – ${iso(end)}`;
+
+        return { name, startDate: iso(start), endDate: iso(end), frequency };
     }
     updatePeriod(id: string, data: any) {
         return this.prisma.payrollPeriod.update({ where: { id }, data });
@@ -443,13 +499,58 @@ export class HrExtrasService {
         const row = await this.prisma.systemSetting.findUnique({ where: { key: HR_SETUP_KEY } });
         return (row?.value as Record<string, unknown>) ?? {};
     }
-    async saveHrSetup(data: any) {
-        const value = JSON.parse(JSON.stringify(data ?? {}));
+    /**
+     * Merged onto the stored setup rather than replacing it, so a caller that
+     * submits a subset of the fields cannot blank the rest.
+     */
+    async saveHrSetup(data: any, actingUserId?: string) {
+        const current = await this.getHrSetup();
+        const incoming = { ...(data ?? {}) };
+        // Audit fields are recorded here, never taken from the client.
+        delete incoming.updatedBy;
+        delete incoming.updatedAt;
+
+        const updatedBy = actingUserId
+            ? await this.prisma.user
+                .findUnique({ where: { id: actingUserId }, select: { name: true, email: true } })
+                .then((u) => u?.name || u?.email || '')
+                .catch(() => '')
+            : '';
+
+        const value = JSON.parse(
+            JSON.stringify({
+                ...current,
+                ...incoming,
+                updatedAt: new Date().toISOString(),
+                ...(updatedBy ? { updatedBy } : {}),
+            }),
+        );
         await this.prisma.systemSetting.upsert({
             where: { key: HR_SETUP_KEY },
             create: { key: HR_SETUP_KEY, value },
             update: { value },
         });
-        return { saved: true, ...data };
+        return { saved: true, ...value };
+    }
+
+    /**
+     * The System Information panel on the HR Setup screen.
+     *
+     * It displayed five hardcoded values — a version, a person's name, a date
+     * and two counts — none of which came from this installation.
+     */
+    async getHrSetupSummary() {
+        const setup = await this.getHrSetup();
+        const [employees, departments] = await Promise.all([
+            this.prisma.employee.count({ where: { status: { not: 'inactive' } } }),
+            this.prisma.department.count(),
+        ]);
+
+        return {
+            employees,
+            departments,
+            updatedAt: (setup.updatedAt as string) ?? null,
+            updatedBy: (setup.updatedBy as string) ?? null,
+        };
     }
 }

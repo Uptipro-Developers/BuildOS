@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PayrollTaxService } from './payroll-tax.service';
 import { PayrollDeductionsService } from './payroll-deductions.service';
+import { PayrollOvertimeService } from './payroll-overtime.service';
 
 interface PayslipData {
   employeeId: string;
@@ -10,11 +11,14 @@ interface PayslipData {
   period: string;
   month: number;
   year: number;
-  
+
   // Earnings
   baseSalary: number;
   allowances: number;
   bonusOrIncentive: number;
+  /** Earned on hours beyond the standard working day, at the configured rate. */
+  overtime: number;
+  overtimeHours: number;
   grossPay: number;
   
   // Deductions
@@ -44,6 +48,7 @@ export class PayslipGenerationService {
     private prisma: PrismaService,
     private taxService: PayrollTaxService,
     private deductionsService: PayrollDeductionsService,
+    private overtimeService: PayrollOvertimeService,
   ) {}
 
   /**
@@ -73,7 +78,15 @@ export class PayslipGenerationService {
 
     const salary = baseSalary || employee.baseSalary || 0;
     const allowances = await this.calculateAllowances(employee.id, salary);
-    const grossPay = salary + allowances;
+    // Overtime is part of gross, so it is taxed and pensioned like the rest of
+    // pay rather than bolted on after the deductions are worked out.
+    const overtime = await this.overtimeService.calculate(
+      employee.id,
+      salary,
+      payrollRun.month,
+      payrollRun.year,
+    );
+    const grossPay = salary + allowances + overtime.pay;
 
     // Calculate tax
     const taxCalc = await this.taxService.calculateIncomeTax(
@@ -104,6 +117,8 @@ export class PayslipGenerationService {
       baseSalary: salary,
       allowances: Math.round(allowances),
       bonusOrIncentive: 0,
+      overtime: overtime.pay,
+      overtimeHours: overtime.hours,
       grossPay: Math.round(grossPay),
       
       incomeTax: taxCalc.tax,
@@ -163,6 +178,8 @@ export class PayslipGenerationService {
         tax: payslipData.incomeTax,
         pension: payslipData.pension,
         allowances: payslipData.allowances,
+        overtime: payslipData.overtime,
+        overtimeHours: payslipData.overtimeHours,
         status: 'Issued',
       },
     });

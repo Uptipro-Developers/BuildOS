@@ -49,6 +49,9 @@ export class HrExtrasController {
     // ── Payroll Periods ──
     @Get('payroll-periods')
     getAllPeriods() { return this.svc.findAllPeriods(); }
+    /** The next period's suggested name and dates, from the configured frequency. */
+    @Get('payroll-periods/next')
+    getNextPeriod() { return this.svc.nextPeriod(); }
     @Get('payroll-periods/:id')
     getPeriod(@Param('id') id: string) { return this.svc.findPeriod(id); }
     @Post('payroll-periods')
@@ -147,5 +150,10 @@ export class HrExtrasController {
     @Get('setup')
     getHrSetup() { return this.svc.getHrSetup(); }
     @Post('setup')
-    saveHrSetup(@Body() body: any) { return this.svc.saveHrSetup(body); }
+    saveHrSetup(@Body() body: any, @Req() req: Request) {
+        return this.svc.saveHrSetup(body, actingUserId(req));
+    }
+    /** Live counts and audit trail for the setup screen's System Information card. */
+    @Get('setup/summary')
+    getHrSetupSummary() { return this.svc.getHrSetupSummary(); }
 }

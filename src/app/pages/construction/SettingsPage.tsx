@@ -67,6 +67,14 @@ interface ReportSetting {
   enabled: boolean;
 }
 
+/**
+ * The one report switch that still asks for a scheduled job the Reports module
+ * does not run: weekly progress reports are delivered by Admin › Report
+ * Automation, so this stays a pointer rather than implying it fires here.
+ * ("Daily report submission reminder" now drives a real reminder job.)
+ */
+const SCHEDULING_REPORT_KEYS = ["auto_generate_weekly"];
+
 const defaultReportSettings: ReportSetting[] = [
   {
     id: "rs1",
@@ -427,6 +435,9 @@ export function SettingsPage() {
 
 
 
+  // Roles persist as they are edited rather than on "Save Settings", which
+  // writes the other sections; the toast says so, and a failed write is
+  // reported by the roles store itself.
   function saveRoleEdit() {
     if (!editingRole || !roleFormName.trim()) return;
     updateRole(editingRole, {
@@ -434,6 +445,7 @@ export function SettingsPage() {
       description: roleFormDesc.trim(),
       permissions: roleFormPerms,
     });
+    toast.success(`"${roleFormName.trim()}" saved.`);
     cancelEditRole();
   }
 
@@ -444,6 +456,7 @@ export function SettingsPage() {
       description: newRoleDesc.trim(),
       permissions: [],
     });
+    toast.success(`"${newRoleName.trim()}" added.`);
     setNewRoleName("");
     setNewRoleDesc("");
   }
@@ -1052,7 +1065,25 @@ export function SettingsPage() {
                 key={rs.id}
                 className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50"
               >
-                <span className="text-sm text-gray-700">{rs.label}</span>
+                <div>
+                  <span className="text-sm text-gray-700">{rs.label}</span>
+                  {/* Weekly progress reports are scheduled and delivered by
+                      Admin › Report Automation, not here. Saying so beats a
+                      switch that saves and changes nothing. */}
+                  {SCHEDULING_REPORT_KEYS.includes(rs.key) && (
+                    <p className="text-[11px] text-gray-400">
+                      Recorded only — schedule this in Admin › Report Automation.
+                    </p>
+                  )}
+                  {/* This one drives a real job: contributors are reminded when
+                      the day's report is missing. */}
+                  {rs.key === "daily_report_reminder" && (
+                    <p className="text-[11px] text-gray-400">
+                      When on, a project's daily-report contributors are reminded
+                      later in the day if no report has been submitted.
+                    </p>
+                  )}
+                </div>
                 <button
                   onClick={() => toggleReportSetting(rs.id)}
                   className={`flex items-center gap-2 text-sm transition-colors ${rs.enabled ? "text-orange-600" : "text-gray-400"}`}
@@ -1072,6 +1103,10 @@ export function SettingsPage() {
               </div>
             ))}
           </div>
+          <p className="mt-3 text-[11px] text-gray-400 border-t border-gray-100 pt-3">
+            The "include" switches control which sections the Reports module
+            offers. Changes apply after Save Settings.
+          </p>
         </Section>
         )}
 
@@ -1115,7 +1150,14 @@ export function SettingsPage() {
         confirmLabel="Delete"
         isDangerous
         onConfirm={() => {
-          if (deleteRoleTarget) deleteRole(deleteRoleTarget.id);
+          if (deleteRoleTarget) {
+            // The store refuses to remove the last role and says so itself;
+            // only report success when one was actually removed.
+            if (roles.length > 1) {
+              toast.success(`"${deleteRoleTarget.name}" deleted.`);
+            }
+            deleteRole(deleteRoleTarget.id);
+          }
           setDeleteRoleTarget(null);
         }}
         onCancel={() => setDeleteRoleTarget(null)}

@@ -17,6 +17,24 @@ import {
 } from "lucide-react";
 import { projects as mockProjects, fmtCurrency } from "./mockData";
 import { fetchConstructionProjects } from "../../api/projects";
+import {
+  reportSectionEnabled,
+  useConstructionSettings,
+} from "../../utils/useConstructionSettings";
+
+/**
+ * Which Settings › Reports switch governs each report card.
+ *
+ * Those switches were stored and read back by the settings screen alone —
+ * turning one off changed nothing here, so the Reports module always offered
+ * every section regardless of how it had been configured.
+ */
+const REPORT_SETTING_FOR_TYPE: Record<string, string> = {
+  rag: "rag_summary",
+  cost: "cost_breakdown",
+  resource: "resource_performance",
+  schedule: "schedule_gantt",
+};
 
 interface ReportTemplate {
   id: string;
@@ -186,6 +204,7 @@ export function ReportsPage() {
   const [generatedIds, setGeneratedIds] = useState<Set<string>>(new Set());
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [projects, setProjects] = useState(mockProjects);
+  const constructionConfig = useConstructionSettings();
 
   useEffect(() => {
     fetchConstructionProjects()
@@ -218,6 +237,15 @@ export function ReportsPage() {
 
   const totalBudget = projects.reduce((s, p) => s + p.budget, 0);
   const totalSpent = projects.reduce((s, p) => s + p.spent, 0);
+
+  const visibleTemplates = reportTemplates.filter((r) => {
+    const key = REPORT_SETTING_FOR_TYPE[r.type];
+    return !key || reportSectionEnabled(constructionConfig, key);
+  });
+  const showRagBreakdown = reportSectionEnabled(
+    constructionConfig,
+    "rag_summary",
+  );
 
   return (
     <div
@@ -289,9 +317,9 @@ export function ReportsPage() {
         ))}
       </div>
 
-      {/* Report type cards */}
+      {/* Report type cards. Only the sections switched on in Settings. */}
       <div className="grid grid-cols-2 gap-4">
-        {reportTemplates.map((r) => {
+        {visibleTemplates.map((r) => {
           const isGenerated = generatedIds.has(r.id);
           const isPreview = previewId === r.id;
           return (
@@ -406,7 +434,8 @@ export function ReportsPage() {
         })}
       </div>
 
-      {/* RAG Health Breakdown */}
+      {/* RAG Health Breakdown — governed by "Include RAG summary in reports". */}
+      {showRagBreakdown && (
       <div
         className="bg-white rounded-xl overflow-hidden"
         style={{ border: "1px solid #E2E8F0" }}
@@ -484,6 +513,7 @@ export function ReportsPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Project summary table */}
       <div

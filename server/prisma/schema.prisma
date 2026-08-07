@@ -1017,6 +1017,9 @@ model PayrollEntry {
   tax          Float      @default(0)
   pension      Float      @default(0)
   allowances   Float      @default(0)
+  /// Earned beyond the standard working day, at the configured multiplier.
+  overtime      Float  @default(0)
+  overtimeHours Float  @default(0)
   status       String     @default("Pending")
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -1036,6 +1039,9 @@ model Payslip {
   tax          Float    @default(0)
   pension      Float    @default(0)
   allowances   Float    @default(0)
+  /// Earned beyond the standard working day, at the configured multiplier.
+  overtime      Float    @default(0)
+  overtimeHours Float    @default(0)
   status       String   @default("Issued")
   issuedAt     DateTime @default(now())
   createdAt    DateTime @default(now())
@@ -1155,13 +1161,17 @@ model BankAccount {
 }
 
 model TaxConfig {
-  id        String   @id @default(cuid())
-  name      String
-  type      String
-  rate      Float
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id   String @id @default(cuid())
+  name String
+  type String
+  rate Float
+  /// GL code the tax posts to, as entered in Finance › Configuration.
+  code        String?
+  /// What the rule applies to, e.g. "Goods and services".
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Task {

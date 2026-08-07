@@ -19,10 +19,24 @@ interface Payslip {
   id: string;
   period: string;
   grossPay: number;
+  allowances: number;
+  /** Paid on hours beyond the standard working day. */
+  overtime: number;
+  overtimeHours: number;
   deductions: number;
   netPay: number;
   status: "Paid" | "Pending";
   paidOn: string;
+}
+
+/**
+ * Basic pay, as gross less the parts that are not basic.
+ *
+ * The breakdown used to be invented from the gross — 70% basic, 20% housing,
+ * 10% transport — regardless of what the payslip actually recorded.
+ */
+function basicPay(p: Payslip): number {
+  return Math.max(0, p.grossPay - p.allowances - p.overtime);
 }
 
 function fmt(n: number) {
@@ -57,6 +71,11 @@ export function PayslipHistoryPage() {
       `</table></div>` +
       `<div class="doc-section"><h2>Earnings and deductions</h2><table>` +
       `<thead><tr><th>Description</th><th class="num">Amount</th></tr></thead><tbody>` +
+      row("Basic pay", fmt(basicPay(p))) +
+      (p.allowances > 0 ? row("Allowances", fmt(p.allowances)) : "") +
+      (p.overtime > 0
+        ? row(`Overtime (${p.overtimeHours} hrs)`, fmt(p.overtime))
+        : "") +
       row("Gross pay", fmt(p.grossPay)) +
       row("Deductions (tax and pension)", `-${fmt(p.deductions)}`, "negative") +
       `<tr class="net"><td>Net pay</td><td class="num">${escapeHtml(fmt(p.netPay))}</td></tr>` +
@@ -83,6 +102,9 @@ export function PayslipHistoryPage() {
             id: p.id,
             period: p.period,
             grossPay: p.grossPay,
+            allowances: p.allowances ?? 0,
+            overtime: p.overtime ?? 0,
+            overtimeHours: p.overtimeHours ?? 0,
             deductions: p.deductions,
             netPay: p.netPay,
             status: (p.status === "Paid"
@@ -243,31 +265,39 @@ export function PayslipHistoryPage() {
               </div>
             </div>
             <div className="px-6 py-5 space-y-3">
+              {/* The signed-in employee, not a hardcoded name, id and
+                  department that belonged to nobody. */}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Employee</span>
-                <span className="font-medium">James Okafor</span>
+                <span className="font-medium">{employeeName || "—"}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Employee ID</span>
-                <span className="font-medium">EMP-0024</span>
+                <span className="text-gray-500">Email</span>
+                <span className="font-medium">{employeeEmail || "—"}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Department</span>
-                <span className="font-medium">Engineering</span>
+                <span className="text-gray-500">Pay period</span>
+                <span className="font-medium">{selected.period}</span>
               </div>
               <hr className="border-gray-100" />
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Basic Salary</span>
-                <span>{fmt(Math.round(selected.grossPay * 0.7))}</span>
+                <span>{fmt(basicPay(selected))}</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Housing Allowance</span>
-                <span>{fmt(Math.round(selected.grossPay * 0.2))}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Transport Allowance</span>
-                <span>{fmt(Math.round(selected.grossPay * 0.1))}</span>
-              </div>
+              {selected.allowances > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Allowances</span>
+                  <span>{fmt(selected.allowances)}</span>
+                </div>
+              )}
+              {selected.overtime > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">
+                    Overtime ({selected.overtimeHours} hrs)
+                  </span>
+                  <span>{fmt(selected.overtime)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm font-medium">
                 <span>Gross Pay</span>
                 <span>{fmt(selected.grossPay)}</span>

@@ -54,13 +54,40 @@ const bsColumns: Column<BSRow>[] = [
 ];
 
 export function FiscalYearsPage() {
-  const { fiscalYears, setFiscalYears, getTrialBalance, getBalanceSheet, getIncomeStatement } = useFinance();
+  const { fiscalYears, saveFiscalYears, getTrialBalance, getBalanceSheet, getIncomeStatement } = useFinance();
   const { logChange } = useChangelog();
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ label: "", startDate: "", endDate: "" });
   const [reportFyId, setReportFyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const currentFy = fiscalYears.find(fy => fy.isCurrent);
+
+  /**
+   * Writes the register, then logs and confirms.
+   *
+   * Every action here used to update React state only: the year, the current
+   * marker and the close record were gone on the next refresh, while a success
+   * toast said otherwise.
+   */
+  async function commit(
+    next: FiscalYear[],
+    log: () => void,
+    success: string,
+    failure: string,
+  ) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await saveFiscalYears(next);
+      log();
+      toast.success(success);
+    } catch (err) {
+      toast.error(err instanceof Error ? `${failure} ${err.message}` : failure);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function handleCreate() {
     if (!form.label || !form.startDate || !form.endDate) return;
@@ -72,36 +99,56 @@ export function FiscalYearsPage() {
       status: "open",
       isCurrent: fiscalYears.length === 0,
     };
-    setFiscalYears(prev => [...prev, fy]);
-    logChange({ module: "Finance", action: "Created", entityType: "FiscalYear", entityId: fy.id, summary: `Fiscal year ${fy.label} created`, performedBy: "Sola Adeleke" });
-    setShowModal(false);
-    setForm({ label: "", startDate: "", endDate: "" });
-    toast.success(`Fiscal year ${fy.label} created.`);
+    void commit(
+      [...fiscalYears, fy],
+      () => {
+        logChange({ module: "Finance", action: "Created", entityType: "FiscalYear", entityId: fy.id, summary: `Fiscal year ${fy.label} created`, performedBy: "Sola Adeleke" });
+        setShowModal(false);
+        setForm({ label: "", startDate: "", endDate: "" });
+      },
+      `Fiscal year ${fy.label} created.`,
+      "Could not create the fiscal year.",
+    );
   }
 
   function handleSetCurrent(id: string) {
     const target = fiscalYears.find(fy => fy.id === id);
-    setFiscalYears(prev => prev.map(fy => ({ ...fy, isCurrent: fy.id === id })));
-    if (target) logChange({ module: "Finance", action: "Set as Current", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} set as current`, performedBy: "Sola Adeleke" });
-    toast.success(`${target?.label ?? "Fiscal year"} set as current.`);
+    void commit(
+      fiscalYears.map(fy => ({ ...fy, isCurrent: fy.id === id })),
+      () => {
+        if (target) logChange({ module: "Finance", action: "Set as Current", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} set as current`, performedBy: "Sola Adeleke" });
+      },
+      `${target?.label ?? "Fiscal year"} set as current.`,
+      "Could not set the current fiscal year.",
+    );
   }
 
   function handleClose(id: string) {
     const target = fiscalYears.find(fy => fy.id === id);
-    setFiscalYears(prev => prev.map(fy =>
-      fy.id === id ? { ...fy, status: "closed", closedAt: new Date().toISOString().split("T")[0], closedBy: "Sola Adeleke" } : fy
-    ));
-    if (target) logChange({ module: "Finance", action: "Closed", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} closed`, performedBy: "Sola Adeleke" });
-    toast.success(`${target?.label ?? "Fiscal year"} closed.`);
+    void commit(
+      fiscalYears.map(fy =>
+        fy.id === id ? { ...fy, status: "closed" as const, closedAt: new Date().toISOString().split("T")[0], closedBy: "Sola Adeleke" } : fy
+      ),
+      () => {
+        if (target) logChange({ module: "Finance", action: "Closed", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} closed`, performedBy: "Sola Adeleke" });
+      },
+      `${target?.label ?? "Fiscal year"} closed.`,
+      "Could not close the fiscal year.",
+    );
   }
 
   function handleReopen(id: string) {
     const target = fiscalYears.find(fy => fy.id === id);
-    setFiscalYears(prev => prev.map(fy =>
-      fy.id === id ? { ...fy, status: "open", closedAt: undefined, closedBy: undefined } : fy
-    ));
-    if (target) logChange({ module: "Finance", action: "Reopened", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} reopened`, performedBy: "Sola Adeleke" });
-    toast.success(`${target?.label ?? "Fiscal year"} reopened.`);
+    void commit(
+      fiscalYears.map(fy =>
+        fy.id === id ? { ...fy, status: "open" as const, closedAt: undefined, closedBy: undefined } : fy
+      ),
+      () => {
+        if (target) logChange({ module: "Finance", action: "Reopened", entityType: "FiscalYear", entityId: id, summary: `Fiscal year ${target.label} reopened`, performedBy: "Sola Adeleke" });
+      },
+      `${target?.label ?? "Fiscal year"} reopened.`,
+      "Could not reopen the fiscal year.",
+    );
   }
 
   const reportFy = reportFyId ? fiscalYears.find(fy => fy.id === reportFyId) : null;

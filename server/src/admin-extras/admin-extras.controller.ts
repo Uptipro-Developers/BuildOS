@@ -469,6 +469,14 @@ export class AdminExtrasController {
     deleteEmailTemplate(@Param('id') id: string) { return this.svc.deleteEmailTemplate(id); }
 
     // ── Notification Rules ──
+    /**
+     * The events a rule can be attached to. The rule form used to take the
+     * event as free text, so nothing a user typed could ever match what the
+     * system emits.
+     */
+    @Get('notification-events')
+    getNotificationEvents() { return this.svc.listNotificationEvents(); }
+
     @Get('notification-rules')
     getNotificationRules() { return this.svc.findNotificationRules(); }
 

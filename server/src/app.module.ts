@@ -31,6 +31,7 @@ import { AccrualsModule } from './accruals/accruals.module';
 import { ProcurementRequestsModule } from './procurement-requests/procurement-requests.module';
 import { ConstructionExtrasModule } from './construction-extras/construction-extras.module';
 import { HrExtrasModule } from './hr-extras/hr-extras.module';
+import { HrSetupModule } from './hr-extras/hr-setup.module';
 import { FinanceExtrasModule } from './finance-extras/finance-extras.module';
 import { AdminExtrasModule } from './admin-extras/admin-extras.module';
 import { HealthModule } from './health/health.module';
@@ -87,6 +88,9 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         PrismaModule,
         NumberingModule,
         AuditLogModule,
+        // Global: HR policy (working day, probation, pension rate) is read by
+        // payroll, attendance and the employee record alike.
+        HrSetupModule,
         NotificationsModule,
         WorkflowsModule,
         IntegrationsModule,

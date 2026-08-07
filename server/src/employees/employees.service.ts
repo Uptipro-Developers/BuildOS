@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityHistoryService } from '../activity-history/activity-history.service';
 import { AdminExtrasService } from '../admin-extras/admin-extras.service';
+import { HrSetupService } from '../hr-extras/hr-setup.service';
 
 /** Columns accepted from clients; everything else is dropped. */
 const EMPLOYEE_FIELDS = [
@@ -37,6 +38,7 @@ export class EmployeesService {
         private prisma: PrismaService,
         private activityHistory: ActivityHistoryService,
         private adminExtras: AdminExtrasService,
+        private hrSetup: HrSetupService,
     ) { }
 
     findAll(status?: string, departmentId?: string) {
@@ -55,6 +57,22 @@ export class EmployeesService {
             where: { id },
             include: { department: true },
         });
+    }
+
+    /**
+     * The employee's probation, notice and retirement dates.
+     *
+     * The policy lives in HR Setup and the dates on the employee; neither side
+     * was ever put together, so the configured probation period, notice period
+     * and retirement age described nothing about anybody.
+     */
+    async employmentTerms(id: string) {
+        const employee = await this.prisma.employee.findUniqueOrThrow({
+            where: { id },
+            select: { id: true, dateHired: true, dateOfBirth: true },
+        });
+        const terms = await this.hrSetup.employmentTerms(employee);
+        return { employeeId: employee.id, ...terms };
     }
 
     async create(data: any) {

@@ -112,6 +112,14 @@ export class FinanceExtrasController {
     @Post('config')
     saveConfig(@Body() body: any) { return this.svc.saveConfig(body); }
 
+    // ── Fiscal Years ──
+    @Get('fiscal-years')
+    getFiscalYears() { return this.svc.getFiscalYears(); }
+    @Put('fiscal-years')
+    saveFiscalYears(@Body() body: any) {
+        return this.svc.saveFiscalYears(body?.fiscalYears ?? body);
+    }
+
     // ── Process / Account Mappings ──
     @Get('process-mappings')
     getProcessMappings() { return this.svc.getProcessMappings(); }

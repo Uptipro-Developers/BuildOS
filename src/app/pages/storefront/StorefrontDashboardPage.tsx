@@ -24,6 +24,10 @@ import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
+import {
+  stockStatusFor,
+  useStoreThresholds,
+} from "../../utils/stockThresholds";
 
 // Compact currency formatter to match the storefront design (e.g. $142.8M).
 function formatStockValue(n: number): string {
@@ -48,7 +52,8 @@ type StoreDisplay = {
   id: string;
   name: string;
   items: number;
-  lowStock: number;
+  /** Lines held by this store, kept so the low count can honour its thresholds. */
+  lines: { qty: number; reorderLevel: number }[];
   lastActivity: string;
   icon: React.ElementType;
   color: string;
@@ -86,6 +91,23 @@ export function StorefrontDashboardPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
+  const { thresholdForStore } = useStoreThresholds();
+
+  /**
+   * Low-stock counts per store, against that store's configured thresholds.
+   * Computed here rather than while mapping the response so a threshold that
+   * arrives after the stores still applies.
+   */
+  const lowStockByStore = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const store of stores) {
+      const threshold = thresholdForStore(store.name);
+      counts[store.id] = store.lines.filter(
+        (line) => stockStatusFor(line, threshold) !== "In Stock",
+      ).length;
+    }
+    return counts;
+  }, [stores, thresholdForStore]);
 
   const stats = useMemo(
     () => [
@@ -128,8 +150,14 @@ export function StorefrontDashboardPage() {
       },
       {
         label: "Low Stock Alerts",
+        // Across the whole register, so no single store's thresholds apply;
+        // the material's own reorder level is the line.
         value: materials.filter(
-          (m) => (m.availableQty || 0) <= (m.reorderLevel || 0),
+          (m) =>
+            stockStatusFor({
+              qty: m.availableQty || 0,
+              reorderLevel: m.reorderLevel || 0,
+            }) !== "In Stock",
         ).length,
         sub: "Below reorder level",
         icon: AlertTriangle,
@@ -156,9 +184,10 @@ export function StorefrontDashboardPage() {
             id: s.id,
             name: s.name,
             items: s.storeItems?.length ?? 0,
-            lowStock: (s.storeItems ?? []).filter(
-              (it) => (it.qty || 0) <= (it.reorderLevel || 0),
-            ).length,
+            lines: (s.storeItems ?? []).map((it) => ({
+              qty: it.qty || 0,
+              reorderLevel: it.reorderLevel || 0,
+            })),
             lastActivity: "—",
             icon: STORE_ICONS[i] ?? FolderOpen,
             color: STORE_COLORS[i] ?? "bg-gray-600",
@@ -239,34 +268,37 @@ export function StorefrontDashboardPage() {
           )}
         </div>
         <div className="grid grid-cols-2 gap-4">
-          {stores.slice(0, STORES_ON_DASHBOARD).map((store) => (
-            <div
-              key={store.name}
-              className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4"
-            >
+          {stores.slice(0, STORES_ON_DASHBOARD).map((store) => {
+            const lowStock = lowStockByStore[store.id] ?? 0;
+            return (
               <div
-                className={`w-10 h-10 rounded-xl ${store.color} flex items-center justify-center`}
+                key={store.name}
+                className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4"
               >
-                <store.icon className="w-5 h-5 text-white" />
+                <div
+                  className={`w-10 h-10 rounded-xl ${store.color} flex items-center justify-center`}
+                >
+                  <store.icon className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-gray-900">
+                    {store.name}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {store.items} items · {lowStock} low stock
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Last activity: {store.lastActivity}
+                  </p>
+                </div>
+                {lowStock > 0 && (
+                  <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">
+                    {lowStock} low
+                  </span>
+                )}
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900">
-                  {store.name}
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {store.items} items · {store.lowStock} low stock
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Last activity: {store.lastActivity}
-                </p>
-              </div>
-              {store.lowStock > 0 && (
-                <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium">
-                  {store.lowStock} low
-                </span>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

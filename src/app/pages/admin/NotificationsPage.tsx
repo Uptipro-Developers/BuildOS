@@ -1,19 +1,16 @@
-import { Plus, Edit, Trash2, Mail, Bell, X } from "lucide-react";
+import { Plus, Edit, Trash2, Mail, Bell, X, ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { apiFetch } from "../../api/client";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
-  getEmailTemplates,
+  getEmailConfigs,
+  getNotificationEvents,
   getNotificationRules,
+  type EmailConfigRecord,
+  type NotificationEventDef,
 } from "../../api/admin-extras";
-
-type EmailTemplate = {
-  id: string;
-  name: string;
-  subject: string;
-  trigger: string;
-};
 
 type NotificationRule = {
   id: string;
@@ -24,21 +21,33 @@ type NotificationRule = {
   enabled: boolean;
 };
 
+/**
+ * Recipient groups the dispatcher resolves. Anything else is treated as a role
+ * name or a list of email addresses, which the field still accepts.
+ */
+const RECIPIENT_GROUPS = ["All Users", "Administrators", "The requester"];
+
 export function NotificationsPage() {
-  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
+  // The emails the system actually sends, from Admin › Email Configuration.
+  // This panel used to manage a second, parallel template list that nothing
+  // composed from: templates added here were never used by any email.
+  const [emailConfigs, setEmailConfigs] = useState<EmailConfigRecord[]>([]);
   const [notificationRules, setNotificationRules] = useState<
     NotificationRule[]
   >([]);
+  const [events, setEvents] = useState<NotificationEventDef[]>([]);
 
   useEffect(() => {
-    Promise.all([getEmailTemplates(), getNotificationRules()])
-      .then(([templates, rules]) => {
-        setEmailTemplates(templates as EmailTemplate[]);
+    Promise.all([getEmailConfigs(), getNotificationRules(), getNotificationEvents()])
+      .then(([configs, rules, eventDefs]) => {
+        setEmailConfigs(configs);
         setNotificationRules(rules as NotificationRule[]);
+        setEvents(eventDefs);
       })
       .catch((err: unknown) => {
-        setEmailTemplates([]);
+        setEmailConfigs([]);
         setNotificationRules([]);
+        setEvents([]);
         toast.error(
           err instanceof Error
             ? err.message
@@ -52,58 +61,19 @@ export function NotificationsPage() {
   // dialog per field, no validation, and no way to cancel halfway. Each catch also
   // swallowed the error and kept the local change, so a failed save looked
   // successful and vanished on refresh.
-  const [templateForm, setTemplateForm] = useState<EmailTemplate | null>(null);
   const [ruleForm, setRuleForm] = useState<NotificationRule | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<
-    { kind: "template" | "rule"; id: string; name: string } | null
+    { id: string; name: string } | null
   >(null);
   const [busy, setBusy] = useState(false);
 
-  const BLANK_TEMPLATE: EmailTemplate = {
-    id: "",
-    name: "",
-    subject: "",
-    trigger: "",
-  };
   const BLANK_RULE: NotificationRule = {
     id: "",
     name: "",
     event: "",
-    recipients: "",
+    recipients: RECIPIENT_GROUPS[0],
     channels: ["Email"],
     enabled: true,
-  };
-
-  const saveTemplate = async () => {
-    if (!templateForm) return;
-    const { id, ...payload } = templateForm;
-    setBusy(true);
-    try {
-      if (id) {
-        const updated = await apiFetch<EmailTemplate>(
-          `/admin/email-templates/${id}`,
-          { method: "PATCH", body: JSON.stringify(payload) },
-        );
-        setEmailTemplates((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, ...updated } : t)),
-        );
-        toast.success(`Template "${payload.name}" updated.`);
-      } else {
-        const created = await apiFetch<EmailTemplate>("/admin/email-templates", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        setEmailTemplates((prev) => [created, ...prev]);
-        toast.success(`Template "${payload.name}" created.`);
-      }
-      setTemplateForm(null);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to save the template.",
-      );
-    } finally {
-      setBusy(false);
-    }
   };
 
   const saveRule = async () => {
@@ -140,19 +110,11 @@ export function NotificationsPage() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    const { kind, id, name } = deleteTarget;
-    const path =
-      kind === "template"
-        ? `/admin/email-templates/${id}`
-        : `/admin/notification-rules/${id}`;
+    const { id, name } = deleteTarget;
     setBusy(true);
     try {
-      await apiFetch(path, { method: "DELETE" });
-      if (kind === "template") {
-        setEmailTemplates((prev) => prev.filter((t) => t.id !== id));
-      } else {
-        setNotificationRules((prev) => prev.filter((r) => r.id !== id));
-      }
+      await apiFetch(`/admin/notification-rules/${id}`, { method: "DELETE" });
+      setNotificationRules((prev) => prev.filter((r) => r.id !== id));
       toast.success(`"${name}" deleted.`);
       setDeleteTarget(null);
     } catch (err) {
@@ -204,7 +166,11 @@ export function NotificationsPage() {
         </p>
       </div>
 
-      {/* Email Templates */}
+      {/* Email Templates.
+
+          Read-only, and sourced from Email Configuration — the store the mail
+          composer actually reads. This panel used to add, edit and delete
+          entries in a second list that composed no email at all. */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -213,50 +179,40 @@ export function NotificationsPage() {
               Email Templates
             </h2>
           </div>
-          <button
-            onClick={() => setTemplateForm({ ...BLANK_TEMPLATE })}
+          <Link
+            to="/apps/admin/email-config"
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
-            <Plus className="w-4 h-4" />
-            Add Template
-          </button>
+            Manage in Email Configuration
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
 
         <div className="space-y-2">
-          {emailTemplates.map((template) => (
+          {emailConfigs.length === 0 && (
+            <p className="text-sm text-gray-500">
+              No email templates configured yet.
+            </p>
+          )}
+          {emailConfigs.map((config) => (
             <div
-              key={template.id}
-              className="flex items-center justify-between p-4 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+              key={config.id}
+              className="flex items-center justify-between p-4 border border-gray-200 rounded-md"
             >
               <div>
-                <p className="font-medium text-gray-900">{template.name}</p>
+                <p className="font-medium text-gray-900">{config.name}</p>
                 <p className="text-sm text-gray-600 mt-1">
-                  Subject: {template.subject}
+                  Subject: {config.subject}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Trigger: {template.trigger}
+                  Trigger: {config.trigger}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setTemplateForm({ ...template })}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                >
-                  <Edit className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() =>
-                    setDeleteTarget({
-                      kind: "template",
-                      id: template.id,
-                      name: template.name,
-                    })
-                  }
-                  className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              <span
+                className={`px-2 py-1 text-xs rounded ${config.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}
+              >
+                {config.enabled ? "Active" : "Inactive"}
+              </span>
             </div>
           ))}
         </div>
@@ -307,7 +263,9 @@ export function NotificationsPage() {
                     )}
                   </div>
                   <p className="text-sm text-gray-600 mt-1">
-                    Event: {rule.event}
+                    Event:{" "}
+                    {events.find((e) => e.key === rule.event)?.label ??
+                      rule.event}
                   </p>
                   <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                     <span>To: {rule.recipients}</span>
@@ -324,11 +282,7 @@ export function NotificationsPage() {
                 </button>
                 <button
                   onClick={() =>
-                    setDeleteTarget({
-                      kind: "rule",
-                      id: rule.id,
-                      name: rule.name,
-                    })
+                    setDeleteTarget({ id: rule.id, name: rule.name })
                   }
                   className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
                 >
@@ -384,75 +338,6 @@ export function NotificationsPage() {
         </div>
       </div>
 
-      {/* ── Add / Edit template ── */}
-      {templateForm && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">
-                {templateForm.id ? "Edit Email Template" : "Add Email Template"}
-              </h2>
-              <button
-                onClick={() => setTemplateForm(null)}
-                className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-4">
-              {(
-                [
-                  { key: "name", label: "Template Name", placeholder: "Leave Approved" },
-                  { key: "subject", label: "Email Subject", placeholder: "Your leave request was approved" },
-                  { key: "trigger", label: "Trigger Event", placeholder: "Leave request approved" },
-                ] as const
-              ).map((field) => (
-                <div key={field.key}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    {field.label} <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={templateForm[field.key]}
-                    placeholder={field.placeholder}
-                    onChange={(e) =>
-                      setTemplateForm((prev) =>
-                        prev ? { ...prev, [field.key]: e.target.value } : prev,
-                      )
-                    }
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="px-6 pb-5 flex justify-end gap-3">
-              <button
-                onClick={() => setTemplateForm(null)}
-                className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => void saveTemplate()}
-                disabled={
-                  busy ||
-                  !templateForm.name.trim() ||
-                  !templateForm.subject.trim() ||
-                  !templateForm.trigger.trim()
-                }
-                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {busy
-                  ? "Saving…"
-                  : templateForm.id
-                    ? "Save Changes"
-                    : "Add Template"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Add / Edit notification rule ── */}
       {ruleForm && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
@@ -470,29 +355,77 @@ export function NotificationsPage() {
               </button>
             </div>
             <div className="px-6 py-5 space-y-4">
-              {(
-                [
-                  { key: "name", label: "Rule Name", placeholder: "Notify on overdue approval" },
-                  { key: "event", label: "Event", placeholder: "Approval overdue" },
-                  { key: "recipients", label: "Recipients", placeholder: "All Team Members" },
-                ] as const
-              ).map((field) => (
-                <div key={field.key}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    {field.label} <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    value={ruleForm[field.key]}
-                    placeholder={field.placeholder}
-                    onChange={(e) =>
-                      setRuleForm((prev) =>
-                        prev ? { ...prev, [field.key]: e.target.value } : prev,
-                      )
-                    }
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Rule Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  value={ruleForm.name}
+                  placeholder="Notify finance of new purchase requests"
+                  onChange={(e) =>
+                    setRuleForm((prev) =>
+                      prev ? { ...prev, name: e.target.value } : prev,
+                    )
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Chosen from the events the system dispatches. This was a free
+                  text box, so a rule could name an event nothing ever emits and
+                  would then never fire. */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Event <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={ruleForm.event}
+                  onChange={(e) =>
+                    setRuleForm((prev) =>
+                      prev ? { ...prev, event: e.target.value } : prev,
+                    )
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                >
+                  <option value="">Select an event…</option>
+                  {events.map((event) => (
+                    <option key={event.key} value={event.key}>
+                      {event.label} ({event.app})
+                    </option>
+                  ))}
+                </select>
+                {ruleForm.event && (
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    {events.find((e) => e.key === ruleForm.event)?.description}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Recipients <span className="text-red-500">*</span>
+                </label>
+                <input
+                  value={ruleForm.recipients}
+                  list="notification-recipient-groups"
+                  placeholder="All Users"
+                  onChange={(e) =>
+                    setRuleForm((prev) =>
+                      prev ? { ...prev, recipients: e.target.value } : prev,
+                    )
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <datalist id="notification-recipient-groups">
+                  {RECIPIENT_GROUPS.map((group) => (
+                    <option key={group} value={group} />
+                  ))}
+                </datalist>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  A group, a role name, or a comma-separated list of email
+                  addresses.
+                </p>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">
                   Channels
@@ -558,11 +491,7 @@ export function NotificationsPage() {
 
       <ConfirmationModal
         isOpen={Boolean(deleteTarget)}
-        title={
-          deleteTarget?.kind === "template"
-            ? "Delete email template"
-            : "Delete notification rule"
-        }
+        title="Delete notification rule"
         description={
           deleteTarget
             ? `"${deleteTarget.name}" will be permanently removed. This cannot be undone.`

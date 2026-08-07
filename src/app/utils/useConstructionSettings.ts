@@ -28,8 +28,22 @@ export interface ConstructionConfig {
   weatherConfig: WeatherConfig[];
   projectTypes: { sector: string; categories: string[] }[];
   tradeTypes: string[];
+  /**
+   * Report content switches from Settings › Reports, keyed by their setting key
+   * ("rag_summary", "cost_breakdown", …). A key that is absent means the
+   * section has never been configured and stays on.
+   */
+  reportSettings: Record<string, boolean>;
   /** False until the first load settles, so callers can avoid flashing defaults. */
   loaded: boolean;
+}
+
+/** Whether a report section is switched on; unconfigured sections are shown. */
+export function reportSectionEnabled(
+  config: ConstructionConfig,
+  key: string,
+): boolean {
+  return config.reportSettings[key] ?? true;
 }
 
 export function useConstructionSettings(): ConstructionConfig {
@@ -38,6 +52,7 @@ export function useConstructionSettings(): ConstructionConfig {
     weatherConfig: defaultWeatherConfig,
     projectTypes: defaultProjectTypes as ConstructionConfig["projectTypes"],
     tradeTypes: defaultTradeTypes as string[],
+    reportSettings: {},
     loaded: false,
   });
 
@@ -61,6 +76,9 @@ export function useConstructionSettings(): ConstructionConfig {
             ? s.projectTypes
             : prev.projectTypes,
           tradeTypes: s?.tradeTypes?.length ? s.tradeTypes : prev.tradeTypes,
+          reportSettings: Object.fromEntries(
+            (s?.reportSettings ?? []).map((rs) => [rs.key, rs.enabled]),
+          ),
           loaded: true,
         }));
       })

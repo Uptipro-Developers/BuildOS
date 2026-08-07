@@ -36,8 +36,10 @@ import {
 import {
   fetchEmployee,
   fetchEmployees,
+  fetchEmploymentTerms,
   updateEmployee,
   toEmployeeUpdatePayload,
+  type EmploymentTerms,
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
 import {
@@ -127,6 +129,7 @@ export function EmployeeProfilePage() {
   const [supervisorOptions, setSupervisorOptions] = useState<
     { id: string; firstName: string; lastName: string }[]
   >([]);
+  const [terms, setTerms] = useState<EmploymentTerms | null>(null);
 
   // Human-friendly display ID passed from the list page
   const displayId = searchParams.get("displayId") ?? emp?.id ?? "";
@@ -138,6 +141,23 @@ export function EmployeeProfilePage() {
       )
       .catch(() => {});
   }, []);
+
+  // Probation / notice / retirement, worked out server-side from the HR policy
+  // and this employee's dates. Informational, so a failure just hides the block.
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    fetchEmploymentTerms(id)
+      .then((data) => {
+        if (alive) setTerms(data);
+      })
+      .catch(() => {
+        if (alive) setTerms(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
 
   // Supervisor candidates: active employees other than this one (an employee
   // cannot report to themselves).
@@ -506,8 +526,8 @@ export function EmployeeProfilePage() {
               </div>
             ))}
           </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-5">
-            <h3 className="font-semibold text-gray-800 text-sm mb-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+            <h3 className="font-semibold text-gray-800 text-sm">
               Employment Status
             </h3>
             <div
@@ -516,6 +536,52 @@ export function EmployeeProfilePage() {
               <CheckCircle className="w-4 h-4" />
               {statusCfg.label}
             </div>
+
+            {/* The organisation's probation period, notice period and
+                retirement age applied to this employee's own dates. All three
+                were configured in HR › General Setup and read by nothing, so
+                they described no one. */}
+            {terms && (
+              <div className="pt-2 border-t border-gray-100 space-y-1">
+                {terms.onProbation && (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700">
+                    On probation
+                  </span>
+                )}
+                {[
+                  {
+                    label: `Probation ends (${terms.probationMonths} months)`,
+                    value: terms.probationEndDate
+                      ? formatDateByGeneralSettings(terms.probationEndDate)
+                      : "—",
+                  },
+                  {
+                    label: "Notice period",
+                    value: `${terms.noticePeriodDays} days`,
+                  },
+                  {
+                    label: `Retirement (age ${terms.retirementAge})`,
+                    value: terms.retirementDate
+                      ? `${formatDateByGeneralSettings(terms.retirementDate)}${
+                          terms.yearsToRetirement !== null
+                            ? ` · ${terms.yearsToRetirement} yrs`
+                            : ""
+                        }`
+                      : "Date of birth not on file",
+                  },
+                ].map((r) => (
+                  <div
+                    key={r.label}
+                    className="flex justify-between py-1 border-b border-gray-50 last:border-0"
+                  >
+                    <span className="text-xs text-gray-400">{r.label}</span>
+                    <span className="text-sm font-medium text-gray-800">
+                      {r.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

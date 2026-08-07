@@ -121,15 +121,6 @@ export function FinancialConfigurationPage() {
     DEFAULT_PAYMENT_METHODS,
   );
 
-  const saveAll = () => {
-    apiFetch("/config", {
-      method: "POST",
-      body: JSON.stringify({ chartOfAccounts, taxSettings, paymentMethods }),
-    }).catch((err) => {
-      console.error("Failed to save financial configuration:", err);
-    });
-  };
-
   // ── Modal state ──
   // These three entities were all edited through chains of window.prompt: one
   // browser dialog per field, no validation, no cancel, and errors surfaced with
@@ -348,13 +339,14 @@ export function FinancialConfigurationPage() {
             permission-controlled.
           </p>
         </div>
-        <button
-          onClick={saveAll}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
-        >
-          <Save className="w-4 h-4" />
-          Save All
-        </button>
+        {/* There is nothing left for a "Save All" to do: accounts, tax rates
+            and payment methods are each written by their own form as they are
+            edited. The button used to POST all three lists into a settings blob
+            no code reads, with no success or failure feedback either way. */}
+        <p className="flex items-center gap-2 text-xs text-gray-400">
+          <Save className="w-3.5 h-3.5" />
+          Changes are saved as you make them.
+        </p>
       </div>
 
       {/* Module context banner */}

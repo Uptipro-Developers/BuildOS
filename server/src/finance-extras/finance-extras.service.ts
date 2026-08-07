@@ -6,6 +6,7 @@ const FINANCE_CONFIG_KEY = 'finance-config';
 const SCHEDULED_POSTINGS_KEY = 'finance-scheduled-postings';
 const PAYMENT_METHODS_KEY = 'finance-payment-methods';
 const PROCESS_MAPPINGS_KEY = 'finance-process-mappings';
+const FISCAL_YEARS_KEY = 'finance-fiscal-years';
 
 @Injectable()
 export class FinanceExtrasService {
@@ -207,11 +208,43 @@ export class FinanceExtrasService {
     findTaxConfig(id: string) {
         return this.prisma.taxConfig.findUniqueOrThrow({ where: { id } });
     }
+    /**
+     * Only the columns TaxConfig has.
+     *
+     * Prisma rejects the whole write on an unrecognised key, and the Finance
+     * Configuration form posts its own field names (glCode, appliesTo,
+     * enabled), so an unfiltered body failed the request outright.
+     */
+    private taxConfigData(data: any) {
+        const out: Record<string, unknown> = {};
+        if (data?.name !== undefined) out.name = String(data.name);
+        if (data?.type !== undefined) out.type = String(data.type);
+        if (data?.rate !== undefined) out.rate = Number(data.rate) || 0;
+        if (data?.code !== undefined || data?.glCode !== undefined)
+            out.code = String(data.code ?? data.glCode ?? '');
+        if (data?.description !== undefined || data?.appliesTo !== undefined)
+            out.description = String(data.description ?? data.appliesTo ?? '');
+        if (data?.isActive !== undefined || data?.enabled !== undefined)
+            out.isActive = Boolean(data.isActive ?? data.enabled);
+        return out;
+    }
     createTaxConfig(data: any) {
-        return this.prisma.taxConfig.create({ data });
+        const clean = this.taxConfigData(data);
+        if (!clean.name) throw new BadRequestException('A tax name is required');
+        return this.prisma.taxConfig.create({
+            data: {
+                name: String(clean.name),
+                type: String(clean.type ?? 'Custom'),
+                rate: Number(clean.rate ?? 0),
+                ...clean,
+            } as any,
+        });
     }
     updateTaxConfig(id: string, data: any) {
-        return this.prisma.taxConfig.update({ where: { id }, data });
+        return this.prisma.taxConfig.update({
+            where: { id },
+            data: this.taxConfigData(data) as any,
+        });
     }
     deleteTaxConfig(id: string) {
         return this.prisma.taxConfig.delete({ where: { id } });
@@ -343,6 +376,52 @@ export class FinanceExtrasService {
         const merged = { ...current, ...(data ?? {}) };
         await this.writeSetting(FINANCE_CONFIG_KEY, merged);
         return { saved: true, ...merged };
+    }
+
+    // ── Fiscal Years ──
+    /**
+     * The fiscal year register.
+     *
+     * Fiscal years were held only in the Finance provider's React state, so
+     * creating one, setting the current year or closing a period was discarded
+     * on the next refresh — including the close audit trail the screen shows.
+     */
+    getFiscalYears() {
+        return this.readSetting<any[]>(FISCAL_YEARS_KEY, []);
+    }
+
+    /**
+     * Replaces the register. The screen edits the list as a whole (closing one
+     * year and marking another current is a single act), and exactly one year
+     * may be current.
+     */
+    async saveFiscalYears(years: any[]) {
+        const list = (Array.isArray(years) ? years : [])
+            .filter((fy) => fy && String(fy.id ?? '').trim())
+            .map((fy) => ({
+                id: String(fy.id),
+                label: String(fy.label ?? '').trim(),
+                startDate: String(fy.startDate ?? ''),
+                endDate: String(fy.endDate ?? ''),
+                status: ['open', 'closing', 'closed'].includes(String(fy.status))
+                    ? String(fy.status)
+                    : 'open',
+                isCurrent: Boolean(fy.isCurrent),
+                ...(fy.closedAt ? { closedAt: String(fy.closedAt) } : {}),
+                ...(fy.closedBy ? { closedBy: String(fy.closedBy) } : {}),
+                ...(fy.openingBalances && typeof fy.openingBalances === 'object'
+                    ? { openingBalances: fy.openingBalances }
+                    : {}),
+            }));
+
+        const firstCurrent = list.findIndex((fy) => fy.isCurrent);
+        const normalized = list.map((fy, index) => ({
+            ...fy,
+            isCurrent: index === firstCurrent,
+        }));
+
+        await this.writeSetting(FISCAL_YEARS_KEY, normalized);
+        return normalized;
     }
 
     // ── Process / Account Mappings (GL posting rules) ──

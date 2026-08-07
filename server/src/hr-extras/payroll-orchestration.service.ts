@@ -75,6 +75,8 @@ export class PayrollOrchestrationService {
           tax: payslip.incomeTax,
           pension: payslip.pension,
           allowances: payslip.allowances,
+          overtime: payslip.overtime,
+          overtimeHours: payslip.overtimeHours,
           status: 'Pending',
         },
       });

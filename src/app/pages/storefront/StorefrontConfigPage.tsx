@@ -1189,6 +1189,11 @@ function StockThresholdsPanel() {
                   <option value="%">Percentage (%)</option>
                   <option value=" units">Absolute quantity (units)</option>
                 </select>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  A percentage is taken of each item's own reorder level; an
+                  absolute threshold is compared to the quantity on hand. Items
+                  with no reorder level fall back to it as the low-stock line.
+                </p>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">

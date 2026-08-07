@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { HrSetupService } from './hr-setup.service';
 
 interface TaxCalculation {
   grossPay: number;
@@ -15,11 +16,23 @@ interface TaxCalculation {
 
 @Injectable()
 export class PayrollTaxService {
-  constructor(private prisma: PrismaService) {}
+  /** The statutory schedule below is denominated in naira. */
+  private static readonly STATUTORY_CURRENCY = 'NGN';
+
+  constructor(
+    private prisma: PrismaService,
+    private hrSetup: HrSetupService,
+  ) {}
 
   /**
    * Calculate income tax based on Nigerian tax brackets (2024)
    * Progressive tax system with exemptions
+   *
+   * The bands and the tax-free allowance are naira amounts, so they only mean
+   * anything for payroll run in naira. When HR Setup names another currency the
+   * configured Default Tax Rate applies as a flat rate instead — previously
+   * that setting was stored and never read, and non-naira payroll was taxed
+   * against naira thresholds.
    */
   async calculateIncomeTax(
     employeeId: string,
@@ -27,6 +40,13 @@ export class PayrollTaxService {
     month: number,
     year: number,
   ): Promise<TaxCalculation> {
+    const setup = await this.hrSetup.read();
+    if (
+      setup.currency.toUpperCase() !== PayrollTaxService.STATUTORY_CURRENCY
+    ) {
+      return this.flatRateTax(grossPay, setup.taxRate);
+    }
+
     // Nigeria tax-free allowance: ₦392,200 per month (2024)
     const MONTHLY_TAX_FREE_ALLOWANCE = 392200;
     const taxableIncome = Math.max(0, grossPay - MONTHLY_TAX_FREE_ALLOWANCE);
@@ -49,6 +69,24 @@ export class PayrollTaxService {
       breakdown: {
         annualIncome,
         annualTax: Math.round(annualTax),
+        monthlyTax: Math.round(monthlyTax),
+      },
+    };
+  }
+
+  /** Flat-rate tax, for payroll outside the statutory naira schedule. */
+  private flatRateTax(grossPay: number, ratePercent: number): TaxCalculation {
+    const rate = Math.min(100, Math.max(0, ratePercent)) / 100;
+    const monthlyTax = grossPay * rate;
+
+    return {
+      grossPay,
+      taxableIncome: grossPay,
+      tax: Math.round(monthlyTax),
+      netPay: Math.round(grossPay - monthlyTax),
+      breakdown: {
+        annualIncome: grossPay * 12,
+        annualTax: Math.round(monthlyTax * 12),
         monthlyTax: Math.round(monthlyTax),
       },
     };

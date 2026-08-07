@@ -291,39 +291,34 @@ export function GeneralSettingsPage() {
     defaultCurrencyOptions,
   );
   const [savingGeneralSettings, setSavingGeneralSettings] = useState(false);
+  // Edits stay local to the form until Save. Writing each keystroke to
+  // localStorage applied unsaved (and abandoned) changes to this browser's
+  // currency and date formatting everywhere, without the server ever agreeing.
   const handleChange = (field: string, value: string) =>
-    setSettings((prev) => {
-      const next = { ...prev, [field]: value };
-      localStorage.setItem("buildos_general_settings", JSON.stringify(next));
-      return next;
-    });
+    setSettings((prev) => ({ ...prev, [field]: value }));
   const saveCurrencyOptions = (
     updater: CurrencyOption[] | ((prev: CurrencyOption[]) => CurrencyOption[]),
   ) => {
-    setCurrencyOptions((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      localStorage.setItem("buildos_currency_options", JSON.stringify(next));
-      return next;
-    });
+    setCurrencyOptions((prev) =>
+      typeof updater === "function" ? updater(prev) : updater,
+    );
   };
+  /**
+   * Saves to the server, then mirrors the stored values into this browser.
+   *
+   * The local copy used to be written first and kept even when the server
+   * rejected the save, so one browser formatted amounts and dates by a
+   * configuration no other user had — until the next boot re-hydrated from the
+   * server and silently undid it. The server is the source of truth; the cache
+   * follows it.
+   */
   const handleSave = async () => {
     setSavingGeneralSettings(true);
-    // Persist locally first so the change is guaranteed and immediately
-    // reflected across the app (currency symbol, number/date formatting, etc.)
-    // regardless of whether the backend sync succeeds.
-    localStorage.setItem("buildos_general_settings", JSON.stringify(settings));
-    localStorage.setItem(
-      "buildos_currency_options",
-      JSON.stringify(currencyOptions),
-    );
-    window.dispatchEvent(new Event("buildos:general-settings-changed"));
-
     try {
-      const payload = {
+      const saved = await updateAdminGeneralSettings({
         generalSettings: settings,
         currencyOptions,
-      };
-      const saved = await updateAdminGeneralSettings(payload);
+      });
 
       setSettings(saved.generalSettings);
       setCurrencyOptions(saved.currencyOptions as CurrencyOption[]);
@@ -338,13 +333,11 @@ export function GeneralSettingsPage() {
       window.dispatchEvent(new Event("buildos:general-settings-changed"));
       toast.success("General settings saved.");
     } catch (error) {
-      // The settings were already saved locally above, so the change still
-      // takes effect — surface a non-blocking warning about server sync.
-      const message =
+      toast.error(
         error instanceof Error && error.message
-          ? `Saved locally. Server sync failed: ${error.message}`
-          : "Saved locally. Could not sync to the server.";
-      toast.warning(message);
+          ? `Could not save the general settings: ${error.message}`
+          : "Could not save the general settings.",
+      );
     } finally {
       setSavingGeneralSettings(false);
     }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Save,
@@ -11,6 +11,17 @@ import {
 } from "lucide-react";
 import { apiFetch } from "../../api/client";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
+import { formatDateTimeByGeneralSettings } from "../../utils/generalSettings";
+
+/** Shown in System Information; the HR module's own release, not a setting. */
+const HR_MODULE_VERSION = "HR v2.4.1";
+
+interface HrSetupSummary {
+  employees: number;
+  departments: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
 
 interface FieldProps {
   label: string;
@@ -70,12 +81,29 @@ function Field({
 }
 
 /**
+ * Marks settings that are stored but that no workflow reads yet.
+ *
+ * Every field on this screen saves, but only some of them change what the
+ * system does. Saying which is which stops the rest from reading as policy the
+ * product enforces.
+ */
+function UnenforcedNote({ fields }: { fields: string }) {
+  return (
+    <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-3">
+      {fields} are recorded for reference — no workflow enforces them yet.
+    </p>
+  );
+}
+
+/**
  * `embedded` hides the page-level heading so this can be rendered as a tab panel
  * inside HR Settings, which supplies its own header. Standalone routes are
  * unchanged.
  */
 export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<HrSetupSummary | null>(null);
   const [form, setForm] = useState({
     // Drives whether a self-service clock-in is recorded as present or late.
     // Blank means "do not judge lateness" — the backend records everyone present
@@ -100,6 +128,56 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
   });
 
 
+  /**
+   * The stored setup, loaded before anything can be edited.
+   *
+   * Without this the form always rendered its compiled-in defaults, so the
+   * configured values were invisible and the next Save wrote the defaults back
+   * over them — silently clearing the workday start that decides whether a
+   * clock-in is late.
+   */
+  useEffect(() => {
+    let alive = true;
+    apiFetch<Record<string, unknown>>("/setup")
+      .then((saved) => {
+        if (!alive || !saved || typeof saved !== "object") return;
+        setForm((prev) => {
+          const next = { ...prev };
+          for (const key of Object.keys(prev) as (keyof typeof prev)[]) {
+            const value = saved[key];
+            // A field absent from the stored setup keeps its default rather
+            // than becoming "undefined" and turning the input uncontrolled.
+            if (value !== undefined && value !== null) {
+              next[key] = String(value);
+            }
+          }
+          return next;
+        });
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error
+            ? `Could not load the saved setup: ${err.message}`
+            : "Could not load the saved setup.",
+        );
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+
+    apiFetch<HrSetupSummary>("/setup/summary")
+      .then((data) => {
+        if (alive) setSummary(data);
+      })
+      // Informational only: the panel shows em dashes rather than blocking
+      // configuration on it.
+      .catch(() => {});
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   function f(key: keyof typeof form) {
     return (v: string) => setForm((prev) => ({ ...prev, [key]: v }));
   }
@@ -113,6 +191,10 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
         toast.success("General setup saved.");
+        // Refreshes "Last Modified" / "Last Configured By" to this save.
+        apiFetch<HrSetupSummary>("/setup/summary")
+          .then(setSummary)
+          .catch(() => {});
       })
       .catch((err) => {
         toast.error(
@@ -138,9 +220,12 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
         </div>
         )}
 
+        {/* Disabled until the stored setup has loaded: saving the defaults
+            before they arrive would overwrite the real configuration. */}
         <button
           onClick={save}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${saved ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
+          disabled={loading}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${saved ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}
         >
           {saved ? (
             <>
@@ -148,7 +233,7 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
             </>
           ) : (
             <>
-              <Save className="w-4 h-4" /> Save Changes
+              <Save className="w-4 h-4" /> {loading ? "Loading…" : "Save Changes"}
             </>
           )}
         </button>
@@ -188,6 +273,7 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
               onChange={f("workDaysPerWeek")}
               type="number"
               suffix="days"
+              hint="Sets the working month used to pro-rate unpaid leave on a payslip."
             />
             <Field
               label="Week Start Day"
@@ -239,6 +325,7 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
               onChange={f("currency")}
               type="select"
               options={["USD", "NGN", "GBP", "EUR", "GHS"]}
+              hint="Payroll currency. Anything other than NGN switches income tax to the flat Default Tax Rate."
             />
           </div>
         </div>
@@ -282,6 +369,7 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
               onChange={f("taxRate")}
               type="number"
               suffix="%"
+              hint="Applied as a flat rate when payroll runs in a currency other than NGN. Naira payroll uses the statutory PAYE bands."
             />
             <Field
               label="Pension Contribution"
@@ -289,22 +377,42 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
               onChange={f("pensionRate")}
               type="number"
               suffix="%"
+              hint="Employee contribution deducted from gross pay on every payslip."
             />
           </div>
+          <UnenforcedNote fields="Fiscal year start" />
         </div>
 
-        {/* System Info */}
+        {/* System Info.
+
+            Every row here was a hardcoded string — an employee count, a
+            department count and an editor's name that belonged to no
+            installation. They are read from this deployment instead. */}
         <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
             <Settings2 className="w-4 h-4 text-indigo-600" /> System Information
           </h2>
           <div className="space-y-3">
             {[
-              { key: "Module Version", val: "HR v2.4.1" },
-              { key: "Last Configured By", val: "Ngozi Okafor" },
-              { key: "Last Modified", val: "Apr 9, 2026 14:32" },
-              { key: "Total Employees", val: "156" },
-              { key: "Active Departments", val: "8" },
+              { key: "Module Version", val: HR_MODULE_VERSION },
+              {
+                key: "Last Configured By",
+                val: summary?.updatedBy || "—",
+              },
+              {
+                key: "Last Modified",
+                val: summary?.updatedAt
+                  ? formatDateTimeByGeneralSettings(summary.updatedAt)
+                  : "—",
+              },
+              {
+                key: "Total Employees",
+                val: summary ? String(summary.employees) : "—",
+              },
+              {
+                key: "Active Departments",
+                val: summary ? String(summary.departments) : "—",
+              },
             ].map((row) => (
               <div key={row.key} className="flex justify-between text-sm">
                 <span className="text-gray-500">{row.key}</span>
@@ -339,6 +447,10 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
               type="text"
             />
           </div>
+          <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-3">
+            Used for HR notification emails: the sender address, a copy-to
+            mailbox, and the HR team address copied on leave activity.
+          </p>
         </div>
 
         {/* Module numbering.

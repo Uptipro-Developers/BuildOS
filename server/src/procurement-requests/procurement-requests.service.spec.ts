@@ -52,8 +52,18 @@ function makeService() {
         ),
     };
 
-    const service = new ProcurementRequestsService(prisma, webhooks, mailQueue, numbering);
-    return { service, created, materialRequestUpdates, numbering };
+    // Notification dispatch is fire-and-forget and swallows its own failures,
+    // so the double only has to exist.
+    const notifications: any = { dispatch: jest.fn(() => Promise.resolve()) };
+
+    const service = new ProcurementRequestsService(
+        prisma,
+        webhooks,
+        mailQueue,
+        numbering,
+        notifications,
+    );
+    return { service, created, materialRequestUpdates, numbering, notifications };
 }
 
 describe('creating a purchase request', () => {

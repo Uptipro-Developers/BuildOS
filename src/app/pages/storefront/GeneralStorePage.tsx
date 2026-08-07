@@ -18,6 +18,7 @@ import {
   updateStoreItem,
   deleteStoreItem,
   getMaterials,
+  getStores,
   type StoreItem as ApiStoreItem,
 } from "../../api/materials";
 import {
@@ -28,14 +29,11 @@ import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
-
-type StockStatus = "In Stock" | "Low Stock" | "Out of Stock";
-
-function getStatus(item: StockItem): StockStatus {
-  if (item.qty === 0) return "Out of Stock";
-  if (item.qty <= item.reorderLevel) return "Low Stock";
-  return "In Stock";
-}
+import {
+  stockStatusFor,
+  useStoreThresholds,
+  type StockStatus,
+} from "../../utils/stockThresholds";
 
 const STATUS_STYLE: Record<StockStatus, string> = {
   "In Stock": "bg-green-50 text-green-700",
@@ -53,6 +51,8 @@ interface StockItem {
   unitCost: number;
   lastReceived: string;
   bin: string;
+  /** Which store holds the line, so its configured thresholds can apply. */
+  storeId: string;
 }
 
 function toStockItem(item: ApiStoreItem): StockItem {
@@ -66,6 +66,7 @@ function toStockItem(item: ApiStoreItem): StockItem {
     unitCost: item.unitCost ?? 0,
     lastReceived: item.lastReceived ?? "",
     bin: item.bin ?? "",
+    storeId: item.storeId ?? "",
   };
 }
 
@@ -78,6 +79,7 @@ const BLANK: Omit<StockItem, "id"> = {
   unitCost: 0,
   lastReceived: "",
   bin: "",
+  storeId: "",
 };
 
 export function GeneralStorePage() {
@@ -105,6 +107,13 @@ export function GeneralStorePage() {
   >([]);
   const [configuredCategories, setConfiguredCategories] = useState<string[]>([]);
   const [configuredUnits, setConfiguredUnits] = useState<string[]>([]);
+  // Thresholds are configured against the store's name, so the id on each line
+  // has to be resolved to one before a line's status can be judged.
+  const [storeNames, setStoreNames] = useState<Record<string, string>>({});
+  const { thresholdForStore } = useStoreThresholds();
+
+  const getStatus = (item: StockItem): StockStatus =>
+    stockStatusFor(item, thresholdForStore(storeNames[item.storeId]));
 
   // One shared, de-duplicated handler: four widget loads failing on a network
   // outage should not stack four identical toasts.
@@ -131,6 +140,14 @@ export function GeneralStorePage() {
         ),
       )
       .catch(reportLoadFailure("materials"));
+
+    getStores()
+      .then((data) =>
+        setStoreNames(
+          Object.fromEntries(data.map((s) => [s.id, s.name ?? ""])),
+        ),
+      )
+      .catch(reportLoadFailure("stores"));
 
     getMaterialCategories()
       .then((data) => setConfiguredCategories(data.map((c) => c.name).filter(Boolean)))
@@ -416,6 +433,7 @@ export function GeneralStorePage() {
                             unitCost: item.unitCost,
                             bin: item.bin,
                             lastReceived: item.lastReceived,
+                            storeId: item.storeId,
                           });
                           setEditingId(item.id);
                           setShowModal(true);

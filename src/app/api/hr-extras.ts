@@ -27,7 +27,11 @@ export interface Payslip {
     id: string; employeeId: string; employeeName: string; department?: string;
     period: string; month: number; year: number; grossPay: number;
     deductions: number; netPay: number; tax: number; pension: number;
-    allowances: number; status: string; issuedAt?: string; createdAt: string;
+    allowances: number;
+    /** Earned beyond the standard working day, at the configured multiplier. */
+    overtime?: number;
+    overtimeHours?: number;
+    status: string; issuedAt?: string; createdAt: string;
 }
 export interface DepartmentPayrollSummary {
     department: string; employees: number; grossPay: number; netPay: number;
@@ -63,6 +67,14 @@ export const deleteAttendanceRecord = (id: string) =>
 
 // Payroll Periods
 export const getPayrollPeriods = () => apiFetch<PayrollPeriod[]>('/payroll-periods');
+/**
+ * The period that follows the last one, dated from the payroll frequency
+ * configured in HR › General Setup.
+ */
+export const getNextPayrollPeriod = () =>
+    apiFetch<{ name: string; startDate: string; endDate: string; frequency: string }>(
+        '/payroll-periods/next',
+    );
 export const getPayrollPeriod = (id: string) => apiFetch<PayrollPeriod>(`/payroll-periods/${id}`);
 export const createPayrollPeriod = (data: Partial<PayrollPeriod>) =>
     apiFetch<PayrollPeriod>('/payroll-periods', { method: 'POST', body: JSON.stringify(data) });

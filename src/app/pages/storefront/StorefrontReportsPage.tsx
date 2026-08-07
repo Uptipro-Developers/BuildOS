@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DeployedReports } from "../../components/DeployedReports";
 import { exportCSV, type CsvCell } from "../../utils/exportCSV";
 import {
@@ -13,12 +13,17 @@ import {
   getMaterials,
   getStockMovements,
   getStockTransfers,
+  type Material,
 } from "../../api/materials";
 import {
   formatDateByGeneralSettings,
   getCurrencySymbol,
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
+import {
+  stockStatusFor,
+  useStoreThresholds,
+} from "../../utils/stockThresholds";
 
 type ReportType = "Stock Levels" | "Movement" | "Transfer" | "Return";
 
@@ -118,36 +123,42 @@ const MOVEMENT_TYPE_STYLE: Record<string, string> = {
 
 export function StorefrontReportsPage() {
   const [activeReport, setActiveReport] = useState<ReportType>("Stock Levels");
-  const [stockData, setStockData] = useState<StockReportRow[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
   const [movementData, setMovementData] = useState<MovementReportRow[]>([]);
   const [transferData, setTransferData] = useState<TransferReportRow[]>([]);
   const [returnData, setReturnData] = useState<ReturnReportRow[]>([]);
+  const { thresholdForStore } = useStoreThresholds();
+
+  /**
+   * Derived rather than built while loading, so the store thresholds — which
+   * arrive on their own request — are applied to the reported status instead of
+   * every row being judged against its reorder level alone.
+   */
+  const stockData = useMemo<StockReportRow[]>(
+    () =>
+      materials.map((m) => {
+        const qty = m.availableQty ?? m.totalQty ?? 0;
+        const store = m.allocatedProject || m.allocatedTo || "General Store";
+        return {
+          material: m.name,
+          category: m.category,
+          store,
+          qty,
+          reorder: m.reorderLevel ?? 0,
+          value: qty * (m.unitCost ?? 0),
+          status: stockStatusFor(
+            { qty, reorderLevel: m.reorderLevel ?? 0 },
+            thresholdForStore(store),
+          ),
+        };
+      }),
+    [materials, thresholdForStore],
+  );
 
   useEffect(() => {
     getMaterials()
-      .then((materials) =>
-        setStockData(
-          materials.map((m) => {
-            const qty = m.availableQty ?? m.totalQty ?? 0;
-            const status =
-              qty <= 0
-                ? "Out of Stock"
-                : qty <= (m.reorderLevel ?? 0)
-                  ? "Low Stock"
-                  : "In Stock";
-            return {
-              material: m.name,
-              category: m.category,
-              store: m.allocatedProject || m.allocatedTo || "General Store",
-              qty,
-              reorder: m.reorderLevel ?? 0,
-              value: qty * (m.unitCost ?? 0),
-              status,
-            };
-          }),
-        ),
-      )
-      .catch(() => setStockData([]));
+      .then(setMaterials)
+      .catch(() => setMaterials([]));
 
     getStockMovements()
       .then((movements) =>

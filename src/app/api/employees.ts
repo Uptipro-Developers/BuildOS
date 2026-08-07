@@ -165,6 +165,27 @@ export async function fetchEmployee(id: string) {
     return mapEmployee(data);
 }
 
+/**
+ * The employee's probation, notice and retirement dates.
+ *
+ * Derived server-side from the policy in HR › General Setup and the employee's
+ * own hire date and date of birth, so both sides stay in one place.
+ */
+export interface EmploymentTerms {
+    employeeId: string;
+    probationMonths: number;
+    probationEndDate: string | null;
+    onProbation: boolean;
+    noticePeriodDays: number;
+    retirementAge: number;
+    retirementDate: string | null;
+    yearsToRetirement: number | null;
+}
+
+export function fetchEmploymentTerms(id: string) {
+    return apiFetch<EmploymentTerms>(`/employees/${id}/employment-terms`);
+}
+
 export function createEmployee(data: any) {
     return apiFetch<any>(`/employees`, { method: 'POST', body: JSON.stringify(data) }).then(mapEmployee);
 }

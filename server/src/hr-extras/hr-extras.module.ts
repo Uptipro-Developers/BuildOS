@@ -7,11 +7,15 @@ import { PayrollValidationService } from './payroll-validation.service';
 import { PayrollTaxService } from './payroll-tax.service';
 import { PayrollDeductionsService } from './payroll-deductions.service';
 import { PayslipGenerationService } from './payslip-generation.service';
+import { PayrollOvertimeService } from './payroll-overtime.service';
+import { HrSetupModule } from './hr-setup.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { LeaveRequestsModule } from '../leave-requests/leave-requests.module';
 
 @Module({
-    imports: [PrismaModule, LeaveRequestsModule],
+    // HrSetupModule is global; imported here so this module still stands alone
+    // in tests that instantiate it directly.
+    imports: [PrismaModule, LeaveRequestsModule, HrSetupModule],
     controllers: [HrExtrasController, PayrollController],
     providers: [
         HrExtrasService,
@@ -19,6 +23,7 @@ import { LeaveRequestsModule } from '../leave-requests/leave-requests.module';
         PayrollValidationService,
         PayrollTaxService,
         PayrollDeductionsService,
+        PayrollOvertimeService,
         PayslipGenerationService,
     ],
     exports: [
@@ -26,6 +31,7 @@ import { LeaveRequestsModule } from '../leave-requests/leave-requests.module';
         PayrollValidationService,
         PayrollTaxService,
         PayrollDeductionsService,
+        PayrollOvertimeService,
         PayslipGenerationService,
     ],
 })

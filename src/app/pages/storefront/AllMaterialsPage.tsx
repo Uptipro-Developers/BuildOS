@@ -13,6 +13,7 @@ import {
   getCurrencySymbol,
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
+import { stockStatusFor } from "../../utils/stockThresholds";
 import {
   Plus,
   Search,
@@ -62,10 +63,13 @@ const BLANK: Omit<Material, "id"> = {
   materialType: "Consumable",
 };
 
+/**
+ * The register spans every store, so no single store's configured thresholds
+ * apply here — the material's own reorder level is the line. The shared helper
+ * keeps that rule identical to the per-store screens.
+ */
 function getStatus(m: Material): MaterialStatus {
-  if (m.availableQty === 0) return "Out of Stock";
-  if (m.availableQty <= m.reorderLevel) return "Low Stock";
-  return "In Stock";
+  return stockStatusFor({ qty: m.availableQty, reorderLevel: m.reorderLevel });
 }
 
 const STATUS_STYLE: Record<MaterialStatus, string> = {

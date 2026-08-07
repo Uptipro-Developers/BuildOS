@@ -17,6 +17,10 @@ export class ConstructionExtrasController {
     getProjectStatuses() { return this.svc.getProjectStatuses(); }
     @Put('project-statuses')
     saveProjectStatuses(@Body() body: any) { return this.svc.saveProjectStatuses(body?.statuses ?? body); }
+    @Get('project-roles')
+    getProjectRoles() { return this.svc.getProjectRoles(); }
+    @Put('project-roles')
+    saveProjectRoles(@Body() body: any) { return this.svc.saveProjectRoles(body?.roles ?? body); }
 
     // ── Project Documents ──
     @Get('project-documents')

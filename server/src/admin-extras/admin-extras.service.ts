@@ -17,6 +17,10 @@ import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 import { PermissionsService } from '../permissions/permissions.service';
 import { EmailTemplateService, type ComposedEmail } from '../email/email-template.service';
 import { WebhookService } from '../integrations/webhook.service';
+import {
+    NOTIFICATION_EVENTS,
+    NOTIFICATION_EVENT_KEYS,
+} from '../notifications/notification-events';
 
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
@@ -590,8 +594,30 @@ export class AdminExtrasService {
             throw new BadRequestException('Each store level requires a level number and name');
         }
         const settings = await this.readAdminSettings();
+        const previous: any[] = Array.isArray(settings.storeLevels) ? settings.storeLevels : [];
         settings.storeLevels = normalized;
         await this.writeAdminSettings(settings);
+
+        // Stores record their level by its name, and the maximum-stores cap is
+        // matched on that name, so a rename used to orphan every existing store
+        // of that level: the cap stopped applying and the store's type no longer
+        // matched any configured level. The rename is carried onto them.
+        for (const level of normalized) {
+            const before = previous.find((p) => Number(p?.level) === level.level);
+            const oldName = String(before?.name ?? '').trim();
+            if (!oldName || oldName.toLowerCase() === level.name.toLowerCase()) continue;
+            await this.prisma.store
+                .updateMany({
+                    where: { type: { equals: oldName, mode: 'insensitive' } },
+                    data: { type: level.name },
+                })
+                .catch((error) =>
+                    this.logger.warn(
+                        `Renamed store level "${oldName}" to "${level.name}" but could not update existing stores: ${(error as Error).message}`,
+                    ),
+                );
+        }
+
         return settings.storeLevels;
     }
 
@@ -2884,12 +2910,31 @@ export class AdminExtrasService {
     }
 
     // ── Notification Rules ──
+    listNotificationEvents() {
+        return NOTIFICATION_EVENTS;
+    }
+
     async findNotificationRules() {
         const settings = await this.readAdminSettings();
         return settings.notificationRules;
     }
 
+    /**
+     * A rule is only useful if its event is one the system dispatches, so an
+     * unrecognised event is rejected at the door rather than saved as a rule
+     * that can never fire.
+     */
+    private assertDispatchableEvent(event: unknown) {
+        const key = String(event ?? '').trim();
+        if (!NOTIFICATION_EVENT_KEYS.includes(key)) {
+            throw new BadRequestException(
+                `"${key}" is not a notification event. Choose one of: ${NOTIFICATION_EVENT_KEYS.join(', ')}`,
+            );
+        }
+    }
+
     async createNotificationRule(data: any) {
+        this.assertDispatchableEvent(data?.event);
         const settings = await this.readAdminSettings();
         const created = { id: `nr-${Date.now()}`, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         settings.notificationRules.unshift(created);
@@ -2898,6 +2943,7 @@ export class AdminExtrasService {
     }
 
     async updateNotificationRule(id: string, data: any) {
+        if (data?.event !== undefined) this.assertDispatchableEvent(data.event);
         const settings = await this.readAdminSettings();
         settings.notificationRules = settings.notificationRules.map((item: any) =>
             item.id === id ? { ...item, ...data, id, updatedAt: new Date().toISOString() } : item,

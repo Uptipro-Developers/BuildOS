@@ -1,8 +1,13 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { getCurrencySymbol } from "../../utils/generalSettings";
-import { getPayrollPeriods, createPayrollPeriod } from "../../api/hr-extras";
-import { Plus, Lock, Unlock, Clock } from "lucide-react";
+import {
+  getPayrollPeriods,
+  createPayrollPeriod,
+  updatePayrollPeriod,
+  getNextPayrollPeriod,
+} from "../../api/hr-extras";
+import { Plus, Lock, Unlock, Clock, CalendarPlus } from "lucide-react";
 
 type PeriodStatus = "open" | "processing" | "closed";
 
@@ -79,20 +84,54 @@ export function PayrollPeriodPage() {
       .catch(() => {});
   }, []);
 
-  function toggleStatus(id: string) {
+  /**
+   * Opens or closes a period.
+   *
+   * This only ever changed React state behind a success toast, so a closed
+   * period was open again on the next load.
+   */
+  async function toggleStatus(id: string) {
     const current = periods.find((p) => p.id === id);
+    if (!current) return;
+    const next: PeriodStatus = current.status === "open" ? "closed" : "open";
+
     setPeriods((prev) =>
-      prev.map((p) => {
-        if (p.id !== id) return p;
-        const next: PeriodStatus = p.status === "open" ? "closed" : "open";
-        return { ...p, status: next };
-      }),
+      prev.map((p) => (p.id === id ? { ...p, status: next } : p)),
     );
-    if (current) {
+    try {
+      await updatePayrollPeriod(id, { status: next });
       toast.success(
-        current.status === "open"
-          ? `${current.name} closed.`
-          : `${current.name} reopened.`,
+        next === "closed" ? `${current.name} closed.` : `${current.name} reopened.`,
+      );
+    } catch (err) {
+      setPeriods((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: current.status } : p)),
+      );
+      toast.error(
+        err instanceof Error
+          ? `Could not update ${current.name}. ${err.message}`
+          : `Could not update ${current.name}.`,
+      );
+    }
+  }
+
+  /**
+   * Fills the new-period form from the configured payroll frequency, so a
+   * Weekly or Bi-Weekly organisation does not have to work out and type the
+   * dates for every period.
+   */
+  async function prefillNextPeriod() {
+    try {
+      const next = await getNextPayrollPeriod();
+      setNewName(next.name);
+      setNewStart(next.startDate);
+      setNewEnd(next.endDate);
+      setShowAdd(true);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Could not work out the next period. ${err.message}`
+          : "Could not work out the next period.",
       );
     }
   }
@@ -153,12 +192,21 @@ export function PayrollPeriodPage() {
             Manage and track payroll processing periods
           </p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
-        >
-          <Plus className="w-4 h-4" /> New Period
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Dates the next period from the payroll frequency in HR Setup. */}
+          <button
+            onClick={() => void prefillNextPeriod()}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <CalendarPlus className="w-4 h-4" /> Next Period
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
+          >
+            <Plus className="w-4 h-4" /> New Period
+          </button>
+        </div>
       </div>
 
       {showAdd && (
@@ -284,7 +332,7 @@ export function PayrollPeriodPage() {
                   <td className="px-4 py-3">
                     {p.status !== "processing" && (
                       <button
-                        onClick={() => toggleStatus(p.id)}
+                        onClick={() => void toggleStatus(p.id)}
                         className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-indigo-700 font-medium"
                       >
                         {p.status === "open" ? (

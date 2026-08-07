@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { HrSetupService } from './hr-setup.service';
 
 interface DeductionBreakdown {
   pension: number;
@@ -21,7 +22,13 @@ interface AllowanceBreakdown {
 
 @Injectable()
 export class PayrollDeductionsService {
-  constructor(private prisma: PrismaService) {}
+  /** NHIS employee contribution. Statutory, so not part of HR Setup. */
+  private static readonly NHIS_RATE = 0.05;
+
+  constructor(
+    private prisma: PrismaService,
+    private hrSetup: HrSetupService,
+  ) {}
 
   /**
    * Calculate all deductions for an employee
@@ -31,11 +38,13 @@ export class PayrollDeductionsService {
     grossPay: number,
     leaveDays: number = 0,
   ): Promise<DeductionBreakdown> {
-    // Pension: 8% of gross pay (employee contribution)
-    const pension = grossPay * 0.08;
+    // Pension: the rate configured in HR › General Setup (employee
+    // contribution). This was hardcoded at 8%, so changing the setting had no
+    // effect on a single payslip.
+    const { pensionRate } = await this.hrSetup.read();
+    const pension = grossPay * (pensionRate / 100);
 
-    // NHIS: 5% of gross pay
-    const nhis = grossPay * 0.05;
+    const nhis = grossPay * PayrollDeductionsService.NHIS_RATE;
 
     // Leave deduction: proportional to leave days taken
     const leaveDeduction = await this.calculateLeaveDeduction(
@@ -65,6 +74,9 @@ export class PayrollDeductionsService {
   /**
    * Calculate leave deduction (unpaid leave)
    * Formula: (Gross Pay / Working days in month) * Unpaid leave days
+   *
+   * The divisor comes from the configured working week rather than a fixed 22,
+   * so a six-day week pro-rates a day of unpaid leave correctly.
    */
   private async calculateLeaveDeduction(
     employeeId: string,
@@ -73,17 +85,9 @@ export class PayrollDeductionsService {
   ): Promise<number> {
     if (leaveDays <= 0) return 0;
 
-    const leaveType = await this.prisma.leaveType.findFirst({
-      where: { paid: false },
-    });
+    const workingDaysPerMonth = await this.hrSetup.workingDaysPerMonth();
+    if (workingDaysPerMonth <= 0) return 0;
 
-    if (!leaveType) {
-      // Default to unpaid if no unpaid leave type exists
-      const workingDaysPerMonth = 22; // Standard
-      return (grossPay / workingDaysPerMonth) * leaveDays;
-    }
-
-    const workingDaysPerMonth = 22;
     return (grossPay / workingDaysPerMonth) * leaveDays;
   }
 
@@ -169,14 +173,17 @@ export class PayrollDeductionsService {
    * Get deduction rules for a department
    */
   async getDeductionRules(departmentId: string) {
-    const department = await this.prisma.department.findUnique({
-      where: { id: departmentId },
-    });
+    const [department, setup] = await Promise.all([
+      this.prisma.department.findUnique({ where: { id: departmentId } }),
+      this.hrSetup.read(),
+    ]);
 
     return {
       department: department?.name,
-      pensionRate: 0.08,
-      nhisRate: 0.05,
+      // Reported as the fraction actually applied above, so this endpoint and
+      // the payslips agree.
+      pensionRate: setup.pensionRate / 100,
+      nhisRate: PayrollDeductionsService.NHIS_RATE,
       maxDeductionPercent: 0.5,
       leaveDeductionApplies: true,
       taxExemptionsApply: true,

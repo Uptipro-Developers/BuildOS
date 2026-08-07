@@ -11,10 +11,16 @@ export const updateConstructionSetting = (id: string, data: Partial<Construction
 export const deleteConstructionSetting = (id: string) =>
     apiFetch<void>(`/construction-settings/${id}`, { method: 'DELETE' });
 
-// Project configuration (types + statuses) — persisted as JSON collections.
-export const getProjectTypes = () => apiFetch<any[]>('/project-types');
-export const saveProjectTypes = (types: any[]) =>
-    apiFetch<any[]>('/project-types', { method: 'PUT', body: JSON.stringify({ types }) });
-export const getProjectStatuses = () => apiFetch<any[]>('/project-statuses');
-export const saveProjectStatuses = (statuses: any[]) =>
-    apiFetch<any[]>('/project-statuses', { method: 'PUT', body: JSON.stringify({ statuses }) });
+// The `/project-types` and `/project-statuses` collections had one client, a
+// Construction "Project Configuration" page that was never routed and so could
+// not be opened. It has been removed: the sectors and categories a project is
+// actually created from live on ConstructionSetting.projectTypes (see
+// useConstructionSettings), and a project's status is a database enum, not a
+// configurable list. The endpoints remain so the rows already stored under them
+// are still reachable.
+
+// Project roles (Construction › Settings › Resources). Saved as one collection
+// because the screen edits the whole list.
+export const getProjectRoles = () => apiFetch<any[]>('/project-roles');
+export const saveProjectRoles = (roles: any[]) =>
+    apiFetch<any[]>('/project-roles', { method: 'PUT', body: JSON.stringify({ roles }) });

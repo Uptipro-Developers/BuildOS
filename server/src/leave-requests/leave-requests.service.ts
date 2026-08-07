@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeaveBalanceService } from './leave-balance.service';
 import { WorkflowEngineService } from '../workflows/workflow-engine.service';
+import { NotificationDispatchService } from '../notifications/notification-dispatch.service';
 
 /**
  * Columns a client may set. Everything else is dropped — the request body used to
@@ -56,6 +57,7 @@ export class LeaveRequestsService {
         private prisma: PrismaService,
         private leaveBalance: LeaveBalanceService,
         private workflowEngine: WorkflowEngineService,
+        private notifications: NotificationDispatchService,
     ) { }
 
     findAll(status?: string, employeeId?: string) {
@@ -164,6 +166,22 @@ export class LeaveRequestsService {
                 (error instanceof Error ? error.message : 'unknown error');
             this.logger.warn(workflowWarning);
         }
+
+        void this.notifications.dispatch('leave-request.submitted', {
+            title: 'Leave request submitted',
+            message:
+                `${request.employee?.firstName ?? ''} ${request.employee?.lastName ?? ''}`.trim() +
+                ` requested ${request.leaveType?.name ?? 'leave'} (${request.refId})`,
+            actionUrl: '/apps/hr/leave-requests',
+            relatedId: request.id,
+            relatedType: 'LeaveRequest',
+            vars: {
+                reference: request.refId,
+                leaveType: request.leaveType?.name ?? '',
+                startDate: request.startDate,
+                endDate: request.endDate,
+            },
+        });
 
         return workflowWarning ? { ...request, workflowWarning } : request;
     }
@@ -332,7 +350,7 @@ export class LeaveRequestsService {
             request.employeeId,
             request.leaveTypeId,
         );
-        return this.prisma.leaveRequest.update({
+        const approved = await this.prisma.leaveRequest.update({
             where: { id },
             data: {
                 status: 'approved',
@@ -343,6 +361,15 @@ export class LeaveRequestsService {
             },
             include: { employee: true, leaveType: true },
         });
+        void this.notifications.dispatch('leave-request.decided', {
+            title: 'Leave request approved',
+            message: `${approved.refId} — ${approved.leaveType?.name ?? 'leave'} approved`,
+            actionUrl: '/apps/ess/my-requests',
+            relatedId: approved.id,
+            relatedType: 'LeaveRequest',
+            vars: { reference: approved.refId, decision: 'approved' },
+        });
+        return approved;
     }
 
     /** Rejects a request and closes any open workflow instance behind it. */
@@ -363,7 +390,7 @@ export class LeaveRequestsService {
             }
         }
 
-        return this.prisma.leaveRequest.update({
+        const rejected = await this.prisma.leaveRequest.update({
             where: { id },
             data: {
                 status: 'rejected',
@@ -373,6 +400,17 @@ export class LeaveRequestsService {
             },
             include: { employee: true, leaveType: true },
         });
+        void this.notifications.dispatch('leave-request.decided', {
+            title: 'Leave request rejected',
+            message:
+                `${rejected.refId} — ${rejected.leaveType?.name ?? 'leave'} rejected` +
+                (reason ? `: ${reason}` : ''),
+            actionUrl: '/apps/ess/my-requests',
+            relatedId: rejected.id,
+            relatedType: 'LeaveRequest',
+            vars: { reference: rejected.refId, decision: 'rejected', reason: reason ?? '' },
+        });
+        return rejected;
     }
 
     update(id: string, data: any) {

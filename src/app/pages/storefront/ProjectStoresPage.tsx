@@ -19,14 +19,11 @@ import {
 } from "../../api/materials";
 import { toast } from "sonner";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
-
-type StockStatus = "In Stock" | "Low Stock" | "Out of Stock";
-
-function getStatus(item: { qty: number; reorderLevel: number }): StockStatus {
-  if (item.qty === 0) return "Out of Stock";
-  if (item.qty <= item.reorderLevel) return "Low Stock";
-  return "In Stock";
-}
+import {
+  stockStatusFor,
+  useStoreThresholds,
+  type StockStatus,
+} from "../../utils/stockThresholds";
 
 const STATUS_STYLE: Record<StockStatus, string> = {
   "In Stock": "bg-green-50 text-green-700",
@@ -73,6 +70,17 @@ export function ProjectStoresPage() {
   const [sentToProcurement, setSentToProcurement] = useState<Set<string>>(
     new Set(),
   );
+  const { thresholdForStore } = useStoreThresholds();
+
+  /**
+   * Stock status for one line, against the thresholds configured for the store
+   * holding it. Every store's items were judged by the material's reorder level
+   * alone, so per-store thresholds never applied.
+   */
+  const getStatus = (
+    item: { qty: number; reorderLevel: number },
+    storeName: string,
+  ): StockStatus => stockStatusFor(item, thresholdForStore(storeName));
 
   // Store-level edit and delete. The card previously offered neither, and its
   // item-row actions were hidden behind hover.
@@ -166,7 +174,8 @@ export function ProjectStoresPage() {
             {stores.reduce(
               (acc, s) =>
                 acc +
-                s.items.filter((i) => getStatus(i) === "Low Stock").length,
+                s.items.filter((i) => getStatus(i, s.project) === "Low Stock")
+                  .length,
               0,
             )}
           </p>
@@ -177,7 +186,9 @@ export function ProjectStoresPage() {
             {stores.reduce(
               (acc, s) =>
                 acc +
-                s.items.filter((i) => getStatus(i) === "Out of Stock").length,
+                s.items.filter(
+                  (i) => getStatus(i, s.project) === "Out of Stock",
+                ).length,
               0,
             )}
           </p>
@@ -189,7 +200,7 @@ export function ProjectStoresPage() {
       <div className="space-y-3">
         {stores.map((store) => {
           const lowCount = store.items.filter(
-            (i) => getStatus(i) !== "In Stock",
+            (i) => getStatus(i, store.project) !== "In Stock",
           ).length;
           const isOpen = expanded === store.id;
           return (
@@ -271,7 +282,7 @@ export function ProjectStoresPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {store.items.map((item, i) => {
-                        const status = getStatus(item);
+                        const status = getStatus(item, store.project);
                         const procKey = `${store.id}-${i}`;
                         return (
                           <tr key={i} className="group">
@@ -356,7 +367,11 @@ export function ProjectStoresPage() {
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-amber-800">
-                  {getStatus(procurementTarget)}
+                  {getStatus(
+                    procurementTarget,
+                    stores.find((s) => s.id === procurementTarget.storeId)
+                      ?.project ?? "",
+                  )}
                 </p>
                 <p className="text-xs text-amber-700 mt-0.5">
                   <span className="font-medium">{procurementTarget.name}</span>{" "}

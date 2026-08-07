@@ -16,6 +16,15 @@ export class EmployeesController {
         return this.employeesService.findOne(id);
     }
 
+    /**
+     * Probation, notice period and retirement dates for this employee, worked
+     * out from the policy configured in HR › General Setup.
+     */
+    @Get(':id/employment-terms')
+    employmentTerms(@Param('id') id: string) {
+        return this.employeesService.employmentTerms(id);
+    }
+
     @Post()
     create(@Body() body: any) {
         return this.employeesService.create(body);

@@ -62,7 +62,7 @@ const bsColumns: Column<BSRow>[] = [
 ];
 
 export function YearEndClosePage() {
-  const { fiscalYears, setFiscalYears, getTrialBalance, getBalanceSheet, getIncomeStatement, accounts } = useFinance();
+  const { fiscalYears, saveFiscalYears, getTrialBalance, getBalanceSheet, getIncomeStatement, accounts } = useFinance();
   const { logChange } = useChangelog();
   const [selectedFyId, setSelectedFyId] = useState<string>(() => {
     const open = fiscalYears.find(fy => fy.status === "open");
@@ -111,17 +111,29 @@ export function YearEndClosePage() {
     toast.success(`Generated ${entries.length} closing entries.`);
   }
 
-  function handleLockYear() {
+  // Locking a year is the one irreversible step of the close, so it is only
+  // reported as done once the register has actually been written.
+  async function handleLockYear() {
     if (!selectedFy) return;
-    setFiscalYears(prev => prev.map(fy =>
-      fy.id === selectedFyId
-        ? { ...fy, status: "closed" as const, closedAt: new Date().toISOString().split("T")[0], closedBy: "Sola Adeleke" }
-        : fy
-    ));
-    logChange({ module: "Finance", action: "Closed Fiscal Year", entityType: "FiscalYear", entityId: selectedFyId, summary: `Fiscal year ${selectedFy.label} closed`, performedBy: "Sola Adeleke" });
-    setLocked(true);
-    setShowConfirmLock(false);
-    toast.success(`Fiscal year ${selectedFy.label} closed.`);
+    try {
+      await saveFiscalYears(
+        fiscalYears.map(fy =>
+          fy.id === selectedFyId
+            ? { ...fy, status: "closed" as const, closedAt: new Date().toISOString().split("T")[0], closedBy: "Sola Adeleke" }
+            : fy
+        ),
+      );
+      logChange({ module: "Finance", action: "Closed Fiscal Year", entityType: "FiscalYear", entityId: selectedFyId, summary: `Fiscal year ${selectedFy.label} closed`, performedBy: "Sola Adeleke" });
+      setLocked(true);
+      setShowConfirmLock(false);
+      toast.success(`Fiscal year ${selectedFy.label} closed.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Could not close the fiscal year. ${err.message}`
+          : "Could not close the fiscal year.",
+      );
+    }
   }
 
   const bsRows: BSRow[] = [];
@@ -381,7 +393,7 @@ export function YearEndClosePage() {
             <p className="text-sm text-gray-500 mb-5">Once closed, the account will be locked. No further postings, edits, or reversals will be permitted for this period.</p>
             <div className="flex gap-2">
               <button onClick={() => setShowConfirmLock(false)} className="flex-1 px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-              <button onClick={handleLockYear} className="flex-1 px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700">Lock Year</button>
+              <button onClick={() => void handleLockYear()} className="flex-1 px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700">Lock Year</button>
             </div>
           </div>
         </div>

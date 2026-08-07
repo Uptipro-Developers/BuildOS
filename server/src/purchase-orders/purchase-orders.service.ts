@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from '../integrations/webhook.service';
 import { MailQueueService } from '../queue/mail-queue.service';
 import { supplierPortalLink } from '../common/supplier-portal';
+import { NotificationDispatchService } from '../notifications/notification-dispatch.service';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -10,6 +11,7 @@ export class PurchaseOrdersService {
         private prisma: PrismaService,
         private webhookService: WebhookService,
         private mailQueue: MailQueueService,
+        private notifications: NotificationDispatchService,
     ) { }
 
     findAll(status?: string, supplierId?: string) {
@@ -40,6 +42,17 @@ export class PurchaseOrdersService {
             include: { supplier: true, items: true },
         }).then((po) => {
             this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => {});
+            void this.notifications.dispatch('purchase-order.created', {
+                title: 'Purchase order created',
+                message: `${(po as any).poRef || po.id} for ${po.supplier?.name ?? 'a supplier'}`,
+                actionUrl: '/apps/procurement/purchase-orders',
+                relatedId: po.id,
+                relatedType: 'PurchaseOrder',
+                vars: {
+                    reference: (po as any).poRef || po.id,
+                    supplier: po.supplier?.name ?? '',
+                },
+            });
             const supplier = po.supplier;
             if (supplier?.email) {
                 const poRef = (po as any).poRef || po.id;
