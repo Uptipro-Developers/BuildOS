@@ -74,36 +74,34 @@ export class FinanceExtrasService {
         const codes = [...new Set(lines.map((l: any) => l.accountCode))] as string[];
         console.log('TESTING CODES :', codes)
         // Looping through the codes to run the aggregation
-        for (const code of codes) {
 
-            console.log('TESTING LOOP')
+        codes.map(async (code) => {
+            console.log('TESTING LOOP', code)
 
-            const account = this.prisma.chartAccount.findUnique({ where: { code }, select: { type: true } });
-            const allJournal = this.prisma.journalLine.findMany({
+            const account = await this.prisma.chartAccount.findUnique({ where: { code }, select: { type: true } });
+            const allJournal = await this.prisma.journalLine.findMany({
                 where: { accountCode: code },
             })
 
 
             console.log('TESTING TOTAL & ACCOUNT', allJournal, account)
 
+        })
 
+        // if (!account) {
+        //     throw new BadRequestException(`No chart of accounts entry found for code ${code}.`);
+        // }
 
-            // if (!account) {
-            //     throw new BadRequestException(`No chart of accounts entry found for code ${code}.`);
-            // }
+        // const debitTotal = totals._sum.debit ?? 0;
+        // const creditTotal = totals._sum.credit ?? 0;
+        // const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
+        // const balance = isCreditNormal ? creditTotal - debitTotal : debitTotal - creditTotal;
 
-            // const debitTotal = totals._sum.debit ?? 0;
-            // const creditTotal = totals._sum.credit ?? 0;
-            // const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
-            // const balance = isCreditNormal ? creditTotal - debitTotal : debitTotal - creditTotal;
-
-            // await this.prisma.chartAccount.update({
-            //     where: { code },
-            //     data: { balance },
-            // });
-        }
-
-        return true
+        // await this.prisma.chartAccount.update({
+        //     where: { code },
+        //     data: { balance },
+        // });
+        return {}
 
     }
 
