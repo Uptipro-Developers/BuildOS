@@ -17,6 +17,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { LeaveTypesModule } from './leave-types/leave-types.module';
 import { ClaimTypesModule } from './claim-types/claim-types.module';
 import { LeaveRequestsModule } from './leave-requests/leave-requests.module';
@@ -101,6 +102,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         HealthModule,
         SuppliersModule,
         PurchaseOrdersModule,
+        GoodsReceiptsModule,
         LeaveTypesModule,
         ClaimTypesModule,
         LeaveRequestsModule,

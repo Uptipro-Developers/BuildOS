@@ -9,10 +9,7 @@ import {
   ReceivedQuote as ApiReceivedQuote,
   SentRFQ as ApiSentRFQ,
 } from "../../api/procurement-requests";
-import { createPurchaseOrder } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
-import { fetchSuppliers } from "../../api/suppliers";
-import { getAuthUserName } from "../../utils/useAuthUser";
 import { useProcurementUnits } from "../../utils/useProcurementUnits";
 import {
   getCurrencySymbol,
@@ -26,7 +23,6 @@ import {
   FileText,
   CheckCircle2,
   ShoppingCart,
-  Clock,
   XCircle,
   Eye,
   Plus,
@@ -40,6 +36,13 @@ import {
   Layers,
 } from "lucide-react";
 import { useNumbering } from "../../stores/numberingStore";
+import { useNavigate } from "react-router";
+import { StatusBadge } from "../../components/StatusBadge";
+import { RowAction, RowActions } from "../../components/RowAction";
+import {
+  RECEIVED_QUOTE_STATUS,
+  statusDef,
+} from "../../utils/procurementWorkflow";
 
 type VendorDocType = "quote" | "invoice";
 type DocStatus = "pending_review" | "approved" | "po_created" | "rejected";
@@ -135,32 +138,6 @@ function fromApi(r: ApiReceivedQuote): VendorDoc {
     notes: r.notes,
   };
 }
-
-const STATUS_CFG: Record<
-  DocStatus,
-  { label: string; badge: string; icon: React.ReactNode }
-> = {
-  pending_review: {
-    label: "Pending Review",
-    badge: "bg-amber-100 text-amber-700",
-    icon: <Clock className="w-3.5 h-3.5" />,
-  },
-  approved: {
-    label: "Approved",
-    badge: "bg-green-100 text-green-700",
-    icon: <CheckCircle2 className="w-3.5 h-3.5" />,
-  },
-  po_created: {
-    label: "PO Created",
-    badge: "bg-blue-100 text-blue-700",
-    icon: <ShoppingCart className="w-3.5 h-3.5" />,
-  },
-  rejected: {
-    label: "Rejected",
-    badge: "bg-red-100 text-red-700",
-    icon: <XCircle className="w-3.5 h-3.5" />,
-  },
-};
 
 function fmt(n: number) {
   const symbol = getCurrencySymbol();
@@ -809,277 +786,18 @@ function NegotiateModal({
   );
 }
 
-function CreatePOFromQuoteModal({
-  doc,
-  onClose,
-  onDone,
-}: {
-  doc: VendorDoc;
-  onClose: () => void;
-  onDone: (id: string) => void;
-}) {
-  const { allocate, peekNextId } = useNumbering();
-  const fmt = (n: number) => {
-    const symbol = getCurrencySymbol();
-    return n >= 1_000_000
-      ? `${symbol}${(n / 1_000_000).toFixed(2)}M`
-      : n >= 1000
-        ? `${symbol}${(n / 1000).toFixed(0)}K`
-        : `${symbol}${n}`;
-  };
-  const today = formatDateByGeneralSettings(new Date());
-  // Default to a week out so the PO can be raised immediately; still editable.
-  const [expectedDate, setExpectedDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().slice(0, 10);
-  });
-  const [supplierContact, setSupplierContact] = useState("");
-  const [notes, setNotes] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  /**
-   * Resolved supplier for this quote. The supplier id is what the purchase
-   * order is actually keyed on, so it has to be looked up before an order can be
-   * placed at all. This modal previously carried a hardcoded seven-supplier
-   * array copied out of the design mock, and matched the vendor name against it.
-   */
-  const [supplier, setSupplier] = useState<{
-    id: string;
-    contactPerson: string;
-    phone: string;
-  } | null>(null);
-
-  useEffect(() => {
-    fetchSuppliers()
-      .then((rows) => {
-        const match =
-          (doc.supplierId && rows.find((s) => s.id === doc.supplierId)) ||
-          rows.find((s) => s.name === doc.vendor);
-        if (!match) return;
-        setSupplier({
-          id: match.id,
-          contactPerson: match.contactPerson,
-          phone: match.phone,
-        });
-        setSupplierContact((prev) =>
-          prev ||
-          [match.contactPerson, match.phone].filter(Boolean).join(" — "),
-        );
-      })
-      .catch((err) => notifyLoadFailure("suppliers", err));
-  }, [doc.supplierId, doc.vendor]);
-
-  // Preview only. This used to call getNextId during render, which consumed a
-  // sequence number on every re-render — typing in any field above burned PO
-  // numbers. The real reference is taken once, when the PO is confirmed.
-  const nextPO = peekNextId("PurchaseOrder");
-
-  /**
-   * Awards the quote — that is, actually raises the purchase order.
-   *
-   * This used to be `onDone(await allocate("PurchaseOrder"))`: it took a number
-   * off the sequence, flipped a local flag and toasted "Purchase Order PO-0007
-   * created." No order was written, the quote's status was not saved, and the
-   * number was burned. The award is the hinge of the whole flow, and it was the
-   * one step that did nothing.
-   */
-  async function handleCreate() {
-    if (!expectedDate || submitting) return;
-    if (!supplier) {
-      toast.error(
-        `${doc.vendor} is not in the supplier list, so an order cannot be raised against them.`,
-      );
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const poRef = await allocate("PurchaseOrder");
-      await createPurchaseOrder({
-        prRef: doc.prRef && doc.prRef !== "—" ? doc.prRef : undefined,
-        // What was awarded, and to whom, at the price that was quoted.
-        quoteRef: doc.id,
-        supplierId: supplier.id,
-        status: "draft",
-        createdBy: getAuthUserName() || "Current User",
-        expectedDate: new Date(expectedDate).toISOString(),
-        totalValue: doc.totalAmount,
-        items: doc.items.map((it) => ({
-          material: it.material,
-          qty: it.qty,
-          unit: it.unit,
-          unitCost: it.unitPrice,
-        })),
-      });
-      // The decision has to outlive the page, or the same quote can be awarded
-      // twice.
-      await updateReceivedQuote(doc.id, { status: "po_created" }).catch(
-        () => undefined,
-      );
-      onDone(poRef);
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Could not raise the purchase order. Please try again.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">
-            Create Purchase Order
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          {/* Quote summary */}
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 space-y-1">
-            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2">
-              From Quote
-            </p>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
-              <div>
-                <span className="text-gray-500">Quote ID:</span>{" "}
-                <span className="font-medium">{doc.id}</span>
-              </div>
-              <div>
-                <span className="text-gray-500">Vendor:</span>{" "}
-                <span className="font-medium">{doc.vendor}</span>
-              </div>
-              <div>
-                <span className="text-gray-500">RFQ Ref:</span>{" "}
-                <span className="font-medium">{doc.rfqRef}</span>
-              </div>
-              <div>
-                <span className="text-gray-500">Total:</span>{" "}
-                <span className="font-semibold text-blue-700">
-                  {fmt(doc.totalAmount)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Line items preview */}
-          <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="text-left px-3 py-2 text-gray-500 font-medium">
-                  Material
-                </th>
-                <th className="text-right px-3 py-2 text-gray-500 font-medium">
-                  Qty
-                </th>
-                <th className="text-right px-3 py-2 text-gray-500 font-medium">
-                  Unit Price
-                </th>
-                <th className="text-right px-3 py-2 text-gray-500 font-medium">
-                  Total
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {doc.items.map((it, i) => (
-                <tr key={i}>
-                  <td className="px-3 py-1.5 text-gray-700">{it.material}</td>
-                  <td className="px-3 py-1.5 text-right text-gray-600">
-                    {it.qty} {it.unit}
-                  </td>
-                  <td className="px-3 py-1.5 text-right text-gray-600">
-                    {fmt(it.unitPrice)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right font-medium text-gray-800">
-                    {fmt(it.total)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Expected Delivery Date <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                value={expectedDate}
-                onChange={(e) => setExpectedDate(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Supplier Contact
-              </label>
-              <input
-                value={supplierContact}
-                onChange={(e) => setSupplierContact(e.target.value)}
-                placeholder="Name & phone"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              PO Notes
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <p className="text-xs text-gray-400">
-            PO will be created as{" "}
-            <span className="font-mono font-medium text-gray-700">
-              {nextPO}
-            </span>{" "}
-            with status <em>Draft</em>. Created by {today}.
-          </p>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => void handleCreate()}
-            disabled={!expectedDate || submitting}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            <ShoppingCart className="w-4 h-4" />{" "}
-            {submitting ? "Creating…" : "Create PO"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Compare Quotes Modal ─────────────────────────────────────────────────────
 function CompareQuotesModal({
   prRef,
   quotes,
   onClose,
-  onCreatePO,
+  onApprove,
 }: {
   prRef: string;
   quotes: VendorDoc[];
   onClose: () => void;
-  onCreatePO: (doc: VendorDoc) => void;
+  /** Approving the winner is what raises the purchase order. */
+  onApprove: (doc: VendorDoc) => void;
 }) {
   const allMaterials = Array.from(
     new Set(quotes.flatMap((q) => q.items.map((it) => it.material))),
@@ -1232,21 +950,21 @@ function CompareQuotesModal({
           >
             Close
           </button>
+          {/* Awarding the comparison is approving the winning quote — there is
+              no separate "create the order" step, because approving a quote you
+              do not intend to buy from is not a thing anyone does. */}
           {quotes
-            .filter(
-              (q) =>
-                q.status === "pending_review" || q.status === "approved",
-            )
+            .filter((q) => q.status === "pending_review")
             .map((q) => (
               <button
                 key={q.id}
                 onClick={() => {
-                  onCreatePO(q);
+                  onApprove(q);
                   onClose();
                 }}
                 className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 flex items-center gap-2"
               >
-                <ShoppingCart className="w-4 h-4" /> Create PO from {q.vendor}
+                <CheckCircle2 className="w-4 h-4" /> Approve {q.vendor}
               </button>
             ))}
         </div>
@@ -1286,23 +1004,71 @@ export function ReceivedQuotesPage() {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showRecordModal, setShowRecordModal] = useState(false);
-  const [createPODoc, setCreatePODoc] = useState<VendorDoc | null>(null);
   const [compareRef, setCompareRef] = useState<string | null>(null);
+  /** Id of the quote being decided, so a decision cannot be double-fired. */
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [negotiateItem, setNegotiateItem] = useState<{
     doc: VendorDoc;
     itemIndex: number;
   } | null>(null);
 
-  // Persist a status change; revert the optimistic update if the write fails.
+  /**
+   * Records the decision on a quote.
+   *
+   * Approving is the award: the server raises the purchase order, closes the
+   * losing quotes for the same request and moves the quote to `po_created`. So
+   * the response is re-read rather than assumed — an approve that lands as
+   * "PO Created" is the order having been raised, and the toast says which one.
+   */
   const updateStatus = async (id: string, status: DocStatus) => {
+    if (deciding) return;
     const previous = docs;
+    setDeciding(id);
     setDocs((p) => p.map((x) => (x.id === id ? { ...x, status } : x)));
     try {
-      await updateReceivedQuote(id, { status });
+      const saved = await updateReceivedQuote(id, { status });
+      const settled = (saved?.status ?? status) as DocStatus;
+      setDocs((p) => p.map((x) => (x.id === id ? { ...x, status: settled } : x)));
+
+      if (status === "approved") {
+        if (settled === "po_created") {
+          // Losing quotes on the same request were closed server-side.
+          const quote = previous.find((x) => x.id === id);
+          setDocs((p) =>
+            p.map((x) =>
+              x.id !== id &&
+              quote?.prRef &&
+              x.prRef === quote.prRef &&
+              x.status === "pending_review"
+                ? { ...x, status: "rejected" as DocStatus }
+                : x,
+            ),
+          );
+          toast.success("Quote approved — purchase order raised.", {
+            description:
+              "Find it on Purchase Orders, ready to be sent to Finance.",
+          });
+        } else {
+          // The approval stuck but the order did not go up, which is almost
+          // always a supplier that is not on the supplier list.
+          toast.warning("Quote approved, but no purchase order was raised.", {
+            description:
+              "Check that the supplier exists in Suppliers, then approve again.",
+          });
+        }
+      } else if (status === "rejected") {
+        toast.success("Quote rejected.");
+      }
     } catch (e) {
-      console.error(e);
-      toast.error("Could not update the submission. Please try again.");
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : "Could not update the submission. Please try again.",
+      );
       setDocs(previous);
+    } finally {
+      setDeciding(null);
     }
   };
 
@@ -1487,11 +1253,7 @@ export function ReceivedQuotesPage() {
               </tr>
             )}
             {filtered.map((d) => {
-              const cfg = STATUS_CFG[d.status] ?? {
-                badge: "bg-gray-100 text-gray-700",
-                icon: null,
-                label: String(d.status ?? "Unknown"),
-              };
+              const cfg = statusDef(RECEIVED_QUOTE_STATUS, d.status);
               const isOpen = expanded === d.id;
               return (
                 // The key belongs on the fragment this callback returns, not on
@@ -1540,48 +1302,51 @@ export function ReceivedQuotesPage() {
                       {fmt(d.totalAmount)}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`flex items-center gap-1 w-fit px-2 py-0.5 rounded-full text-xs font-medium ${cfg.badge}`}
-                      >
-                        {cfg.icon} {cfg.label}
-                      </span>
+                      <StatusBadge {...cfg} />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        {/* Had no handler; opens the detail row already below. */}
-                        <button
+                      {/* View, Approve, Reject — nothing else. "Create PO"
+                          used to sit here as a fourth action, so a quote could
+                          be approved with no order behind it, or turned into an
+                          order without ever being approved. Approving is what
+                          raises the order now. */}
+                      <RowActions>
+                        <RowAction
+                          icon={<Eye className="w-3.5 h-3.5" />}
+                          label="View"
+                          tone="primary"
                           onClick={() => setExpanded(isOpen ? null : d.id)}
-                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> View
-                        </button>
-                        {d.docType === "quote" &&
-                          (d.status === "pending_review" ||
-                            d.status === "approved") && (
-                            <button
-                              onClick={() => setCreatePODoc(d)}
-                              className="flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium"
-                            >
-                              <ShoppingCart className="w-3.5 h-3.5" /> Create PO
-                            </button>
-                          )}
+                        />
                         {d.status === "pending_review" && (
-                          <button
-                            onClick={() => updateStatus(d.id, "approved")}
-                            className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-xs font-medium"
-                          >
-                            <CheckCircle className="w-3.5 h-3.5" /> Approve
-                          </button>
+                          <>
+                            <RowAction
+                              icon={<CheckCircle2 className="w-3.5 h-3.5" />}
+                              label="Approve"
+                              tone="positive"
+                              title="Approve this quote and raise the purchase order"
+                              busy={deciding === d.id}
+                              busyLabel="Approving…"
+                              onClick={() => void updateStatus(d.id, "approved")}
+                            />
+                            <RowAction
+                              icon={<XCircle className="w-3.5 h-3.5" />}
+                              label="Reject"
+                              tone="negative"
+                              disabled={deciding === d.id}
+                              onClick={() => void updateStatus(d.id, "rejected")}
+                            />
+                          </>
                         )}
-                        {d.status === "pending_review" && (
-                          <button
-                            onClick={() => updateStatus(d.id, "rejected")}
-                            className="flex items-center gap-1 text-red-500 hover:text-red-700 text-xs font-medium"
-                          >
-                            <XCircle className="w-3.5 h-3.5" /> Reject
-                          </button>
+                        {d.status === "po_created" && (
+                          <RowAction
+                            icon={<ShoppingCart className="w-3.5 h-3.5" />}
+                            label="Purchase Order"
+                            onClick={() =>
+                              navigate("/apps/procurement/purchase-orders")
+                            }
+                          />
                         )}
-                      </div>
+                      </RowActions>
                     </td>
                   </tr>
                   {isOpen && (
@@ -1796,25 +1561,6 @@ export function ReceivedQuotesPage() {
           }}
         />
       )}
-      {createPODoc && (
-        <CreatePOFromQuoteModal
-          doc={createPODoc}
-          onClose={() => setCreatePODoc(null)}
-          onDone={(poRef) => {
-            // The modal has already written the order and the quote's status;
-            // this only brings the table in line with what was stored.
-            setDocs((prev) =>
-              prev.map((x) =>
-                x.id === createPODoc!.id ? { ...x, status: "po_created" } : x,
-              ),
-            );
-            setCreatePODoc(null);
-            toast.success(`Purchase Order ${poRef} created.`, {
-              description: `Raised for ${createPODoc!.vendor} from quote ${createPODoc!.id}.`,
-            });
-          }}
-        />
-      )}
       {compareRef &&
         (() => {
           const qs = submissionGroups[compareRef] ?? [];
@@ -1823,9 +1569,9 @@ export function ReceivedQuotesPage() {
               prRef={compareRef}
               quotes={qs}
               onClose={() => setCompareRef(null)}
-              onCreatePO={(doc) => {
-                setCreatePODoc(doc);
+              onApprove={(doc) => {
                 setCompareRef(null);
+                void updateStatus(doc.id, "approved");
               }}
             />
           );

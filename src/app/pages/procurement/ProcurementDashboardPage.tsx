@@ -121,11 +121,14 @@ export function ProcurementDashboardPage() {
     },
   ];
 
+  // Open means the chain has not finished: still with Procurement, with Finance,
+  // or awaiting delivery. The old filter excluded "Completed" and "Received",
+  // neither of which was ever a purchase order status.
   const openPOs = allPOs
-    .filter((po) => !["Completed", "Received"].includes(po.status))
+    .filter((po) => !["goods_received", "cancelled"].includes(po.status))
     .slice(0, 5)
     .map((po) => ({
-      id: po.prRef || po.id?.slice(0, 8).toUpperCase() || "—",
+      id: po.poRef || po.prRef || "—",
       supplier: po.supplier,
       total: po.totalValue,
       status: po.status?.toLowerCase() || "draft",

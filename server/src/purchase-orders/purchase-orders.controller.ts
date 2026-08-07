@@ -41,6 +41,47 @@ export class PurchaseOrdersController {
         return this.purchaseOrdersService.update(id, body);
     }
 
+    /**
+     * The workflow transitions, each as its own endpoint.
+     *
+     * These used to be `setState` calls on the Purchase Orders page — the order
+     * moved in the browser and nothing was written, so a refresh undid it and
+     * Finance never heard about any of it. Making them endpoints is also what
+     * lets the server refuse an out-of-order move.
+     */
+    @Post(':id/send-to-finance')
+    @RequiresProcess('p_purchase_orders', 'edit')
+    sendToFinance(@Param('id') id: string, @Body() body: any) {
+        return this.purchaseOrdersService.sendToFinance(id, body?.actor);
+    }
+
+    @Post(':id/request-payment-confirmation')
+    @RequiresProcess('p_purchase_orders', 'edit')
+    requestPaymentConfirmation(@Param('id') id: string) {
+        return this.purchaseOrdersService.requestPaymentConfirmation(id);
+    }
+
+    // Service-accessible: the supplier portal confirms the payment landed, which
+    // is the half of this step that does not happen inside BuildOS.
+    @Post(':id/confirm-payment')
+    @ServiceAuth()
+    confirmPayment(@Param('id') id: string) {
+        return this.purchaseOrdersService.confirmPayment(id);
+    }
+
+    /**
+     * Cancels the order rather than deleting it.
+     *
+     * Deleting a purchase order takes its history with it — the quote it was
+     * awarded from, the invoice Finance raised against it, the payment. A
+     * cancellation leaves the trail intact and is what the workflow needs.
+     */
+    @Post(':id/cancel')
+    @RequiresProcess('p_purchase_orders', 'edit')
+    cancel(@Param('id') id: string, @Body() body: any) {
+        return this.purchaseOrdersService.cancel(id, body?.reason);
+    }
+
     @Delete(':id')
     @RequiresProcess('p_purchase_orders', 'delete')
     remove(@Param('id') id: string) {

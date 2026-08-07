@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { POStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface ReportDefinition {
@@ -181,8 +182,12 @@ export class ReportBuilderService {
     ]);
 
     const totalOrderValue = purchaseOrders.reduce((sum, po) => sum + po.totalValue, 0);
-    const pendingOrders = purchaseOrders.filter((po) => po.status === 'draft' || po.status === 'sent');
-    const completedOrders = purchaseOrders.filter((po) => po.status === 'completed');
+    // "Pending" is everything not yet paid for and not abandoned; "completed"
+    // is the end of the chain, which is the goods arriving — not a `completed`
+    // status, which no longer exists because no step ever set it.
+    const OPEN: POStatus[] = ['draft', 'sent_to_finance', 'finance_accepted', 'finance_declined'];
+    const pendingOrders = purchaseOrders.filter((po) => OPEN.includes(po.status));
+    const completedOrders = purchaseOrders.filter((po) => po.status === 'goods_received');
 
     return {
       summary: {

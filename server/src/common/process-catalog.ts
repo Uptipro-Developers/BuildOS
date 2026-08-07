@@ -98,7 +98,7 @@ export const DEFAULT_PROCESS_CATALOG: ProcessCatalogItem[] = [
     define('p_goods_receipt', 'Goods Receipt', 'procurement',
         'Recording deliveries and confirming goods against the purchase order',
         // A receipt is evidence of delivery: corrected if wrong, never deleted.
-        ['view', 'create', 'edit'], 'purchase-orders', '/apps/procurement/goods-receipt'),
+        ['view', 'create', 'edit'], 'goods-receipts', '/apps/procurement/goods-receipt'),
     define('p_suppliers', 'Suppliers', 'procurement',
         'Supplier records and the materials they supply',
         MANAGED, 'suppliers', '/apps/procurement/suppliers'),
@@ -136,7 +136,10 @@ export const DEFAULT_PROCESS_CATALOG: ProcessCatalogItem[] = [
         ['view', 'create', 'edit', 'approve'], 'claims', '/apps/finance/claims'),
     define('p_purchase_invoices', 'Purchase Invoices', 'finance',
         'Supplier invoices matched against purchase orders',
-        FULL, 'procurement-requests', '/apps/finance/purchase-invoice'),
+        // No delete: an invoice is the record that a purchase order reached
+        // Finance, and a paid one is the record that money left. Cancellation
+        // replaces it, which keeps the trail the workflow is built on.
+        ['view', 'create', 'edit', 'approve'], 'procurement-requests', '/apps/finance/purchase-invoice'),
     define('p_chart_of_accounts', 'Chart of Accounts', 'finance',
         'Ledger accounts and their parent hierarchy',
         MANAGED, 'finance-extras', '/apps/finance/chart-of-accounts'),

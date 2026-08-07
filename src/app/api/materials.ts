@@ -37,6 +37,8 @@ export interface MaterialRequest {
     /** When the materials are needed — shown as Due date. ISO string. */
     neededBy?: string;
     approvedAt?: string; notes?: string;
+    /** Backlink to the Purchase Request auto-raised when this request is approved. */
+    prRef?: string;
 }
 export interface MaterialReturn {
     id: string; reference: string; materialName: string; unit: string; qty: number;

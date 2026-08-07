@@ -9,5 +9,8 @@ import { AdminExtrasModule } from '../admin-extras/admin-extras.module';
     imports: [PrismaModule, IntegrationsModule, AdminExtrasModule],
     controllers: [ProcurementRequestsController],
     providers: [ProcurementRequestsService],
+    // Exported so MaterialsModule can auto-raise a Purchase Request when a
+    // Material Request is approved.
+    exports: [ProcurementRequestsService],
 })
 export class ProcurementRequestsModule { }
