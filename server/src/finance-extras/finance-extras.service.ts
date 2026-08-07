@@ -59,14 +59,15 @@ export class FinanceExtrasService {
         // which ignored that configuration entirely and produced references like
         // JRN-1754212800000 that matched no convention and could not be cited.
         const { reference } = await this.numbering.allocate('JournalEntry');
-        return this.prisma.journalEntry.create({
-            data: {
-                ...rest,
-                reference,
-                lines: lines ? { create: lines } : undefined,
-            },
-            include: { lines: true },
-        });
+        return [...new Set(lines.map((l: any) => l.accountCode))] as string[];
+        // return this.prisma.journalEntry.create({
+        //     data: {
+        //         ...rest,
+        //         reference,
+        //         lines: lines ? { create: lines } : undefined,
+        //     },
+        //     include: { lines: true },
+        // });
     }
 
     /**
