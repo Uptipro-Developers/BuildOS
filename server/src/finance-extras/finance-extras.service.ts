@@ -82,20 +82,26 @@ export class FinanceExtrasService {
             const allJournal = await this.prisma.journalLine.findMany({
                 where: { accountCode: code },
             })
+            const total = allJournal.reduce(
+                (acc, item) => {
+                    acc.totalDebit += item.debit;
+                    acc.totalCredit += item.credit;
+                    return acc;
+                },
+                { totalDebit: 0, totalCredit: 0 }
+            );
+            console.log('TESTING TOTAL & ACCOUNT', allJournal, account, total)
 
 
-            console.log('TESTING TOTAL & ACCOUNT', allJournal, account)
+            const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
+            const balance = isCreditNormal ? total.totalCredit - total.totalDebit : total.totalDebit - total.totalCredit;
+            console.log('TESTING Balance', balance)
+
 
         })
 
-        // if (!account) {
-        //     throw new BadRequestException(`No chart of accounts entry found for code ${code}.`);
-        // }
-
         // const debitTotal = totals._sum.debit ?? 0;
         // const creditTotal = totals._sum.credit ?? 0;
-        // const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
-        // const balance = isCreditNormal ? creditTotal - debitTotal : debitTotal - creditTotal;
 
         // await this.prisma.chartAccount.update({
         //     where: { code },
