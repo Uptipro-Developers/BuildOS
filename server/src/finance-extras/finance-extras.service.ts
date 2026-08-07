@@ -52,6 +52,7 @@ export class FinanceExtrasService {
             include: { lines: true },
         });
     }
+    private static readonly CREDIT_NORMAL_TYPES = new Set(['Liabilities', 'Equity', 'Income']);
     async createJournal(data: any) {
         const { lines, reference: _ignored, ...rest } = data;
         // References come from the sequence an admin configured in Settings →
@@ -59,15 +60,47 @@ export class FinanceExtrasService {
         // which ignored that configuration entirely and produced references like
         // JRN-1754212800000 that matched no convention and could not be cited.
         const { reference } = await this.numbering.allocate('JournalEntry');
-        return [...new Set(lines.map((l: any) => l.accountCode))] as string[];
-        // return this.prisma.journalEntry.create({
-        //     data: {
-        //         ...rest,
-        //         reference,
-        //         lines: lines ? { create: lines } : undefined,
-        //     },
-        //     include: { lines: true },
-        // });
+
+        const journal = this.prisma.journalEntry.create({
+            data: {
+                ...rest,
+                reference,
+                lines: lines ? { create: lines } : undefined,
+            },
+            include: { lines: true },
+        });
+
+        // Gets all the selected codes
+        const codes = [...new Set(lines.map((l: any) => l.accountCode))] as string[];
+
+        // Looping through the codes to run the aggregation
+        for (const code of codes) {
+
+            const [totals, account] = await Promise.all([
+                this.prisma.journalLine.aggregate({
+                    where: { accountCode: code },
+                    _sum: { debit: true, credit: true },
+                }),
+                this.prisma.chartAccount.findUnique({ where: { code }, select: { type: true } }),
+            ]);
+
+            if (!account) {
+                throw new BadRequestException(`No chart of accounts entry found for code ${code}.`);
+            }
+
+            const debitTotal = totals._sum.debit ?? 0;
+            const creditTotal = totals._sum.credit ?? 0;
+            const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
+            const balance = isCreditNormal ? creditTotal - debitTotal : debitTotal - creditTotal;
+
+            await this.prisma.chartAccount.update({
+                where: { code },
+                data: { balance },
+            });
+        }
+
+        return journal
+
     }
 
     /**
