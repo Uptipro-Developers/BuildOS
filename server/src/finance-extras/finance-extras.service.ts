@@ -61,52 +61,55 @@ export class FinanceExtrasService {
         // JRN-1754212800000 that matched no convention and could not be cited.
         const { reference } = await this.numbering.allocate('JournalEntry');
 
-        // const journal = this.prisma.journalEntry.create({
-        //     data: {
-        //         ...rest,
-        //         reference,
-        //         lines: lines ? { create: lines } : undefined,
-        //     },
-        //     include: { lines: true },
-        // });
-
         // Gets all the selected codes
         const codes = [...new Set(lines.map((l: any) => l.accountCode))] as string[];
-        console.log('TESTING CODES :', codes)
-        // Looping through the codes to run the aggregation
 
-        codes.map(async (code) => {
-            console.log('TESTING LOOP', code)
+        return this.prisma.$transaction(async (tx) => {
 
-            const account = await this.prisma.chartAccount.findUnique({ where: { code }, select: { type: true } });
-            const allJournal = await this.prisma.journalLine.findMany({
-                where: { accountCode: code },
-            })
-            const total = allJournal.reduce(
-                (acc, item) => {
-                    acc.totalDebit += item.debit;
-                    acc.totalCredit += item.credit;
-                    return acc;
+            const journal = await tx.journalEntry.create({
+                data: {
+                    ...rest,
+                    reference,
+                    lines: { create: lines },
                 },
-                { totalDebit: 0, totalCredit: 0 }
-            );
-            console.log('TESTING TOTAL & ACCOUNT', total)
-
-
-            const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
-            const balance = isCreditNormal ? total.totalCredit - total.totalDebit : total.totalDebit - total.totalCredit;
-            console.log('TESTING Balance', balance, account.type)
-
-            await this.prisma.chartAccount.update({
-                where: { code },
-                data: { balance },
+                include: { lines: true },
             });
 
+            console.log('TEST Journal Inserted')
+
+            await Promise.all(
+
+                codes.map(async (code) => {
+                    const account = await tx.chartAccount.findUnique({ where: { code }, select: { type: true } });
+                    const allJournal = await tx.journalLine.findMany({
+                        where: { accountCode: code },
+                    })
+
+                    const total = allJournal.reduce(
+                        (acc, item) => {
+                            acc.totalDebit += item.debit;
+                            acc.totalCredit += item.credit;
+                            return acc;
+                        },
+                        { totalDebit: 0, totalCredit: 0 }
+                    );
+
+                    console.log('TEST', code, total)
+
+
+                    const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
+                    const balance = isCreditNormal ? total.totalCredit - total.totalDebit : total.totalDebit - total.totalCredit;
+                    console.log('TEST Balance', balance, account.type)
+
+                    await tx.chartAccount.update({
+                        where: { code },
+                        data: { balance },
+                    });
+
+                })
+            );
+            return journal;
         })
-
-
-        return {}
-
     }
 
     /**
