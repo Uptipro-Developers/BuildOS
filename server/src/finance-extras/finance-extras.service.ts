@@ -95,18 +95,16 @@ export class FinanceExtrasService {
 
             const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
             const balance = isCreditNormal ? total.totalCredit - total.totalDebit : total.totalDebit - total.totalCredit;
-            console.log('TESTING Balance', balance)
+            console.log('TESTING Balance', balance, account.type)
 
+            await this.prisma.chartAccount.update({
+                where: { code },
+                data: { balance },
+            });
 
         })
 
-        // const debitTotal = totals._sum.debit ?? 0;
-        // const creditTotal = totals._sum.credit ?? 0;
 
-        // await this.prisma.chartAccount.update({
-        //     where: { code },
-        //     data: { balance },
-        // });
         return {}
 
     }
