@@ -2,7 +2,7 @@
   "info": {
     "name": "BuildOS API",
     "_postman_id": "buildos-api-collection",
-    "description": "Complete API collection for BuildOS – Construction Management Platform. Base URL: http://localhost:3001/api",
+    "description": "Complete API collection for BuildOS – Construction Management Platform. Base URL: https://buildos-production-e328.up.railway.app/api",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -12,7 +12,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3001/api",
+      "value": "https://buildos-production-e328.up.railway.app/api",
       "type": "string"
     },
     { "key": "token", "value": "", "type": "string" }

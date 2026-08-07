@@ -61,14 +61,14 @@ export class FinanceExtrasService {
         // JRN-1754212800000 that matched no convention and could not be cited.
         const { reference } = await this.numbering.allocate('JournalEntry');
 
-        const journal = this.prisma.journalEntry.create({
-            data: {
-                ...rest,
-                reference,
-                lines: lines ? { create: lines } : undefined,
-            },
-            include: { lines: true },
-        });
+        // const journal = this.prisma.journalEntry.create({
+        //     data: {
+        //         ...rest,
+        //         reference,
+        //         lines: lines ? { create: lines } : undefined,
+        //     },
+        //     include: { lines: true },
+        // });
 
         // Gets all the selected codes
         const codes = [...new Set(lines.map((l: any) => l.accountCode))] as string[];
@@ -78,15 +78,13 @@ export class FinanceExtrasService {
 
             console.log('TESTING LOOP')
 
-            const [totals, account] = await Promise.all([
-                this.prisma.journalLine.aggregate({
-                    where: { accountCode: code },
-                    _sum: { debit: true, credit: true },
-                }),
-                this.prisma.chartAccount.findUnique({ where: { code }, select: { type: true } }),
-            ]);
+            const account = this.prisma.chartAccount.findUnique({ where: { code }, select: { type: true } });
+            const allJournal = this.prisma.journalLine.findMany({
+                where: { accountCode: code },
+            })
 
-            console.log('TESTING TOTAL & ACCOUNT', totals, account)
+
+            console.log('TESTING TOTAL & ACCOUNT', allJournal, account)
 
 
 
@@ -105,7 +103,7 @@ export class FinanceExtrasService {
             // });
         }
 
-        return journal
+        return true
 
     }
 

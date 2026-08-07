@@ -34,24 +34,24 @@
 BuildOS is an enterprise construction ERP: a multi-tenant, multi-module business suite (comparable in shape to Google Workspace or Zoho, where each themed module is its own "app" inside one product) covering Construction/Project Management, Finance, Procurement, HR, Employee Self-Service (ESS), Storefront, and Admin.
 
 - **Tenancy:** company-scoped. The first user to sign up becomes that company's Admin/Owner; all other data hangs off a company through its owning entities.
-- **Roles referenced in code and UI:** Admin (owner), Construction Manager, Accountant, Store Manager, HR Manager, Employee — plus a separate, generic app-assignment claim (`assignedApps`) used for module-level gating. *(Not re-verified role-by-role in this revision; carried over from the prior pass.)*
+- **Roles referenced in code and UI:** Admin (owner), Construction Manager, Accountant, Store Manager, HR Manager, Employee — plus a separate, generic app-assignment claim (`assignedApps`) used for module-level gating. _(Not re-verified role-by-role in this revision; carried over from the prior pass.)_
 - **Scale, re-verified by direct count in this revision:**
 
-  | Metric | Prior doc claimed | Actual (re-counted) |
-  |---|---|---|
-  | Prisma models | 105 | **105** ✓ |
-  | Backend feature modules (imported in `app.module.ts`) | 63 | **66** |
-  | Controllers | 67 | **67** ✓ |
-  | REST endpoint handlers (`@Get/@Post/@Put/@Patch/@Delete`) | ~585 | **585** ✓ (exact) |
-  | Frontend page components (8 module folders) | 181 | **180** (admin folder has 22, not 23) |
-  | Frontend API-client files (`src/app/api/`) | 59 | **60** |
-  | Migrations | 16 (latest `add_org_unit`) | **17** (latest `20260728130000_reconcile_employee_role_column`) |
+  | Metric                                                    | Prior doc claimed          | Actual (re-counted)                                             |
+  | --------------------------------------------------------- | -------------------------- | --------------------------------------------------------------- |
+  | Prisma models                                             | 105                        | **105** ✓                                                       |
+  | Backend feature modules (imported in `app.module.ts`)     | 63                         | **66**                                                          |
+  | Controllers                                               | 67                         | **67** ✓                                                        |
+  | REST endpoint handlers (`@Get/@Post/@Put/@Patch/@Delete`) | ~585                       | **585** ✓ (exact)                                               |
+  | Frontend page components (8 module folders)               | 181                        | **180** (admin folder has 22, not 23)                           |
+  | Frontend API-client files (`src/app/api/`)                | 59                         | **60**                                                          |
+  | Migrations                                                | 16 (latest `add_org_unit`) | **17** (latest `20260728130000_reconcile_employee_role_column`) |
 
   Two frontend pages sit directly under `src/app/pages/` outside any of the 8 module folders and aren't counted in the 180 above: `AppLauncherPage.tsx` (the post-login app-switcher landing page) and `UnauthorizedPage.tsx`.
 
 The single most important thing in this document is **§6 (Authentication & Authorization)**: the frontend's route-protection layer is unused, and most backend routes carry no role/permission check beyond "is logged in." Read that section before treating any part of the system as access-controlled — but also read the correction note at the end of it: the prior revision of this document got the mechanics of the backend's role-guard wrong in a way that matters if you're about to add coverage to a route.
 
-The second most important thing is **§11**: this repository contains many internally-generated "completion" and "audit" reports describing an earlier, in-progress state of the codebase, and they are no longer accurate. That same risk applies recursively — the prior version of *this* document was itself about three weeks and roughly a dozen commits stale by the time anyone read it (see the note at the top of §11). Treat any handover document, including this one, as accurate only as of its stated commit, and check `git log -1` before relying on anything time-sensitive in it.
+The second most important thing is **§11**: this repository contains many internally-generated "completion" and "audit" reports describing an earlier, in-progress state of the codebase, and they are no longer accurate. That same risk applies recursively — the prior version of _this_ document was itself about three weeks and roughly a dozen commits stale by the time anyone read it (see the note at the top of §11). Treat any handover document, including this one, as accurate only as of its stated commit, and check `git log -1` before relying on anything time-sensitive in it.
 
 ---
 
@@ -100,16 +100,16 @@ The repository holds two independently-versioned applications side by side (sepa
 
 ## 3. Tech Stack
 
-| Layer | Choice |
-|---|---|
-| Frontend | React 18.3, TypeScript, React Router 7 (data mode), Tailwind CSS 4, Radix UI + shadcn-style components, MUI (partial, alongside Radix), Vite 6, Zustand, Recharts |
-| Backend | NestJS 10, TypeScript, class-validator / class-transformer, Passport-JWT, Helmet |
-| Database | PostgreSQL via Prisma ORM 5.22 — 105 models, 17 migrations in this snapshot |
-| Cache / Queue | Redis (ioredis) — optional; BullMQ for background email delivery; everything degrades gracefully if Redis is unset |
-| Rate limiting | `@nestjs/throttler`; Redis-backed storage when configured, in-memory otherwise |
-| Email | Resend SDK, via a queued (`MailQueueService`) or direct (`EmailService.sendNow`) send path depending on Redis availability |
-| Testing (real) | Jest — 4 backend unit specs; Playwright — 5 frontend e2e specs (see §11.3 for the discrepancy with the repo's own test-coverage claims) |
-| Hosting | Backend → Railway (Dockerfile-based); Frontend → Vercel |
+| Layer          | Choice                                                                                                                                                            |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend       | React 18.3, TypeScript, React Router 7 (data mode), Tailwind CSS 4, Radix UI + shadcn-style components, MUI (partial, alongside Radix), Vite 6, Zustand, Recharts |
+| Backend        | NestJS 10, TypeScript, class-validator / class-transformer, Passport-JWT, Helmet                                                                                  |
+| Database       | PostgreSQL via Prisma ORM 5.22 — 105 models, 17 migrations in this snapshot                                                                                       |
+| Cache / Queue  | Redis (ioredis) — optional; BullMQ for background email delivery; everything degrades gracefully if Redis is unset                                                |
+| Rate limiting  | `@nestjs/throttler`; Redis-backed storage when configured, in-memory otherwise                                                                                    |
+| Email          | Resend SDK, via a queued (`MailQueueService`) or direct (`EmailService.sendNow`) send path depending on Redis availability                                        |
+| Testing (real) | Jest — 4 backend unit specs; Playwright — 5 frontend e2e specs (see §11.3 for the discrepancy with the repo's own test-coverage claims)                           |
+| Hosting        | Backend → Railway (Dockerfile-based); Frontend → Vercel                                                                                                           |
 
 ---
 
@@ -131,7 +131,7 @@ The repository holds two independently-versioned applications side by side (sepa
 
 - Global prefix `/api`; Helmet; 10 MB JSON/urlencoded body limit; global `ValidationPipe({ transform: true, whitelist: true })`.
 - A compatibility middleware silently rewrites legacy path prefixes (`/api/admin-extras` → `/api/admin`, `/api/finance-extras` → `/api`, `/api/hr-extras` → `/api`, and their non-`/api` equivalents) — evidence of an in-flight endpoint-renaming migration (see §11.9).
-- **CORS is a hybrid, not purely hardcoded** (a correction from the prior revision, which described it as fully hardcoded): the primary allowed origin is `process.env.FRONTEND_URL` (falling back to `http://localhost:5173`), so pointing the backend at a new frontend deployment is an env-var change, not a code change. On top of that, two literal origins (`https://build-os-delta.vercel.app`, `https://buildos-dev-suite.vercel.app`) and two regex patterns (`/^https:\/\/buildos[-a-z0-9]*\.vercel\.app$/i`, `/^https:\/\/build-os[-a-z0-9]*\.vercel\.app$/i`, matching any Vercel preview URL) are hardcoded in source. Adding a *non-Vercel, non-FRONTEND_URL* origin still requires a code change and redeploy.
+- **CORS is a hybrid, not purely hardcoded** (a correction from the prior revision, which described it as fully hardcoded): the primary allowed origin is `process.env.FRONTEND_URL` (falling back to `http://localhost:5173`), so pointing the backend at a new frontend deployment is an env-var change, not a code change. On top of that, two literal origins (`https://build-os-delta.vercel.app`, `https://buildos-dev-suite.vercel.app`) and two regex patterns (`/^https:\/\/buildos[-a-z0-9]*\.vercel\.app$/i`, `/^https:\/\/build-os[-a-z0-9]*\.vercel\.app$/i`, matching any Vercel preview URL) are hardcoded in source. Adding a _non-Vercel, non-FRONTEND_URL_ origin still requires a code change and redeploy.
 
 ### 4.2 Frontend — multi-app shell over one React Router tree
 
@@ -139,7 +139,7 @@ A single Vite/React app renders eight themed "sub-apps" (Construction, Finance, 
 
 - **RootLayout** — outer shell, no logic beyond an `<Outlet />`.
 - **AuthLayout** — wraps signup/login/verify pages.
-- **AppLayout** — wraps every authenticated page. Re-verified in this revision: it does perform a real client-side session check (calls `hasValidAuthSession()`/`ensureValidAccessToken()` on mount, on a 60-second interval, and on `visibilitychange`; redirects to `/auth/login` and clears the session if invalid; gates rendering with `if (!ready) return null` until that check resolves). It also nests context providers — `ChangelogProvider → HRConfigProvider → ResourceProvider → TaskProvider → RolesProvider → NumberingProvider` — around the `<Outlet />`. *(This corrects the prior revision, which said AppLayout "performs no authentication check at all" — it does check session validity; what it does **not** do is check role or permission, which is the actual gap. See §6.1.)*
+- **AppLayout** — wraps every authenticated page. Re-verified in this revision: it does perform a real client-side session check (calls `hasValidAuthSession()`/`ensureValidAccessToken()` on mount, on a 60-second interval, and on `visibilitychange`; redirects to `/auth/login` and clears the session if invalid; gates rendering with `if (!ready) return null` until that check resolves). It also nests context providers — `ChangelogProvider → HRConfigProvider → ResourceProvider → TaskProvider → RolesProvider → NumberingProvider` — around the `<Outlet />`. _(This corrects the prior revision, which said AppLayout "performs no authentication check at all" — it does check session validity; what it does **not** do is check role or permission, which is the actual gap. See §6.1.)_
 - Each module has its own themed layout (e.g. `ConstructionLayout`) and color: Construction=blue, Finance=green, Procurement=purple, HR=orange, ESS=indigo.
 
 ### 4.3 Multi-tenancy model
@@ -152,17 +152,17 @@ Companies register as the primary organizational unit; the first user becomes th
 
 `server/prisma/schema.prisma` — PostgreSQL, **105 models** (re-counted, exact), **17 migrations** in this snapshot (latest: `20260728130000_reconcile_employee_role_column`). The models map roughly one-for-one onto the module list in §4.1.
 
-| Domain Area | Representative Models (count) |
-|---|---|
-| Company / Identity / Access | Project, Department, User, UserRole, Permission, AppRole, CompanyProfile, Director, OrgUnit, SystemSetting, BankName, UserPasswordHistory (12) |
-| HR & Workforce | Employee, JobRole, WorkforceAllocation, HumanResource, SalaryBand, EmployeeBank, AttendanceRecord, PayrollPeriod, PayrollRun, PayrollEntry, Payslip, Appraisal, LeaveType, LeaveRequest, ClaimType, Claim, Holiday (17) |
-| Finance & Accounting | Expense, Income, Budget, Payment, Transaction, JournalEntry, JournalLine, ChartAccount, BankAccount, TaxConfig, FundingAllocation, FundingRelease, Disbursement (13) |
-| Procurement & Materials | Supplier, SupplierMaterial, PurchaseOrder, POItem, Material, Store, StoreItem, StockMovement, StockTransfer, MaterialRequest, MaterialReturn, PurchaseRequest, PurchaseInvoice, SentRFQ, ReceivedQuote, MaterialResource, EquipmentResource, Equipment, Vendor, Contractor (20) |
+| Domain Area                     | Representative Models (count)                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Company / Identity / Access     | Project, Department, User, UserRole, Permission, AppRole, CompanyProfile, Director, OrgUnit, SystemSetting, BankName, UserPasswordHistory (12)                                                                                                                                                                                                                                                              |
+| HR & Workforce                  | Employee, JobRole, WorkforceAllocation, HumanResource, SalaryBand, EmployeeBank, AttendanceRecord, PayrollPeriod, PayrollRun, PayrollEntry, Payslip, Appraisal, LeaveType, LeaveRequest, ClaimType, Claim, Holiday (17)                                                                                                                                                                                     |
+| Finance & Accounting            | Expense, Income, Budget, Payment, Transaction, JournalEntry, JournalLine, ChartAccount, BankAccount, TaxConfig, FundingAllocation, FundingRelease, Disbursement (13)                                                                                                                                                                                                                                        |
+| Procurement & Materials         | Supplier, SupplierMaterial, PurchaseOrder, POItem, Material, Store, StoreItem, StockMovement, StockTransfer, MaterialRequest, MaterialReturn, PurchaseRequest, PurchaseInvoice, SentRFQ, ReceivedQuote, MaterialResource, EquipmentResource, Equipment, Vendor, Contractor (20)                                                                                                                             |
 | Construction / Project Delivery | ProjectDocument, ConstructionApproval, Timeline, ProjectPhase, ProjectSetup, Cluster, ConstructionIssue, ChangeRequest, ProjectDelay, Stakeholder, VisitorLog, QualityNcr, HseRecord, CommunicationLog, DailyReport, DocumentFolder, DocumentFile, EarnedValueRecord, ConstructionBaseline, ConstructionCalendar, ConstructionSetting, ConstructionTask, ResourcePlan, ResourceAllocation, Task, Issue (26) |
-| Approval Workflow Engine | ApprovalWorkflow, ApprovalNode, ApprovalRule, WorkflowInstance, ApprovalRequest (5) |
-| Notifications & Integrations | Notification, NotificationRule, NotificationPreference, NotificationTemplate, Webhook, WebhookDelivery (6) |
-| Reporting & Audit | ReportDefinition, ReportRun, AuditLog, ActivityRecord (4) |
-| Compliance & Uploaded Documents | ComplianceDocumentType, DocumentUpload (2) |
+| Approval Workflow Engine        | ApprovalWorkflow, ApprovalNode, ApprovalRule, WorkflowInstance, ApprovalRequest (5)                                                                                                                                                                                                                                                                                                                         |
+| Notifications & Integrations    | Notification, NotificationRule, NotificationPreference, NotificationTemplate, Webhook, WebhookDelivery (6)                                                                                                                                                                                                                                                                                                  |
+| Reporting & Audit               | ReportDefinition, ReportRun, AuditLog, ActivityRecord (4)                                                                                                                                                                                                                                                                                                                                                   |
+| Compliance & Uploaded Documents | ComplianceDocumentType, DocumentUpload (2)                                                                                                                                                                                                                                                                                                                                                                  |
 
 > **New since the prior handover:** `Employee` now has a nullable, unique `userId` FK to `User` (migration `add_employee_user_link`), so an onboarded employee can be linked to a real login account. Employee-creation reuses the existing Admin "invite user" pipeline (`AdminExtrasService.inviteUser`) to create that linked account and send the welcome email — see §8.3.
 >
@@ -212,21 +212,23 @@ This is the highest-priority section in the document. The underlying conclusion 
 ### 6.3 Backend authorization: two guards, not one (corrected)
 
 `JwtAuthGuard` (`server/src/auth/jwt-auth.guard.ts`) is registered globally as an `APP_GUARD`, alongside `ThrottlerGuard`:
+
 ```ts
 { provide: APP_GUARD, useClass: ThrottlerGuard },
 { provide: APP_GUARD, useClass: JwtAuthGuard },
 ```
+
 Every route requires a valid JWT unless marked `@Public()`.
 
-> **Correction — this is the most important fix in this revision.** The prior version of this document claimed that role/permission enforcement happens entirely inside `JwtAuthGuard` via `Reflector` metadata, and that a second class, `RolesGuard` (`server/src/auth/roles.guard.ts`), "is not registered globally and was not found wired via `@UseGuards` anywhere in the controllers — it appears to be dead code." **That's factually wrong.** `RolesGuard` is actively applied via `@UseGuards(RolesGuard)` on 13 controllers — the *same* 13 that carry `@Roles`/`@Permissions`/`@RequireApp` decorators (`tasks`, `resource-allocation`, `workflow`, `audit-log`, `payroll` (hr-extras), `leave-requests`, `webhook`, `admin-public`, `approvals-public`, `system-config`, `admin-extras`, `timeline` (construction-extras), `notification`). It is `RolesGuard`, applied per-controller, that actually reads and enforces those decorators — not a Reflector check baked into `JwtAuthGuard` itself. If you're adding role coverage to one of the 54 currently-open controllers listed in §7.2, the pattern to copy is: add `@UseGuards(RolesGuard)` to the controller class *and* `@Roles(...)`/`@Permissions(...)` to the handler — one without the other does nothing.
+> **Correction — this is the most important fix in this revision.** The prior version of this document claimed that role/permission enforcement happens entirely inside `JwtAuthGuard` via `Reflector` metadata, and that a second class, `RolesGuard` (`server/src/auth/roles.guard.ts`), "is not registered globally and was not found wired via `@UseGuards` anywhere in the controllers — it appears to be dead code." **That's factually wrong.** `RolesGuard` is actively applied via `@UseGuards(RolesGuard)` on 13 controllers — the _same_ 13 that carry `@Roles`/`@Permissions`/`@RequireApp` decorators (`tasks`, `resource-allocation`, `workflow`, `audit-log`, `payroll` (hr-extras), `leave-requests`, `webhook`, `admin-public`, `approvals-public`, `system-config`, `admin-extras`, `timeline` (construction-extras), `notification`). It is `RolesGuard`, applied per-controller, that actually reads and enforces those decorators — not a Reflector check baked into `JwtAuthGuard` itself. If you're adding role coverage to one of the 54 currently-open controllers listed in §7.2, the pattern to copy is: add `@UseGuards(RolesGuard)` to the controller class _and_ `@Roles(...)`/`@Permissions(...)` to the handler — one without the other does nothing.
 
 Four decorators, read via `Reflector` metadata by whichever guard is actually applied, add further checks only where a controller/handler explicitly carries them:
 
-| Decorator | Effect |
-|---|---|
-| `@Public()` | Skips authentication entirely for this route. |
-| `@Roles('admin', ...)` | Payload's role/roles claim must intersect with the listed roles. |
-| `@Permissions('perm', ...)` | Payload's permissions claim must be a superset of the listed permissions. |
+| Decorator                     | Effect                                                                                                                                                                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@Public()`                   | Skips authentication entirely for this route.                                                                                                                                                                                                                   |
+| `@Roles('admin', ...)`        | Payload's role/roles claim must intersect with the listed roles.                                                                                                                                                                                                |
+| `@Permissions('perm', ...)`   | Payload's permissions claim must be a superset of the listed permissions.                                                                                                                                                                                       |
 | `@RequireApp('finance', ...)` | Payload's `assignedApps` claim must intersect with the listed apps. Bypassed entirely for role admin/super-admin/superadmin, and bypassed for any token issued before the `assignedApps` claim existed (explicit backward-compatibility carve-out in the code). |
 
 **Verified coverage (re-counted, unchanged from the prior revision's headline number, exact this time):** of 67 controllers, only 13 apply any of `@Roles` / `@Permissions` / `@RequireApp` at all — the same 13 listed above. The remaining 54 controllers require only a valid JWT — any authenticated user of any role can call every handler in them. The full controller-by-controller table is in §7.2.
@@ -241,84 +243,84 @@ Four decorators, read via `Reflector` metadata by whichever guard is actually ap
 
 ### 7.1 Frontend ⇄ backend contract
 
-- Base URL: `VITE_API_URL`, defaulting to `http://localhost:3001/api`.
+- Base URL: `VITE_API_URL`, defaulting to `https://buildos-production-e328.up.railway.app/api`.
 - `src/app/api/client.ts` centralizes fetch, bearer-token injection, one-retry-on-401 refresh, and error-message extraction. All 60 per-resource files in `src/app/api/` sit on top of it — new resources should follow the same thin-wrapper pattern.
 - Response envelope is inconsistent across controllers: some return `{ success, data }`, some return `{ data, total }` (paginated), some return the raw payload or array directly. The client ships `unwrapApiResult()` and `toApiArray()` specifically to paper over this — use them for any new API file rather than assuming a shape.
 - There is no generated OpenAPI/Swagger spec (`@nestjs/swagger` is not a dependency, re-confirmed). `BuildOS.postman_collection.json` is the closest thing to living API documentation.
 
 ### 7.2 Controller-by-controller RBAC decorator coverage (re-verified, full list)
 
-"Yes" means the controller has `@UseGuards(RolesGuard)` *and* applies `@Roles`/`@Permissions`/`@RequireApp` to at least one handler (not necessarily all of them — check the individual handler before assuming full coverage). "No" means only `JwtAuthGuard`'s baseline authentication applies; any authenticated user can call every handler.
+"Yes" means the controller has `@UseGuards(RolesGuard)` _and_ applies `@Roles`/`@Permissions`/`@RequireApp` to at least one handler (not necessarily all of them — check the individual handler before assuming full coverage). "No" means only `JwtAuthGuard`'s baseline authentication applies; any authenticated user can call every handler.
 
-| Controller (module folder) | Has `@Roles`/`@Permissions`/`@RequireApp`? |
-|---|---|
-| activity-history | No |
-| admin-extras | **Yes** |
-| admin-extras (public) | **Yes** |
-| approvals-public | **Yes** |
-| system-config | **Yes** |
-| app-catalog | No |
-| audit-log | **Yes** |
-| auth | No (self-service endpoints) |
-| budgets | No |
-| change-requests | No |
-| claim-types | No |
-| claims | No |
-| clusters | No |
-| communications | No |
-| compliance-documents | No |
-| construction-baselines | No |
-| construction-calendars | No |
-| construction-extras | No |
-| construction-extras/timeline | **Yes** |
-| construction-issues | No |
-| construction-settings | No |
-| construction-tasks | No |
-| contractors | No |
-| daily-reports | No |
-| delays | No |
-| departments | No |
-| disbursements | No |
-| document-files | No |
-| document-folders | No |
-| earned-value-records | No |
-| employees | No |
-| equipment-resources | No |
-| equipment | No |
-| expenses | No |
-| finance-extras | No |
-| funding-allocations | No |
-| funding-releases | No |
-| health | No |
-| hr-extras | No |
-| hr-extras/payroll | **Yes** |
-| hse-records | No |
-| human-resources | No |
-| income | No |
-| integrations/webhook | **Yes** |
-| job-roles | No |
-| leave-requests | **Yes** |
-| leave-types | No |
-| material-resources | No |
-| materials | No |
-| notifications | **Yes** |
-| org-units | No |
-| payments | No |
-| procurement-requests | No |
-| project-setup | No |
-| projects | No |
-| purchase-orders | No |
-| quality-ncrs | No |
-| reports | No |
-| resource-planning/resource-allocation | **Yes** |
-| resource-planning | No |
-| stakeholders | No |
-| suppliers | No |
-| tasks | **Yes** |
-| vendors | No |
-| visitor-logs | No |
-| workflows/workflow | **Yes** |
-| workforce-allocation | No |
+| Controller (module folder)            | Has `@Roles`/`@Permissions`/`@RequireApp`? |
+| ------------------------------------- | ------------------------------------------ |
+| activity-history                      | No                                         |
+| admin-extras                          | **Yes**                                    |
+| admin-extras (public)                 | **Yes**                                    |
+| approvals-public                      | **Yes**                                    |
+| system-config                         | **Yes**                                    |
+| app-catalog                           | No                                         |
+| audit-log                             | **Yes**                                    |
+| auth                                  | No (self-service endpoints)                |
+| budgets                               | No                                         |
+| change-requests                       | No                                         |
+| claim-types                           | No                                         |
+| claims                                | No                                         |
+| clusters                              | No                                         |
+| communications                        | No                                         |
+| compliance-documents                  | No                                         |
+| construction-baselines                | No                                         |
+| construction-calendars                | No                                         |
+| construction-extras                   | No                                         |
+| construction-extras/timeline          | **Yes**                                    |
+| construction-issues                   | No                                         |
+| construction-settings                 | No                                         |
+| construction-tasks                    | No                                         |
+| contractors                           | No                                         |
+| daily-reports                         | No                                         |
+| delays                                | No                                         |
+| departments                           | No                                         |
+| disbursements                         | No                                         |
+| document-files                        | No                                         |
+| document-folders                      | No                                         |
+| earned-value-records                  | No                                         |
+| employees                             | No                                         |
+| equipment-resources                   | No                                         |
+| equipment                             | No                                         |
+| expenses                              | No                                         |
+| finance-extras                        | No                                         |
+| funding-allocations                   | No                                         |
+| funding-releases                      | No                                         |
+| health                                | No                                         |
+| hr-extras                             | No                                         |
+| hr-extras/payroll                     | **Yes**                                    |
+| hse-records                           | No                                         |
+| human-resources                       | No                                         |
+| income                                | No                                         |
+| integrations/webhook                  | **Yes**                                    |
+| job-roles                             | No                                         |
+| leave-requests                        | **Yes**                                    |
+| leave-types                           | No                                         |
+| material-resources                    | No                                         |
+| materials                             | No                                         |
+| notifications                         | **Yes**                                    |
+| org-units                             | No                                         |
+| payments                              | No                                         |
+| procurement-requests                  | No                                         |
+| project-setup                         | No                                         |
+| projects                              | No                                         |
+| purchase-orders                       | No                                         |
+| quality-ncrs                          | No                                         |
+| reports                               | No                                         |
+| resource-planning/resource-allocation | **Yes**                                    |
+| resource-planning                     | No                                         |
+| stakeholders                          | No                                         |
+| suppliers                             | No                                         |
+| tasks                                 | **Yes**                                    |
+| vendors                               | No                                         |
+| visitor-logs                          | No                                         |
+| workflows/workflow                    | **Yes**                                    |
+| workforce-allocation                  | No                                         |
 
 ---
 
@@ -334,11 +336,11 @@ A generic, entity-agnostic multi-step approval engine, not tied to any one modul
 - `handleEscalation` — reassigns to an escalation target (e.g. on timeout).
 - `getOverdueApprovals(hoursOverdue)` and `getWorkflowStats(workflowId)` — operational visibility.
 
-*(Not independently re-verified line-by-line in this revision; carried over from the prior pass.)*
+_(Not independently re-verified line-by-line in this revision; carried over from the prior pass.)_
 
 ### 8.2 Payroll pipeline (`server/src/hr-extras/`)
 
-Payroll is split across five focused services rather than one god-service: `payroll-validation.service.ts` (8 discrete validators), `payroll-tax.service.ts` (Nigerian progressive income-tax, ₦392,200/month tax-free allowance hardcoded from 2024 figures), `payroll-deductions.service.ts`, `payroll-orchestration.service.ts` (`processPayroll`, `getEmployeePayrollHistory`, `forecastPayroll`), and `payslip-generation.service.ts`. *(Not independently re-verified line-by-line in this revision; carried over from the prior pass.)*
+Payroll is split across five focused services rather than one god-service: `payroll-validation.service.ts` (8 discrete validators), `payroll-tax.service.ts` (Nigerian progressive income-tax, ₦392,200/month tax-free allowance hardcoded from 2024 figures), `payroll-deductions.service.ts`, `payroll-orchestration.service.ts` (`processPayroll`, `getEmployeePayrollHistory`, `forecastPayroll`), and `payslip-generation.service.ts`. _(Not independently re-verified line-by-line in this revision; carried over from the prior pass.)_
 
 ### 8.3 Notifications, webhooks, email configuration, and reporting
 
@@ -361,29 +363,29 @@ Re-measured in this revision: **~105 KB, 85 async methods** in one class (prior 
 
 ### 9.1 Frontend (`.env.example`, repo root)
 
-| Variable | In `.env.example`? | Purpose | Default / fallback |
-|---|---|---|---|
-| `VITE_GA_MEASUREMENT_ID` | Yes (only var present) | Google Analytics measurement ID. | empty |
-| `VITE_API_URL` | Read in code, absent from `.env.example` | Backend base URL used by every `src/app/api/*.ts` file. | `http://localhost:3001/api` |
+| Variable                 | In `.env.example`?                       | Purpose                                                 | Default / fallback                                   |
+| ------------------------ | ---------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `VITE_GA_MEASUREMENT_ID` | Yes (only var present)                   | Google Analytics measurement ID.                        | empty                                                |
+| `VITE_API_URL`           | Read in code, absent from `.env.example` | Backend base URL used by every `src/app/api/*.ts` file. | `https://buildos-production-e328.up.railway.app/api` |
 
 ### 9.2 Backend (`server/.env.example`)
 
-| Variable | Required? | Purpose | Default / fallback |
-|---|---|---|---|
-| `DATABASE_URL` | Yes | Postgres connection string (Prisma). | — |
-| `PORT` | No | HTTP port. | 8080 (`main.ts`) |
-| `NODE_ENV` | No | development / production. | development |
-| `FRONTEND_URL` | No | Drives the primary CORS origin + email links (see §4.1). | `http://localhost:5173` |
-| `JWT_SECRET` | Recommended | Access-token signing secret. | insecure hardcoded fallback |
-| `JWT_REFRESH_SECRET` | Recommended | Refresh-token signing secret. | insecure hardcoded fallback |
-| `JWT_ACCESS_EXPIRES_IN` | No | Access token TTL. | 15m |
-| `JWT_REFRESH_EXPIRES_IN` | No | Refresh token TTL. | 60m |
-| `SEED_ADMIN_EMAIL` | No | Bootstrap admin auto-granted all apps. | admin@buildos.ng |
-| `EMAIL_PROVIDER` | No | Currently only "resend" is implemented. | resend |
-| `EMAIL_FROM` | No | From header for outbound mail. | BuildOS <noreply@buildos.ng> |
-| `RESEND_API_KEY` | Yes (for real email) | Resend API key. | empty |
-| `REDIS_URL` / `REDIS_HOST`(+`PORT`/`USERNAME`/`PASSWORD`/`TLS`) | No | Enables cache, BullMQ, distributed throttling, token revocation. Fully optional — degrades gracefully. | unset (commented out in `.env.example`) |
-| `REDIS_KEY_PREFIX` | No | Namespace for Redis keys. | buildos: |
+| Variable                                                        | Required?            | Purpose                                                                                                | Default / fallback                      |
+| --------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| `DATABASE_URL`                                                  | Yes                  | Postgres connection string (Prisma).                                                                   | —                                       |
+| `PORT`                                                          | No                   | HTTP port.                                                                                             | 8080 (`main.ts`)                        |
+| `NODE_ENV`                                                      | No                   | development / production.                                                                              | development                             |
+| `FRONTEND_URL`                                                  | No                   | Drives the primary CORS origin + email links (see §4.1).                                               | `http://localhost:5173`                 |
+| `JWT_SECRET`                                                    | Recommended          | Access-token signing secret.                                                                           | insecure hardcoded fallback             |
+| `JWT_REFRESH_SECRET`                                            | Recommended          | Refresh-token signing secret.                                                                          | insecure hardcoded fallback             |
+| `JWT_ACCESS_EXPIRES_IN`                                         | No                   | Access token TTL.                                                                                      | 15m                                     |
+| `JWT_REFRESH_EXPIRES_IN`                                        | No                   | Refresh token TTL.                                                                                     | 60m                                     |
+| `SEED_ADMIN_EMAIL`                                              | No                   | Bootstrap admin auto-granted all apps.                                                                 | admin@buildos.ng                        |
+| `EMAIL_PROVIDER`                                                | No                   | Currently only "resend" is implemented.                                                                | resend                                  |
+| `EMAIL_FROM`                                                    | No                   | From header for outbound mail.                                                                         | BuildOS <noreply@buildos.ng>            |
+| `RESEND_API_KEY`                                                | Yes (for real email) | Resend API key.                                                                                        | empty                                   |
+| `REDIS_URL` / `REDIS_HOST`(+`PORT`/`USERNAME`/`PASSWORD`/`TLS`) | No                   | Enables cache, BullMQ, distributed throttling, token revocation. Fully optional — degrades gracefully. | unset (commented out in `.env.example`) |
+| `REDIS_KEY_PREFIX`                                              | No                   | Namespace for Redis keys.                                                                              | buildos:                                |
 
 ---
 
@@ -410,11 +412,11 @@ Seed data (from `server/`): `npm run prisma:seed` for reference + demo data; `ts
 
 ### 10.2 Testing — what actually exists (re-verified; still contradicts the repo's own docs — see §11.3)
 
-| Suite | Files that actually exist | Command |
-|---|---|---|
-| Backend unit (Jest) | `redis.service.spec.ts`, `jwt-auth.guard.spec.ts`, `cache.service.spec.ts`, `mail-queue.service.spec.ts` | `npm test` / `npm run test:unit` |
+| Suite                      | Files that actually exist                                                                                                                                   | Command                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Backend unit (Jest)        | `redis.service.spec.ts`, `jwt-auth.guard.spec.ts`, `cache.service.spec.ts`, `mail-queue.service.spec.ts`                                                    | `npm test` / `npm run test:unit`                           |
 | Backend integration (Jest) | None found — `server/test/` contains only `jest-e2e.json` and `setup.ts`, not the payroll/leave/workflow/e2e integration specs described in `TEST_GUIDE.md` | `npm run test:integration` (would currently match nothing) |
-| Frontend e2e (Playwright) | `e2e/debug.spec.ts`, `e2e/employees.spec.ts`, `e2e/fixes.spec.ts`, `e2e/integration.spec.ts`, `e2e/wiring.spec.ts` | `npx playwright test` |
+| Frontend e2e (Playwright)  | `e2e/debug.spec.ts`, `e2e/employees.spec.ts`, `e2e/fixes.spec.ts`, `e2e/integration.spec.ts`, `e2e/wiring.spec.ts`                                          | `npx playwright test`                                      |
 
 > `playwright.config.ts` assumes both dev servers are already running (`reuseExistingServer: true`, base URL `http://localhost:5173`) rather than starting them itself — start frontend + backend manually first, or point `BUILDOS_API`/baseURL env overrides at a disposable local database if you don't want test runs touching real data (several of the e2e specs create and delete real records through the live API).
 
@@ -422,7 +424,7 @@ Seed data (from `server/`): `npm run prisma:seed` for reference + demo data; `ts
 
 - **Backend → Railway.** `railway.json` points at `server/Dockerfile`: multi-stage build (`npm ci` → `prisma generate` → `nest build`), then a slim `node:20-alpine` runtime image with the generated Prisma client copied over. Health check: `GET /api`. Start command: `node dist/main`.
 - **Frontend → Vercel** (`vercel.json`; region pinned to `fra1`). Silent GitHub integration, no build overrides beyond Vite defaults. **`vercel.json` now includes a SPA fallback rewrite** (`{ "source": "/(.*)", "destination": "/index.html" }`) — this was missing until this revision and meant any hard refresh or directly-shared link to a client-side route (e.g. `/apps/hr/employees`) returned a static 404 from Vercel's edge before React Router ever got a chance to handle it. If you're troubleshooting a "404 on refresh" report on a Vercel-hosted single-page app, this is the first thing to check.
-- CORS on the backend for any *non*-Vercel, non-`FRONTEND_URL` frontend domain must still be manually extended in source (see §4.1).
+- CORS on the backend for any _non_-Vercel, non-`FRONTEND_URL` frontend domain must still be manually extended in source (see §4.1).
 
 ---
 
@@ -491,7 +493,7 @@ Re-verified in this revision (in an unrestricted environment, unlike the prior r
 - If you need to trust "tests pass" for a module, first confirm the test file actually exists (§11.3) — don't rely on `TEST_GUIDE.md` or `PROJECT_COMPLETION_SUMMARY.md`'s claims.
 - If you're touching password reset, invites, or login: note that `JWT_SECRET` / `JWT_REFRESH_SECRET` both fall back to a hardcoded insecure default string if unset — confirm real secrets are set in every deployed environment.
 - If you're setting up a fresh database (new environment, CI, local-from-scratch): run migrations then seed, and expect it to work now (§5, §10.1) — this previously failed partway through seeding before this revision's `reconcile_employee_role_column` migration.
-- Before trusting *any* handover or audit document in this repository, including this one: check `git log -1` and compare against the commit the document says it was prepared against (§11, meta-finding).
+- Before trusting _any_ handover or audit document in this repository, including this one: check `git log -1` and compare against the commit the document says it was prepared against (§11, meta-finding).
 
 ---
 

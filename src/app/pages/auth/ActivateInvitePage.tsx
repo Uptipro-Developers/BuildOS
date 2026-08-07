@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import { Building2, CheckCircle2, Eye, EyeOff } from "lucide-react";
 
 const API_BASE_URL = (
-  import.meta.env.VITE_API_URL || "http://localhost:3001/api"
+  import.meta.env.VITE_API_URL || "https://buildos-production-e328.up.railway.app/api"
 ).replace(/\/$/, "");
 
 function parseErrorMessage(raw: string): string {
