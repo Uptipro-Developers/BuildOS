@@ -123,6 +123,14 @@ export const getProcessMappings = () => apiFetch<any[]>('/process-mappings');
 export const saveProcessMappings = (mappings: any[]) =>
     apiFetch<any[]>('/process-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) });
 
+/**
+ * The Posting Engine's process categories. Stored and saved as a whole list,
+ * the same way the mappings are — the screen edits the set, not one row.
+ */
+export const getProcessCategories = () => apiFetch<any[]>('/process-categories');
+export const saveProcessCategories = (categories: any[]) =>
+    apiFetch<any[]>('/process-categories', { method: 'PUT', body: JSON.stringify({ categories }) });
+
 // Fiscal years. Written as one collection: closing a year and making another
 // current is a single change to the register.
 export const getFiscalYears = () => apiFetch<any[]>('/fiscal-years');

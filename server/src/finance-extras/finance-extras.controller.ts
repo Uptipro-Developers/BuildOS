@@ -127,4 +127,12 @@ export class FinanceExtrasController {
     saveProcessMappings(@Body() body: any) {
         return this.svc.saveProcessMappings(body?.mappings ?? body);
     }
+
+    // ── Posting Engine process categories ──
+    @Get('process-categories')
+    getProcessCategories() { return this.svc.getProcessCategories(); }
+    @Put('process-categories')
+    saveProcessCategories(@Body() body: any) {
+        return this.svc.saveProcessCategories(body?.categories ?? body);
+    }
 }

@@ -6,6 +6,7 @@ const FINANCE_CONFIG_KEY = 'finance-config';
 const SCHEDULED_POSTINGS_KEY = 'finance-scheduled-postings';
 const PAYMENT_METHODS_KEY = 'finance-payment-methods';
 const PROCESS_MAPPINGS_KEY = 'finance-process-mappings';
+const PROCESS_CATEGORIES_KEY = 'finance-process-categories';
 const FISCAL_YEARS_KEY = 'finance-fiscal-years';
 
 @Injectable()
@@ -431,6 +432,26 @@ export class FinanceExtrasService {
     async saveProcessMappings(mappings: any[]) {
         const list = Array.isArray(mappings) ? mappings : [];
         await this.writeSetting(PROCESS_MAPPINGS_KEY, list);
+        return list;
+    }
+
+    /**
+     * The Posting Engine's process categories — the buckets transactions arrive
+     * under, and the debit/credit pair each posts to.
+     *
+     * These had nowhere to live at all: the page held them in component state
+     * seeded with an empty array, so the category list was empty on every load,
+     * a category created by hand vanished on refresh, and posting to the ledger
+     * — which looks its category up first — could never run. Stored as a setting
+     * rather than a table for the same reason the mappings are: it is a short
+     * configured list edited as a whole, not a growing record set.
+     */
+    getProcessCategories() {
+        return this.readSetting<any[]>(PROCESS_CATEGORIES_KEY, []);
+    }
+    async saveProcessCategories(categories: any[]) {
+        const list = Array.isArray(categories) ? categories : [];
+        await this.writeSetting(PROCESS_CATEGORIES_KEY, list);
         return list;
     }
 
