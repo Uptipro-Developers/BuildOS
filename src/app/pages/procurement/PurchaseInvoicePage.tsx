@@ -9,6 +9,9 @@ import {
   Banknote,
   Ban,
   Eye,
+  BookOpen,
+  CreditCard,
+  X,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -28,6 +31,17 @@ import {
   statusDef,
   type PurchaseInvoiceStatus,
 } from "../../utils/procurementWorkflow";
+import {
+  JournalLinesEditor,
+  journalTotals,
+  type JournalLineInput,
+} from "../../components/JournalLinesEditor";
+import {
+  findAccount,
+  loadPostableAccounts,
+  postJournalEntry,
+} from "../../utils/postJournalEntry";
+import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   csvAmountHeader,
   getCurrencySymbol,
@@ -133,6 +147,198 @@ const BLANK_FORM = {
   lines: [BLANK_LINE()],
 };
 
+/**
+ * Records the payment and posts it to the ledger, in one step.
+ *
+ * Paying was a status flip: the invoice went to Paid and nothing reached the
+ * Chart of Accounts, so the money left the business without an accounting entry
+ * behind it. Settling a payable is always the same double-entry — debit the
+ * payable, credit the bank — so the lines open pre-filled and only need
+ * changing when the payment is unusual.
+ */
+function PayInvoiceModal({
+  invoice,
+  total,
+  onClose,
+  onConfirm,
+}: {
+  invoice: PurchaseInvoice;
+  total: number;
+  onClose: () => void;
+  onConfirm: (payload: {
+    date: string;
+    method: string;
+    lines: JournalLineInput[];
+  }) => Promise<void>;
+}) {
+  const [accounts, setAccounts] = useState<{ code: string; name: string }[]>([]);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState("Bank Transfer");
+  const [lines, setLines] = useState<JournalLineInput[]>([]);
+  const [posting, setPosting] = useState(false);
+
+  useEffect(() => {
+    loadPostableAccounts()
+      .then((list) => {
+        setAccounts(list);
+        // Seeded from the organisation's own Chart of Accounts, by name — the
+        // codes are whatever was configured here, not the ones in seed data.
+        const payable = findAccount(list, "accounts payable", "payable");
+        const cash = findAccount(list, "cash & bank", "bank", "cash");
+        setLines([
+          {
+            id: "pay-dr",
+            glCode: payable?.code ?? "",
+            account: payable?.name ?? "",
+            debit: total,
+            credit: 0,
+            description: `Settle ${invoice.invoiceNo} — ${invoice.supplier}`,
+          },
+          {
+            id: "pay-cr",
+            glCode: cash?.code ?? "",
+            account: cash?.name ?? "",
+            debit: 0,
+            credit: total,
+            description: `Payment to ${invoice.supplier}`,
+          },
+        ]);
+      })
+      .catch(() => {
+        toast.error("Could not load the Chart of Accounts.");
+      });
+  }, [invoice.invoiceNo, invoice.supplier, total]);
+
+  const { balanced } = journalTotals(lines);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 py-6 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 my-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">
+              Pay Invoice — {invoice.invoiceNo}
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {invoice.supplier} · Due {invoice.dueDate} · {fmt(total)}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 hover:bg-gray-100 rounded-lg"
+          >
+            <X className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+            <CreditCard className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-blue-900">
+                Post this payment to the general ledger
+              </p>
+              <p className="text-xs text-blue-700 mt-0.5">
+                Recording the payment posts a balanced double-entry to the Chart
+                of Accounts, and marks the purchase order paid in Procurement.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                Payment Date <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                Payment Method
+              </label>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {["Bank Transfer", "Cheque", "Cash", "Mobile Payment"].map(
+                  (m) => (
+                    <option key={m}>{m}</option>
+                  ),
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                Reference
+              </label>
+              {/* Locked to the invoice: a payment that cites a different
+                  reference cannot be matched back to what it settled. */}
+              <input
+                value={invoice.invoiceNo}
+                readOnly
+                tabIndex={-1}
+                className="w-full px-3 py-2 text-sm border border-gray-200 bg-gray-50 rounded-lg text-gray-500 cursor-default focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-gray-700">
+                Posting Lines
+              </label>
+              <span className="text-xs text-gray-400">
+                Debits must equal credits to post.
+              </span>
+            </div>
+            <JournalLinesEditor
+              lines={lines}
+              onChange={setLines}
+              accounts={accounts}
+            />
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+          <p className="text-xs text-gray-400">
+            Only a balanced posting updates the Chart of Accounts.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!balanced || posting) return;
+                setPosting(true);
+                try {
+                  await onConfirm({ date, method, lines });
+                } finally {
+                  setPosting(false);
+                }
+              }}
+              disabled={!balanced || posting}
+              className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40 flex items-center gap-2"
+            >
+              <BookOpen className="w-4 h-4" />
+              {posting ? "Posting…" : "Confirm & Post Payment"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PurchaseInvoicePage() {
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +354,8 @@ export function PurchaseInvoicePage() {
   const [declineReason, setDeclineReason] = useState("");
   /** Id of the invoice being decided, so a decision cannot be double-fired. */
   const [deciding, setDeciding] = useState<string | null>(null);
+  /** The invoice being paid, which opens the posting modal. */
+  const [payTarget, setPayTarget] = useState<PurchaseInvoice | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ ...BLANK_FORM, lines: [BLANK_LINE()] });
   const { logChange } = useChangelog();
@@ -268,6 +476,48 @@ export function PurchaseInvoicePage() {
     }
   }
 
+  /**
+   * Posts the payment, then marks the invoice paid.
+   *
+   * In that order, and only in that order: marking it paid is what tells
+   * Procurement the money has gone, so it must not happen unless the posting
+   * actually reached the ledger.
+   */
+  async function confirmPay(payload: {
+    date: string;
+    method: string;
+    lines: JournalLineInput[];
+  }) {
+    const inv = payTarget;
+    if (!inv) return;
+    try {
+      const entry = await postJournalEntry({
+        description: `Payment to ${inv.supplier} — ${inv.invoiceNo}`,
+        date: payload.date,
+        createdBy: getAuthUserName() || "Current User",
+        lines: payload.lines,
+      });
+      setPayTarget(null);
+      await updateStatus(
+        inv.id,
+        "paid",
+        `Paid via ${payload.method}. Posted to the ledger as ${entry.reference}.`,
+      );
+      logChange({
+        module: "Finance",
+        action: "Posted",
+        entityType: "JournalEntry",
+        entityId: entry.id,
+        summary: `Payment for ${inv.invoiceNo} posted as ${entry.reference}`,
+        performedBy: getAuthUserName() || "Current User",
+      });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not post the payment.",
+      );
+    }
+  }
+
   async function confirmCancel() {
     const inv = cancelTarget;
     if (!inv) return;
@@ -364,9 +614,8 @@ export function PurchaseInvoicePage() {
             icon={<Banknote className="w-3.5 h-3.5" />}
             label="Pay"
             tone="positive"
-            busy={deciding === inv.id}
-            busyLabel="Paying…"
-            onClick={() => void updateStatus(inv.id, "paid")}
+            disabled={deciding === inv.id}
+            onClick={() => setPayTarget(inv)}
           />
           <RowAction
             icon={<Ban className="w-3.5 h-3.5" />}
@@ -822,6 +1071,15 @@ export function PurchaseInvoicePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {payTarget && (
+        <PayInvoiceModal
+          invoice={payTarget}
+          total={lineTotal(payTarget.lines) || payTarget.total}
+          onClose={() => setPayTarget(null)}
+          onConfirm={confirmPay}
+        />
       )}
 
       <ConfirmationModal

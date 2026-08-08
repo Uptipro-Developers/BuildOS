@@ -70,10 +70,11 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/finance/year-end-close", label: "Year-End Close", section: "Period End" },
     { id: "/apps/finance/fiscal-years", label: "Fiscal Years", section: "Period End" },
     { id: "/apps/finance/approvals", label: "Approvals", section: "Approvals" },
+    { id: "/apps/finance/general-ledger", label: "General Ledger", section: "Ledger & Reports" },
     { id: "/apps/finance/ledger", label: "Transactions Ledger", section: "Ledger & Reports" },
     { id: "/apps/finance/posting-engine", label: "Posting Engine", section: "Ledger & Reports" },
     { id: "/apps/finance/reports", label: "Reports", section: "Ledger & Reports" },
-    { id: "/apps/finance/config", label: "Finance Settings", section: "Settings" },
+    { id: "/apps/finance/config", label: "Settings", section: "Settings" },
     { id: "/apps/finance/process-mapping", label: "Process Mapping", section: "Settings" },
   ],
   hr: [
