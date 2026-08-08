@@ -6,6 +6,7 @@ import {
   createChartAccount,
   updateChartAccount,
   deleteChartAccount,
+  recomputeAccountBalances,
 } from "../../api/finance-extras";
 import {
   Plus,
@@ -14,6 +15,7 @@ import {
   Trash2,
   ChevronRight,
   BookOpen,
+  RefreshCw,
   X,
   Save,
 } from "lucide-react";
@@ -123,6 +125,36 @@ export function ChartOfAccountsPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
+
+  /**
+   * Rebuilds every balance from the posted journal lines.
+   *
+   * Balances are maintained incrementally as entries post, so this is not part
+   * of normal use — it exists for accounts seeded before the posting engine did
+   * (their balances were never maintained at all), and as the reconciliation to
+   * reach for whenever a balance is doubted. Recomputing is always safe: the
+   * posted lines are the truth and this column is a cache of them.
+   */
+  async function handleRecompute() {
+    if (recomputing) return;
+    setRecomputing(true);
+    try {
+      const { accounts: checked, adjusted } = await recomputeAccountBalances();
+      await loadAccounts();
+      toast.success(
+        adjusted === 0
+          ? `All ${checked} balances already agree with the ledger.`
+          : `${adjusted} balance${adjusted === 1 ? "" : "s"} corrected against the ledger.`,
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not recompute the balances.",
+      );
+    } finally {
+      setRecomputing(false);
+    }
+  }
 
   const filtered = orderAccountsTree(accounts).filter((a) => {
     if (typeFilter !== "All" && a.type !== typeFilter) return false;
@@ -264,10 +296,19 @@ export function ChartOfAccountsPage() {
             Chart of Accounts
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Define and manage all financial accounts used in the system
+            Every account and its live balance, maintained by the posting engine
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleRecompute}
+            disabled={recomputing}
+            title="Rebuild every balance from the posted journal lines"
+            className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${recomputing ? "animate-spin" : ""}`} />
+            {recomputing ? "Recomputing…" : "Recompute Balances"}
+          </button>
           <button onClick={handleExport} className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Export CSV</button>
           <button onClick={openCreate} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors text-sm font-medium">
             <Plus className="w-4 h-4" /> New Account

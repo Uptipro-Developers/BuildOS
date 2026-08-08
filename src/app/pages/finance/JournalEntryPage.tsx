@@ -8,8 +8,10 @@ import {
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   getJournalEntries,
+  getJournalEntry,
   createJournalEntry,
   updateJournalEntry,
+  postJournalDraft,
   deleteJournalEntry,
   reverseJournalEntry,
   getChartAccounts,
@@ -196,7 +198,19 @@ export function JournalEntryPage() {
     };
     try {
       if (editId) {
-        const updated = mapApiEntry(await updateJournalEntry(editId, payload));
+        // Saving the lines and posting are two server calls, because they are
+        // two different things: an update may only touch a draft, and posting
+        // is what runs the balance check and moves account balances. Sending
+        // `status: "Posted"` on the update would be ignored, and the entry
+        // would quietly stay a draft.
+        await updateJournalEntry(editId, payload);
+        const updated = mapApiEntry(
+          status === "Posted"
+            ? await postJournalDraft(editId, {
+                postedBy: getAuthUserName() || "Current User",
+              })
+            : await getJournalEntry(editId),
+        );
         setEntries((prev) => prev.map((e) => (e.id === editId ? updated : e)));
         logChange({ module: "Finance", action: "Updated", entityType: "JournalEntry", entityId: editId, summary: `Journal Entry: ${form.description} updated [${status}]`, performedBy: "Current User" });
       } else {

@@ -1079,17 +1079,37 @@ model PayrollPeriod {
 
 model PayrollRun {
   id            String         @id @default(cuid())
+  /// Human reference shown as "Payroll Code" in the Finance Payroll Overview.
+  /// Allocated from Settings → Numbering, so it follows the same convention as
+  /// every other document reference rather than exposing the cuid.
+  code          String?        @unique
   periodId      String?
   period        PayrollPeriod? @relation(fields: [periodId], references: [id])
   periodName    String
   month         Int
   year          Int
+  /// HR side: "Draft" | "Processing" | "Approved". Finance side then carries it
+  /// through "Pending Posting Approval" → "Posting Approved" → "Posted".
+  /// Approval to post is deliberately separate from posting: the person who
+  /// authorises the accounting is not always the one who runs it.
   status        String         @default("Draft")
   totalGross    Float          @default(0)
   totalNet      Float          @default(0)
   employeeCount Int            @default(0)
   processedBy   String?
   processedAt   DateTime?
+
+  // Finance posting trail.
+  postingRequestedBy String?
+  postingRequestedAt DateTime?
+  postingApprovedBy  String?
+  postingApprovedAt  DateTime?
+  postedBy           String?
+  postedAt           DateTime?
+  /// The journal entry this run posted as, so the Overview can cite it and the
+  /// General Ledger can be traced back to the run.
+  journalEntryId     String?
+
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   entries       PayrollEntry[]
@@ -1206,9 +1226,28 @@ model JournalEntry {
   reversalOfId String?
   reversalOf   JournalEntry?  @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
   reversedBy   JournalEntry[] @relation("JournalReversal")
+
+  // Where this posting came from. Every engine — Journal Entries, Payments,
+  // Purchases, Payroll — posts through the same service, and these are what let
+  // a General Ledger line be traced back to the thing that caused it. A hand
+  // keyed entry is sourceModule "Journal" with no source record behind it.
+  /// "Journal" | "Payment" | "Purchase" | "Payroll" | …
+  sourceModule String  @default("Journal")
+  /// The originating record's model, e.g. "PurchaseInvoice", "PayrollRun".
+  sourceType   String?
+  /// The originating record's id, for deep-linking back to it.
+  sourceId     String?
+  /// The originating document's own human reference, e.g. an invoice number.
+  sourceRef    String?
+  /// The configured process whose mapping produced the lines, when one did.
+  process      String?
+
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   lines       JournalLine[]
+
+  @@index([sourceModule, sourceId])
+  @@index([status, date])
 }
 
 model JournalLine {

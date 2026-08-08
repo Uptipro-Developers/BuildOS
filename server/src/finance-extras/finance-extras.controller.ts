@@ -1,13 +1,47 @@
 import {
     Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query,
+    Param, Body, Query, Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { FinanceExtrasService } from './finance-extras.service';
+import { PayrollPostingService } from './payroll-posting.service';
 import { RequiresProcess } from '../permissions/require-permission.decorator';
+
+/** Who is acting, for the posting trail. The JWT signs the name alongside the id. */
+function actingUser(req: Request): string | undefined {
+    const user = req.user as any;
+    const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
+    return name || user?.name || user?.email || undefined;
+}
 
 @Controller()
 export class FinanceExtrasController {
-    constructor(private readonly svc: FinanceExtrasService) { }
+    constructor(
+        private readonly svc: FinanceExtrasService,
+        private readonly payrollPosting: PayrollPostingService,
+    ) { }
+
+    // ── Payroll Overview (HR-approved runs, and their route to the ledger) ──
+    @Get('payroll-overview')
+    getPayrollOverview() { return this.payrollPosting.overview(); }
+
+    @Get('payroll-overview/:id/posting-preview')
+    getPayrollPostingPreview(@Param('id') id: string) { return this.payrollPosting.preview(id); }
+
+    @Post('payroll-overview/:id/send-for-posting-approval')
+    sendPayrollForPostingApproval(@Param('id') id: string, @Req() req: Request, @Body() body: any) {
+        return this.payrollPosting.sendForPostingApproval(id, body?.by ?? actingUser(req));
+    }
+
+    @Post('payroll-overview/:id/approve-posting')
+    approvePayrollPosting(@Param('id') id: string, @Req() req: Request, @Body() body: any) {
+        return this.payrollPosting.approvePosting(id, body?.by ?? actingUser(req));
+    }
+
+    @Post('payroll-overview/:id/post')
+    postPayroll(@Param('id') id: string, @Req() req: Request, @Body() body: any) {
+        return this.payrollPosting.post(id, body?.by ?? actingUser(req));
+    }
 
     // ── Transactions ──
     @Get('transactions')
@@ -38,14 +72,34 @@ export class FinanceExtrasController {
     createJournal(@Body() body: any) { return this.svc.createJournal(body); }
     @Put('journal-entries/:id')
     updateJournal(@Param('id') id: string, @Body() body: any) { return this.svc.updateJournal(id, body); }
+    @Post('journal-entries/:id/post')
+    postJournal(@Param('id') id: string, @Body() body: any) { return this.svc.postJournal(id, body ?? {}); }
     @Post('journal-entries/:id/reverse')
     reverseJournal(@Param('id') id: string, @Body() body: any) { return this.svc.reverseJournal(id, body ?? {}); }
     @Delete('journal-entries/:id')
     deleteJournal(@Param('id') id: string) { return this.svc.deleteJournal(id); }
 
+    // ── General Ledger ──
+    @Get('general-ledger')
+    getGeneralLedger(
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+        @Query('accountCode') accountCode?: string,
+        @Query('sourceModule') sourceModule?: string,
+    ) {
+        return this.svc.buildGeneralLedger({ from, to, accountCode, sourceModule });
+    }
+
     // ── Chart of Accounts ──
     @Get('chart-accounts')
     getAllAccounts(@Query('type') type?: string) { return this.svc.findAllAccounts(type); }
+    /**
+     * Rebuilds every balance from the posted journal lines. Accounts that
+     * predate the posting engine never had their balances maintained, and this
+     * is also the reconciliation to reach for if one is ever doubted.
+     */
+    @Post('chart-accounts/recompute-balances')
+    recomputeBalances() { return this.svc.recomputeAccountBalances(); }
     @Get('chart-accounts/:id')
     getAccount(@Param('id') id: string) { return this.svc.findAccount(id); }
     @Post('chart-accounts')
