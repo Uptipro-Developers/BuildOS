@@ -55,29 +55,64 @@ export class FinanceExtrasService {
             include: { lines: true },
         });
     }
-    /**
-     * Creates a journal entry through the posting engine.
-     *
-     * References come from the sequence an admin configured in Settings →
-     * Numbering ("JE-{N:3}" by default), which is why the caller's `reference`
-     * is ignored — it is a document number, not something a client picks. What
-     * the caller *can* pass is `sourceRef`: the reference of the thing being
-     * settled, e.g. the invoice number a payment cites.
-     */
-    createJournal(data: any) {
-        return this.posting.post({
-            description: data?.description,
-            date: data?.date,
-            createdBy: data?.createdBy,
-            status: String(data?.status) === 'Draft' ? 'Draft' : 'Posted',
-            lines: data?.lines ?? [],
-            sourceModule: data?.sourceModule,
-            sourceType: data?.sourceType,
-            sourceId: data?.sourceId,
-            // Older callers sent the settled document's number as `reference`.
-            sourceRef: data?.sourceRef ?? data?.reference,
-            process: data?.process,
-        });
+    private static readonly CREDIT_NORMAL_TYPES = new Set(['Liabilities', 'Equity', 'Income']);
+    async createJournal(data: any) {
+        const { lines, reference: _ignored, ...rest } = data;
+        // References come from the sequence an admin configured in Settings →
+        // Numbering ("JE-{N:3}" by default). This used to be `JRN-${Date.now()}`,
+        // which ignored that configuration entirely and produced references like
+        // JRN-1754212800000 that matched no convention and could not be cited.
+        const { reference } = await this.numbering.allocate('JournalEntry');
+
+        // Gets all the selected codes
+        const codes = [...new Set(lines.map((l: any) => l.accountCode))] as string[];
+
+        return this.prisma.$transaction(async (tx) => {
+
+            const journal = await tx.journalEntry.create({
+                data: {
+                    ...rest,
+                    reference,
+                    lines: { create: lines },
+                },
+                include: { lines: true },
+            });
+
+            console.log('TEST Journal Inserted')
+
+            await Promise.all(
+
+                codes.map(async (code) => {
+                    const account = await tx.chartAccount.findUnique({ where: { code }, select: { type: true } });
+                    const allJournal = await tx.journalLine.findMany({
+                        where: { accountCode: code },
+                    })
+
+                    const total = allJournal.reduce(
+                        (acc, item) => {
+                            acc.totalDebit += item.debit;
+                            acc.totalCredit += item.credit;
+                            return acc;
+                        },
+                        { totalDebit: 0, totalCredit: 0 }
+                    );
+
+                    console.log('TEST', code, total)
+
+
+                    const isCreditNormal = FinanceExtrasService.CREDIT_NORMAL_TYPES.has(account.type);
+                    const balance = isCreditNormal ? total.totalCredit - total.totalDebit : total.totalDebit - total.totalCredit;
+                    console.log('TEST Balance', balance, account.type)
+
+                    await tx.chartAccount.update({
+                        where: { code },
+                        data: { balance },
+                    });
+
+                })
+            );
+            return journal;
+        })
     }
 
     /** Turns a draft into a ledger record. Balances move here, not at save. */

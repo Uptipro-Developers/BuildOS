@@ -172,23 +172,23 @@ function userFromApi(u: AppUser): UserRecord {
     rawStatus === "active"
       ? "Active"
       : ["pending", "pending_invite", "invited", "pending invite"].includes(
-            rawStatus,
-          )
+        rawStatus,
+      )
         ? "Pending"
         : "Inactive";
 
   const apps: AppKey[] = Array.isArray(u.assignedApps)
     ? (u.assignedApps.filter((app): app is AppKey =>
-        [
-          "construction",
-          "finance",
-          "hr",
-          "procurement",
-          "storefront",
-          "admin",
-          "ess",
-        ].includes(app),
-      ) as AppKey[])
+      [
+        "construction",
+        "finance",
+        "hr",
+        "procurement",
+        "storefront",
+        "admin",
+        "ess",
+      ].includes(app),
+    ) as AppKey[])
     : (["ess"] as AppKey[]);
 
   return {
@@ -475,13 +475,12 @@ function UserProcessPermissions({
                             title={title}
                             disabled={effective?.isSuper}
                             onClick={() => cycle(proc.id, action)}
-                            className={`w-6 h-6 inline-flex items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed ${
-                              state === "allow"
+                            className={`w-6 h-6 inline-flex items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed ${state === "allow"
                                 ? "bg-indigo-100 border-indigo-400"
                                 : state === "deny"
                                   ? "bg-red-100 border-red-400"
                                   : "border-transparent hover:bg-gray-100"
-                            }`}
+                              }`}
                           >
                             {allowed ? (
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
@@ -530,8 +529,8 @@ function toRoleAppScope(role: {
   const granted =
     appAccessSource && typeof appAccessSource === "object"
       ? Object.entries(appAccessSource as Record<string, unknown>)
-          .filter(([, allowed]) => Boolean(allowed))
-          .map(([app]) => app.toLowerCase())
+        .filter(([, allowed]) => Boolean(allowed))
+        .map(([app]) => app.toLowerCase())
       : [];
 
   const appAccess = ALL_APPS.map((a) => a.key).filter(
@@ -558,12 +557,12 @@ const PERM_ACTIONS: Array<{
   label: string;
   Icon: React.FC<{ className?: string }>;
 }> = [
-  { key: "view", label: "View", Icon: Eye },
-  { key: "create", label: "Create", Icon: Plus },
-  { key: "edit", label: "Edit", Icon: PenLine },
-  { key: "approve", label: "Approve", Icon: BadgeCheck },
-  { key: "delete", label: "Delete", Icon: Trash2 },
-];
+    { key: "view", label: "View", Icon: Eye },
+    { key: "create", label: "Create", Icon: Plus },
+    { key: "edit", label: "Edit", Icon: PenLine },
+    { key: "approve", label: "Approve", Icon: BadgeCheck },
+    { key: "delete", label: "Delete", Icon: Trash2 },
+  ];
 
 const USERS_PER_PAGE = 20;
 const NAME_PATTERN = /^[A-Za-z]+(?:[ '-][A-Za-z]+)*$/;
@@ -622,11 +621,11 @@ function UserDetailPanel({
   >("info");
   const [signatureInitials, setSignatureInitials] = useState(
     user.signatureInitials ??
-      user.name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 3),
+    user.name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 3),
   );
   const [hasSignature, setHasSignature] = useState(user.hasSignature ?? false);
   const [uploadSimulated, setUploadSimulated] = useState(false);
@@ -745,11 +744,10 @@ function UserDetailPanel({
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`py-2.5 px-3 text-xs font-medium transition-colors border-b-2 -mb-px ${
-                tab === t.key
+              className={`py-2.5 px-3 text-xs font-medium transition-colors border-b-2 -mb-px ${tab === t.key
                   ? "border-indigo-500 text-indigo-700"
                   : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+                }`}
             >
               {t.label}
             </button>
@@ -935,11 +933,10 @@ function UserDetailPanel({
                   className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100"
                 >
                   <div
-                    className={`mt-[5px] w-1.5 h-1.5 rounded-full shrink-0 ${
-                      ALL_APPS.find((ap) => ap.key === a.app)
+                    className={`mt-[5px] w-1.5 h-1.5 rounded-full shrink-0 ${ALL_APPS.find((ap) => ap.key === a.app)
                         ?.color.replace("text-", "bg-")
                         .split(" ")[0]
-                    }`}
+                      }`}
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-800">{a.action}</p>
@@ -1631,11 +1628,10 @@ function AddUserModal({
         id: inviteResult.id,
         userId:
           String((inviteResult as { userId?: string }).userId || "").trim() ||
-          `BOS-${new Date().getUTCFullYear().toString().slice(-2)}${String(new Date().getUTCMonth() + 1).padStart(2, "0")}-${
-            inviteResult.id
-              .replace(/[^a-zA-Z0-9]/g, "")
-              .slice(-4)
-              .toUpperCase() || "0000"
+          `BOS-${new Date().getUTCFullYear().toString().slice(-2)}${String(new Date().getUTCMonth() + 1).padStart(2, "0")}-${inviteResult.id
+            .replace(/[^a-zA-Z0-9]/g, "")
+            .slice(-4)
+            .toUpperCase() || "0000"
           }`,
         name: form.name,
         email: form.email,
@@ -2067,7 +2063,7 @@ export function UsersPage() {
 
   const requestPasswordReset = async (email: string) => {
     const baseUrl = (
-      import.meta.env.VITE_API_URL || "http://localhost:3001/api"
+      import.meta.env.VITE_API_URL || "https://buildos-production-e328.up.railway.app/api"
     ).replace(/\/$/, "");
     const response = await fetch(`${baseUrl}/auth/forgot-password`, {
       method: "POST",
@@ -2221,7 +2217,7 @@ export function UsersPage() {
         <UserDetailPanel
           user={selectedUser}
           onClose={() => setSelectedUser(null)}
-          onUpdateSignature={() => {}}
+          onUpdateSignature={() => { }}
           onUpdateApps={async (id, apps) => {
             try {
               const updated = await updateUser(id, { assignedApps: apps });
@@ -2718,11 +2714,10 @@ export function UsersPage() {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`min-w-8 px-2 py-1.5 text-sm rounded-lg border transition-colors ${
-                    currentPage === page
+                  className={`min-w-8 px-2 py-1.5 text-sm rounded-lg border transition-colors ${currentPage === page
                       ? "border-indigo-600 bg-indigo-600 text-white"
                       : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                  }`}
+                    }`}
                 >
                   {page}
                 </button>
