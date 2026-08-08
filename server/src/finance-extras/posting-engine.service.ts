@@ -50,6 +50,19 @@ function naturalSign(accountType: string | undefined): 1 | -1 {
 }
 
 /**
+ * Room for a posting to finish.
+ *
+ * A posting is several statements on one connection — write the entry, read the
+ * accounts it touches, move each balance — and Prisma caps an interactive
+ * transaction at five seconds by default. That is generous locally and not
+ * generous at all against a hosted database over a proxy, where each round trip
+ * costs a few hundred milliseconds: posting a payroll run timed out mid-way and
+ * surfaced as a bare 500. The work inside is small and bounded; the limit is
+ * here to catch a genuine hang, not to police normal latency.
+ */
+const TX_OPTIONS = { timeout: 30_000, maxWait: 10_000 };
+
+/**
  * The one way anything in BuildOS reaches the Chart of Accounts.
  *
  * Journal Entries, Payments, Purchases and Payroll all post through `post()`,
@@ -248,7 +261,7 @@ export class PostingEngineService {
 
             if (status === 'Posted') await this.applyToAccounts(tx, lines, 1);
             return entry;
-        });
+        }, TX_OPTIONS);
     }
 
     /**
@@ -290,7 +303,7 @@ export class PostingEngineService {
             });
             await this.applyToAccounts(tx, lines, 1);
             return posted;
-        });
+        }, TX_OPTIONS);
     }
 
     /**
@@ -361,7 +374,7 @@ export class PostingEngineService {
             });
             await this.applyToAccounts(tx, mirrored, 1);
             return [updated, created] as const;
-        });
+        }, TX_OPTIONS);
 
         return {
             original: await this.prisma.journalEntry.findUnique({
@@ -407,7 +420,7 @@ export class PostingEngineService {
                 await tx.chartAccount.update({ where: { id: account.id }, data: { balance } });
                 adjusted += 1;
             }
-        });
+        }, TX_OPTIONS);
 
         return { accounts: accounts.length, adjusted };
     }

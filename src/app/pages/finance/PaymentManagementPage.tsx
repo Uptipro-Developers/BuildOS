@@ -26,6 +26,7 @@ import {
 import { Download, CreditCard, Clock, CheckCircle, XCircle, Send, Eye, X, BookOpen } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
+import { RowAction, RowActions } from "../../components/RowAction";
 import { useChangelog } from "../../stores/changelogStore";
 
 type PaymentType = "Expense" | "Payroll" | "Vendor" | "Contractor";
@@ -480,10 +481,19 @@ export function PaymentManagementPage() {
       filterable: false,
       className: "text-right",
       headerClassName: "text-right",
+      // Icon *and* label, through the shared component, like every other row
+      // action in the app. A naked eye icon carries no accessible name, so it
+      // was unreachable by name to a screen reader — and it is the only way in
+      // to the stage actions, which is a lot to hang on an unlabelled glyph.
       render: (p) => (
-        <button onClick={() => setViewPayment(p)} className="text-emerald-600 hover:text-emerald-700">
-          <Eye className="w-3.5 h-3.5" />
-        </button>
+        <RowActions>
+          <RowAction
+            icon={<Eye className="w-3.5 h-3.5" />}
+            label="View"
+            tone="positive"
+            onClick={() => setViewPayment(p)}
+          />
+        </RowActions>
       ),
     },
   ];
