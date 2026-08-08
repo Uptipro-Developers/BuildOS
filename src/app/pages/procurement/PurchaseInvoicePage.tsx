@@ -654,15 +654,16 @@ export function PurchaseInvoicePage() {
       filterable: true,
       // The supplier numbers their own invoices, so an invoice number says
       // nothing about which order it bills for. The purchase order reference
-      // goes underneath it — the same way a purchase request shows the material
-      // request it came from.
+      // goes underneath it, in the same "from <upstream ref>" form the purchase
+      // order column uses for its purchase request and the purchase request
+      // column uses for its material request.
       render: (inv) => (
         <div>
-          <p className="font-mono text-xs text-gray-700">{inv.invoiceNo}</p>
+          <span className="font-mono text-xs text-gray-700">
+            {inv.invoiceNo}
+          </span>
           {inv.poRef && (
-            <p className="font-mono text-xs text-gray-400 mt-0.5">
-              {inv.poRef}
-            </p>
+            <p className="text-xs text-gray-400">from {inv.poRef}</p>
           )}
         </div>
       ),
