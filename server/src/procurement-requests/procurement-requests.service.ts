@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookService } from '../integrations/webhook.service';
 import { MailQueueService } from '../queue/mail-queue.service';
@@ -16,6 +16,15 @@ import { NotificationDispatchService } from '../notifications/notification-dispa
 function normaliseEmail(raw: any): string | null {
     const s = String(raw ?? '').trim();
     return s.length > 0 ? s : null;
+}
+
+/**
+ * Statuses have been written in several shapes over time ("Pending Approval",
+ * "pending_approval", "Approved"), so every comparison goes through here.
+ * Mirrors normaliseStatus in src/app/utils/procurementWorkflow.tsx.
+ */
+function normaliseStatus(raw: unknown): string {
+    return String(raw ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
 /** Accepts ISO (YYYY-MM-DD) or DD/MM/YYYY date strings; returns a Date or null. */
@@ -109,13 +118,111 @@ export class ProcurementRequestsService {
     findInvoice(id: string) {
         return this.prisma.purchaseInvoice.findUniqueOrThrow({ where: { id } });
     }
-    createInvoice(data: any) {
-        const invoiceNo = `INV-${Date.now()}`;
-        return this.prisma.purchaseInvoice.create({ data: { ...data, invoiceNo } });
+    async createInvoice(data: any) {
+        // From the PurchaseInvoice sequence in Settings › Numbering ("PI-{N:3}").
+        // `INV-${Date.now()}` ignored that configuration and produced references
+        // like INV-1785770844706, which match no convention and cannot be cited.
+        const { invoiceNo: supplied, ...rest } = data ?? {};
+        const invoiceNo =
+            String(supplied ?? '').trim() ||
+            (await this.numbering.allocate('PurchaseInvoice')).reference;
+        return this.prisma.purchaseInvoice.create({ data: { ...rest, invoiceNo } });
     }
-    updateInvoice(id: string, data: any) {
-        return this.prisma.purchaseInvoice.update({ where: { id }, data });
+
+    /**
+     * Records Finance's decision, and mirrors it onto the purchase order.
+     *
+     * Procurement and Finance were two lists that happened to mention the same
+     * PO reference: Finance could approve and pay an invoice and the order in
+     * Procurement still read "Unpaid" forever, because nothing joined them. The
+     * invoice carries `poRef`, so a decision here moves the order too — which is
+     * what makes "Paid in Finance shows as Paid on the PO" true rather than
+     * something a user has to keep in their head.
+     */
+    async updateInvoice(id: string, data: any) {
+        const invoice = await this.prisma.purchaseInvoice.update({ where: { id }, data });
+        const status = normaliseStatus(data?.status);
+
+        const poStatus =
+            status === 'accepted'
+                ? 'finance_accepted'
+                : status === 'declined'
+                  ? 'finance_declined'
+                  : status === 'paid'
+                    ? 'paid'
+                    : null;
+
+        if (poStatus && invoice.poRef) {
+            const now = new Date();
+            await this.prisma.purchaseOrder
+                .updateMany({
+                    where: { OR: [{ poRef: invoice.poRef }, { id: invoice.poRef }] },
+                    data: {
+                        status: poStatus as any,
+                        ...(status === 'paid'
+                            ? { paidAt: now }
+                            : { financeDecidedAt: now }),
+                        ...(status === 'declined'
+                            ? { declineReason: data?.notes ?? 'Declined by Finance.' }
+                            : {}),
+                    },
+                })
+                .catch(() => undefined);
+
+            void this.notifications.dispatch(`purchase-invoice.${status}`, {
+                title: `Purchase invoice ${status}`,
+                message: `${invoice.invoiceNo} — ${invoice.supplierName} (PO ${invoice.poRef})`,
+                actionUrl: '/apps/procurement/purchase-orders',
+                relatedId: invoice.id,
+                relatedType: 'PurchaseInvoice',
+                vars: { reference: invoice.invoiceNo, poRef: invoice.poRef },
+            });
+        }
+
+        return invoice;
     }
+
+    /**
+     * Cancels an invoice rather than deleting it.
+     *
+     * Purchase Invoices offered Delete as the action on a *paid* invoice, which
+     * is the one row that must not disappear: it is the record that the money
+     * left. A cancellation keeps the history and releases the order back to
+     * procurement.
+     */
+    async cancelInvoice(id: string, reason?: string) {
+        const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { id } });
+        if (!invoice) throw new NotFoundException('Purchase invoice not found');
+        if (normaliseStatus(invoice.status) === 'paid') {
+            throw new BadRequestException(
+                'A paid invoice cannot be cancelled. Reverse the payment first.',
+            );
+        }
+        const updated = await this.prisma.purchaseInvoice.update({
+            where: { id },
+            data: {
+                status: 'cancelled',
+                notes: reason ? `${invoice.notes ?? ''}\nCancelled: ${reason}`.trim() : invoice.notes,
+            },
+        });
+        if (invoice.poRef) {
+            await this.prisma.purchaseOrder
+                .updateMany({
+                    where: {
+                        OR: [{ poRef: invoice.poRef }, { id: invoice.poRef }],
+                        status: { in: ['sent_to_finance', 'finance_accepted'] },
+                    },
+                    data: {
+                        status: 'finance_declined',
+                        declineReason: reason ?? 'Invoice cancelled in Finance.',
+                        financeDecidedAt: new Date(),
+                    },
+                })
+                .catch(() => undefined);
+        }
+        return updated;
+    }
+
     deleteInvoice(id: string) {
         return this.prisma.purchaseInvoice.delete({ where: { id } });
     }
@@ -233,6 +340,14 @@ export class ProcurementRequestsService {
     }
     async updateQuote(id: string, data: any) {
         const quote = await this.prisma.receivedQuote.update({ where: { id }, data });
+
+        // Approving a quote *is* raising the order. "Create PO" was a separate
+        // button on Received Quotes, so a quote could sit approved with no order
+        // behind it and the two lists disagreed about what had been bought.
+        if (normaliseStatus(data?.status) === 'approved') {
+            await this.raisePurchaseOrderFromQuote(quote).catch(() => undefined);
+            return this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
+        }
         // Mirror a buyer counter-offer to the supplier's portal. Only the negotiate
         // action sends items carrying negotiation rounds; status-only updates don't.
         const rounds = Array.isArray(data.items)
@@ -257,5 +372,118 @@ export class ProcurementRequestsService {
     }
     deleteQuote(id: string) {
         return this.prisma.receivedQuote.delete({ where: { id } });
+    }
+
+    /**
+     * Raises the purchase order an approved quote has won.
+     *
+     * Written against Prisma rather than through PurchaseOrdersService on
+     * purpose: that service is where "send this order to Finance" lives, and
+     * Finance's invoice updates come back through *this* service, so injecting
+     * one into the other would close a cycle. A quote-derived order also should
+     * not email the supplier yet — it has to clear Finance first — which is the
+     * other half of why it does not reuse the create path.
+     *
+     * Idempotent: a quote already carrying an order is left alone, so a repeated
+     * approve cannot raise the same order twice.
+     */
+    private async raisePurchaseOrderFromQuote(quote: {
+        id: string;
+        prRef: string | null;
+        supplierId: string | null;
+        supplierName: string;
+        items: any;
+        totalValue: number;
+        validUntil: Date | null;
+    }) {
+        const existing = await this.prisma.purchaseOrder.findFirst({
+            where: { quoteRef: quote.id },
+            select: { id: true },
+        });
+        if (existing) return existing;
+
+        // An order needs a supplier row: the price is owed to somebody specific.
+        // A quote recorded against a name that is not in the supplier list has
+        // nowhere to send the money, so the quote stays approved and the buyer is
+        // told to add the supplier.
+        const supplierId =
+            quote.supplierId ??
+            (
+                await this.prisma.supplier.findFirst({
+                    where: { name: { equals: quote.supplierName, mode: 'insensitive' } },
+                    select: { id: true },
+                })
+            )?.id;
+        if (!supplierId) {
+            throw new BadRequestException(
+                `${quote.supplierName} is not in the supplier list, so an order cannot be raised against them.`,
+            );
+        }
+
+        // Delivery is due when the request that started this asked for it; the
+        // quote's validity, then a fortnight, are the fallbacks.
+        const pr = quote.prRef
+            ? await this.prisma.purchaseRequest.findUnique({ where: { prRef: quote.prRef } })
+            : null;
+        const days = pr?.daysToDeliver ?? null;
+        const expectedDate =
+            days != null
+                ? new Date(Date.now() + days * 86_400_000)
+                : (quote.validUntil ?? new Date(Date.now() + 14 * 86_400_000));
+
+        const items = (Array.isArray(quote.items) ? quote.items : []).map((it: any) => ({
+            material: String(it?.material ?? it?.description ?? ''),
+            qty: Number(it?.qty) || 0,
+            unit: String(it?.unit ?? 'Units'),
+            unitCost: Number(it?.unitPrice ?? it?.unitCost) || 0,
+        }));
+
+        const { reference: poRef } = await this.numbering.allocate('PurchaseOrder');
+        const po = await this.prisma.purchaseOrder.create({
+            data: {
+                poRef,
+                prRef: quote.prRef,
+                mrRef: pr?.mrRef ?? null,
+                quoteRef: quote.id,
+                supplierId,
+                status: 'draft',
+                createdBy: 'System',
+                expectedDate,
+                totalValue: Number(quote.totalValue) || 0,
+                items: { create: items },
+            },
+            include: { supplier: true, items: true },
+        });
+
+        // Both ends of the award are recorded: the quote is spent, and the
+        // request it was competed for now has an order against it.
+        await this.prisma.receivedQuote.update({
+            where: { id: quote.id },
+            data: { status: 'po_created' },
+        });
+        if (quote.prRef) {
+            await this.prisma.purchaseRequest
+                .updateMany({ where: { prRef: quote.prRef }, data: { status: 'po_created' } })
+                .catch(() => undefined);
+            // Losing quotes for the same request are closed out, so the list does
+            // not keep offering an approval for something already bought.
+            await this.prisma.receivedQuote
+                .updateMany({
+                    where: { prRef: quote.prRef, id: { not: quote.id }, status: 'pending_review' },
+                    data: { status: 'rejected' },
+                })
+                .catch(() => undefined);
+        }
+
+        this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => {});
+        void this.notifications.dispatch('purchase-order.created', {
+            title: 'Purchase order raised from approved quote',
+            message: `${poRef} — ${po.supplier?.name ?? quote.supplierName}`,
+            actionUrl: '/apps/procurement/purchase-orders',
+            relatedId: po.id,
+            relatedType: 'PurchaseOrder',
+            vars: { reference: poRef, supplier: po.supplier?.name ?? quote.supplierName },
+        });
+        return po;
     }
 }

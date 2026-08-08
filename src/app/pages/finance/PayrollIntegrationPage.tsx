@@ -24,6 +24,10 @@ import {
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
+import {
+  buildProcessPosting,
+  postJournalEntry,
+} from "../../utils/postJournalEntry";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 import { useNumbering } from "../../stores/numberingStore";
@@ -88,6 +92,8 @@ export function PayrollIntegrationPage() {
   const { allocate } = useNumbering();
   const [payrolls, setPayrolls] = useState<PayrollRun[]>([]);
   const [activeRun, setActiveRun] = useState<PayrollRun | null>(null);
+  /** Id of the run being posted, so paying cannot be double-fired. */
+  const [posting, setPosting] = useState<string | null>(null);
   const [employees, setEmployees] = useState<PayrollEmployee[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<PayrollRun | null>(null);
 
@@ -139,12 +145,59 @@ export function PayrollIntegrationPage() {
   const fmt = (n: number) =>
     formatCurrencyByGeneralSettings(n, { minimumFractionDigits: 0 });
 
-  function advance(id: string, action: string) {
+  /**
+   * Advances a payroll run, and posts it to the ledger when it is paid.
+   *
+   * Paying a run moves real money and produced no accounting entry at all —
+   * payroll was the largest recurring spend in the system and the ledger never
+   * heard about it. The lines come from Finance › Process Mapping for "Payroll
+   * Disbursement" rather than being hardcoded here, so which accounts payroll
+   * hits stays a configuration decision.
+   */
+  async function advance(id: string, action: string) {
+    const run = payrolls.find((p) => p.id === id);
+    if (!run || posting) return;
+    const idx = STATUS_FLOW.indexOf(run.status);
+    if (idx >= STATUS_FLOW.length - 1) return;
+    const next = STATUS_FLOW[idx + 1];
+
+    let postedRef: string | undefined;
+    if (next === "Paid") {
+      setPosting(id);
+      try {
+        const lines = await buildProcessPosting("Payroll Disbursement", {
+          "Gross Salary": run.grossPay,
+          "PAYE Tax": run.deductions,
+          "Net Pay": run.netPay,
+        });
+        if (lines.length === 0) {
+          toast.error("Payroll Disbursement has no account mapping.", {
+            description:
+              "Map it in Finance › Process Mapping before paying a run, or the payment posts nowhere.",
+          });
+          return;
+        }
+        const entry = await postJournalEntry({
+          description: `${run.period} payroll — ${run.department}`,
+          date: new Date().toISOString(),
+          createdBy: getAuthUserName() || "Current User",
+          lines,
+        });
+        postedRef = entry.reference;
+      } catch (e) {
+        toast.error(
+          e instanceof Error
+            ? e.message
+            : "Could not post the payroll to the ledger.",
+        );
+        return;
+      } finally {
+        setPosting(null);
+      }
+    }
+
     setPayrolls((prev) => prev.map((p) => {
       if (p.id !== id) return p;
-      const idx = STATUS_FLOW.indexOf(p.status);
-      if (idx >= STATUS_FLOW.length - 1) return p;
-      const next = STATUS_FLOW[idx + 1];
       return {
         ...p,
         status: next,
@@ -161,9 +214,9 @@ export function PayrollIntegrationPage() {
     setActiveRun((prev) => {
       if (!prev) return prev;
       if (prev.id !== id) return prev;
-      const idx = STATUS_FLOW.indexOf(prev.status);
-      if (idx >= STATUS_FLOW.length - 1) return prev;
-      return { ...prev, status: STATUS_FLOW[idx + 1] };
+      const i = STATUS_FLOW.indexOf(prev.status);
+      if (i >= STATUS_FLOW.length - 1) return prev;
+      return { ...prev, status: STATUS_FLOW[i + 1] };
     });
 
     if (action === "submit") {
@@ -173,8 +226,22 @@ export function PayrollIntegrationPage() {
       logChange({ module: "Finance", action: "Approved", entityType: "PayrollRun", entityId: id, summary: "Payroll run approved", performedBy: "Current User" });
       toast.success("Payroll run approved.");
     } else if (action === "pay") {
-      logChange({ module: "Finance", action: "Paid", entityType: "PayrollRun", entityId: id, summary: "Payroll run marked as paid", performedBy: "Current User" });
-      toast.success("Payroll run marked as paid.");
+      logChange({
+        module: "Finance",
+        action: "Paid",
+        entityType: "PayrollRun",
+        entityId: id,
+        summary: postedRef
+          ? `Payroll run paid and posted as ${postedRef}`
+          : "Payroll run marked as paid",
+        performedBy: getAuthUserName() || "Current User",
+      });
+      toast.success(
+        "Payroll run marked as paid.",
+        postedRef
+          ? { description: `Posted to the general ledger as ${postedRef}.` }
+          : undefined,
+      );
     }
   }
 
@@ -289,15 +356,15 @@ export function PayrollIntegrationPage() {
         <div className="flex items-center gap-1">
           {r.status === "Draft" && (
             <>
-              <button onClick={() => advance(r.id, "submit")} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Submit</button>
+              <button onClick={() => void advance(r.id, "submit")} className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Submit</button>
               <button onClick={() => setDeleteTarget(r)} className="p-1 text-xs text-red-500 hover:text-red-700"><Trash2 className="w-3.5 h-3.5" /></button>
             </>
           )}
           {r.status === "Sent for Approval" && (
-            <button onClick={() => advance(r.id, "approve")} className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
+            <button onClick={() => void advance(r.id, "approve")} className="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
           )}
           {r.status === "Approved" && (
-            <button onClick={() => advance(r.id, "pay")} className="px-2 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700">Pay</button>
+            <button onClick={() => void advance(r.id, "pay")} disabled={posting === r.id} className="px-2 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-40">{posting === r.id ? "Posting…" : "Pay"}</button>
           )}
           {r.status === "Paid" && (
             <span className="text-xs text-gray-400">—</span>
@@ -506,7 +573,7 @@ export function PayrollIntegrationPage() {
               <div className="flex gap-2">
                 {activeRun.status === "Draft" && (
                   <button
-                    onClick={() => advance(activeRun.id, "submit")}
+                    onClick={() => void advance(activeRun.id, "submit")}
                     className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                   >
                     <span className="flex items-center gap-1.5">
@@ -516,7 +583,7 @@ export function PayrollIntegrationPage() {
                 )}
                 {activeRun.status === "Sent for Approval" && (
                   <button
-                    onClick={() => advance(activeRun.id, "approve")}
+                    onClick={() => void advance(activeRun.id, "approve")}
                     className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
                   >
                     <span className="flex items-center gap-1.5">
@@ -526,7 +593,7 @@ export function PayrollIntegrationPage() {
                 )}
                 {activeRun.status === "Approved" && (
                   <button
-                    onClick={() => advance(activeRun.id, "pay")}
+                    onClick={() => void advance(activeRun.id, "pay")}
                     className="px-4 py-2 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700"
                   >
                     <span className="flex items-center gap-1.5">

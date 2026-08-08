@@ -6,7 +6,17 @@ import {
   formatDateByGeneralSettings,
 } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
-import { fetchPayments } from "../../api/payments";
+import {
+  fetchPayments,
+  initiatePayment,
+  completePayment,
+  updatePayment,
+} from "../../api/payments";
+import {
+  findAccount,
+  loadPostableAccounts,
+  postJournalEntry,
+} from "../../utils/postJournalEntry";
 import { Download, CreditCard, Clock, CheckCircle, XCircle, Send, Eye, X } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -71,6 +81,19 @@ const typeColors: Record<PaymentType, string> = {
   Payroll: "bg-purple-100 text-purple-700",
   Vendor: "bg-blue-100 text-blue-700",
   Contractor: "bg-teal-100 text-teal-700",
+};
+
+/**
+ * Where each kind of payment is expensed. Only a hint: the actual account is
+ * matched by name against this organisation's own Chart of Accounts, so a
+ * BuildOS install that names its accounts differently still posts somewhere
+ * sensible rather than to a hardcoded code that does not exist.
+ */
+const EXPENSE_ACCOUNT_HINT: Record<PaymentType, string> = {
+  Expense: "operating expense",
+  Payroll: "salaries",
+  Vendor: "cost of sales",
+  Contractor: "subcontract",
 };
 
 const PAYMENT_FLOW: PaymentStatus[] = [
@@ -138,6 +161,8 @@ export function PaymentManagementPage() {
     "All",
   );
   const [viewPayment, setViewPayment] = useState<Payment | null>(null);
+  /** Id of the payment mid-advance, so the action cannot be double-fired. */
+  const [advancing, setAdvancing] = useState<string | null>(null);
   const { logChange } = useChangelog();
 
   const fmt = (n: number) =>
@@ -149,40 +174,123 @@ export function PaymentManagementPage() {
     return true;
   });
 
-  function advancePayment(id: string) {
-    const payment = payments.find(p => p.id === id);
-    if (!payment) return;
+  /**
+   * Moves a payment to the next stage, and posts it when it completes.
+   *
+   * Two things were missing. The stage change was a `setPayments` call and
+   * nothing else, so the payment advanced in the browser and the next reload
+   * put it back. And completing a payment — the moment money actually leaves —
+   * posted nothing to the Chart of Accounts, so the ledger only ever knew about
+   * entries somebody had keyed by hand.
+   *
+   * The posting happens first: a payment marked complete without one is a
+   * payment with no accounting behind it, which is the harder error to find
+   * later.
+   */
+  async function advancePayment(id: string) {
+    const payment = payments.find((p) => p.id === id);
+    if (!payment || advancing) return;
     const idx = PAYMENT_FLOW.indexOf(payment.status);
     if (idx < 0 || idx >= PAYMENT_FLOW.length - 1) return;
     const next = PAYMENT_FLOW[idx + 1];
 
-    setPayments((prev) => prev.map((p) => {
-      if (p.id !== id) return p;
-      return {
-        ...p,
-        status: next,
-        initiatedBy: next === "Payment Initiated" ? (getAuthUserName() || "Current User") : p.initiatedBy,
-        completedAt: next === "Payment Completed"
-          ? formatDateByGeneralSettings(new Date())
-          : p.completedAt,
-      };
-    }));
+    setAdvancing(id);
+    const previous = payments;
+    try {
+      let postedRef: string | undefined;
 
-    logChange({
-      module: "Finance",
-      action: next,
-      entityType: "Payment",
-      entityId: id,
-      summary: `Payment ${id} advanced to ${next}`,
-      performedBy: "Current User",
-    });
+      if (next === "Payment Completed") {
+        const accounts = await loadPostableAccounts();
+        // Which account the spend lands in depends on what is being paid for;
+        // the credit side is always the bank.
+        const expense =
+          findAccount(
+            accounts,
+            EXPENSE_ACCOUNT_HINT[payment.type],
+            "expense",
+            "overhead",
+          ) ?? accounts[0];
+        const cash = findAccount(accounts, "cash & bank", "bank", "cash");
+        if (!expense || !cash) {
+          throw new Error(
+            "The Chart of Accounts has no bank or expense account to post this payment to.",
+          );
+        }
+        const entry = await postJournalEntry({
+          description: `Payment ${payment.reference || payment.id} — ${payment.recipient} (${payment.type})`,
+          date: new Date().toISOString(),
+          createdBy: getAuthUserName() || "Current User",
+          lines: [
+            {
+              id: `${payment.id}-dr`,
+              glCode: expense.code,
+              account: expense.name,
+              debit: payment.amount,
+              credit: 0,
+              description: payment.recipient,
+            },
+            {
+              id: `${payment.id}-cr`,
+              glCode: cash.code,
+              account: cash.name,
+              debit: 0,
+              credit: payment.amount,
+              description: `Paid via ${payment.method}`,
+            },
+          ],
+        });
+        postedRef = entry.reference;
+      }
 
-    setViewPayment(null);
-    toast.success(
-      next === "Payment Completed"
-        ? "Payment recorded."
-        : `Payment moved to ${next}.`,
-    );
+      if (next === "Payment Initiated") await initiatePayment(id);
+      else if (next === "Payment Completed") await completePayment(id);
+      else await updatePayment(id, { status: next.replace(/\s+/g, "") });
+
+      setPayments((prev) =>
+        prev.map((p) =>
+          p.id !== id
+            ? p
+            : {
+                ...p,
+                status: next,
+                initiatedBy:
+                  next === "Payment Initiated"
+                    ? getAuthUserName() || "Current User"
+                    : p.initiatedBy,
+                completedAt:
+                  next === "Payment Completed"
+                    ? formatDateByGeneralSettings(new Date())
+                    : p.completedAt,
+              },
+        ),
+      );
+
+      logChange({
+        module: "Finance",
+        action: next,
+        entityType: "Payment",
+        entityId: id,
+        summary: postedRef
+          ? `Payment ${id} completed and posted as ${postedRef}`
+          : `Payment ${id} advanced to ${next}`,
+        performedBy: getAuthUserName() || "Current User",
+      });
+
+      setViewPayment(null);
+      toast.success(
+        next === "Payment Completed" ? "Payment recorded." : `Payment moved to ${next}.`,
+        postedRef
+          ? { description: `Posted to the general ledger as ${postedRef}.` }
+          : undefined,
+      );
+    } catch (e) {
+      setPayments(previous);
+      toast.error(
+        e instanceof Error ? e.message : "Could not advance the payment.",
+      );
+    } finally {
+      setAdvancing(null);
+    }
   }
 
   function handleExport() {

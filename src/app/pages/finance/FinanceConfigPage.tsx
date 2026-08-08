@@ -5,6 +5,7 @@ import {
   formatCurrencyByGeneralSettings,
   getCurrencyCode,
 } from "../../utils/generalSettings";
+import { GlobalCurrencyField } from "../../components/GlobalCurrencyField";
 import {
   getBankAccounts,
   createBankAccount,
@@ -55,6 +56,14 @@ interface TaxEntry {
   enabled: boolean;
 }
 
+/**
+ * Currencies a *bank account* may be denominated in.
+ *
+ * A genuinely foreign account is a real thing, so this list stays — but it is
+ * about one account's denomination, not the organisation's reporting currency,
+ * which is global and set in Admin. New accounts default to the org currency
+ * rather than a hardcoded USD.
+ */
 const CURRENCIES = ["USD", "NGN", "GBP", "EUR", "GHS", "ZAR"];
 const FISCAL_MONTHS = [
   "January",
@@ -128,8 +137,9 @@ export function FinanceConfigPage() {
   // persists to the server; `removeConfig` is still used by the delete modal.
   const { removeConfig } = useNumbering();
 
-  // General settings state
-  const [currency, setCurrency] = useState("USD");
+  // General settings state. Currency is not among them: it is global, read from
+  // Admin › General Settings, and saved back so the stored Finance config keeps
+  // agreeing with it rather than drifting to a currency nothing converts to.
   const [fiscalYearStart, setFiscalYearStart] = useState("January");
   // Blank means "no threshold": every expense goes to a manager. Defaulting to
   // a number would have set a live auto-approval limit the first time anyone
@@ -142,7 +152,7 @@ export function FinanceConfigPage() {
     name: "",
     bank: "",
     accountNumber: "",
-    currency: "USD",
+    currency: getCurrencyCode(),
     balance: "",
   });
 
@@ -179,7 +189,6 @@ export function FinanceConfigPage() {
       .catch((err) => notifyLoadFailure("tax configuration", err));
     apiFetch<any>("/config")
       .then((cfg) => {
-        if (cfg?.currency) setCurrency(cfg.currency);
         if (cfg?.fiscalYearStart) setFiscalYearStart(cfg.fiscalYearStart);
         if (cfg?.approvalThreshold !== undefined && cfg?.approvalThreshold !== null)
           setApprovalThreshold(String(cfg.approvalThreshold));
@@ -223,7 +232,7 @@ export function FinanceConfigPage() {
     apiFetch("/config", {
       method: "POST",
       body: JSON.stringify({
-        currency,
+        currency: getCurrencyCode(),
         fiscalYearStart,
         // Blank stores 0, which the server reads as "no threshold".
         approvalThreshold: parseFloat(approvalThreshold) || 0,
@@ -294,7 +303,13 @@ export function FinanceConfigPage() {
         setBankAccounts([...bankAccounts, acc]);
         logChange({ module: "Finance", action: "Created", entityType: "BankAccount", entityId: acc.id, summary: `Bank account "${acc.name}" (${acc.bank}) added`, performedBy: "Sola Adeleke" });
         setShowBankModal(false);
-        setBankForm({ name: "", bank: "", accountNumber: "", currency: "USD", balance: "" });
+        setBankForm({
+          name: "",
+          bank: "",
+          accountNumber: "",
+          currency: getCurrencyCode(),
+          balance: "",
+        });
         toast.success(`Bank account "${acc.name}" added.`);
       })
       .catch((err) => {
@@ -653,22 +668,13 @@ export function FinanceConfigPage() {
           <h2 className="text-sm font-semibold text-gray-900">General Setup</h2>
         </div>
         <div className="px-5 py-4 grid grid-cols-3 gap-6">
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-              Default Currency
-            </label>
-            <select
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              {CURRENCIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Currency is global; the financial year beside it deliberately is
+              not, because Finance may run to a different year end than the rest
+              of the company. */}
+          <GlobalCurrencyField
+            label="Default Currency"
+            hint="Every amount in Finance is stated in it."
+          />
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1.5">
               Financial Year Start

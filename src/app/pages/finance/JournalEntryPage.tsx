@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import {
   csvAmountHeader,
   formatCurrencyByGeneralSettings,
-  formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
@@ -22,17 +21,17 @@ import { exportCSV } from "../../utils/exportCSV";
 import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
+import {
+  JournalLinesEditor,
+  journalTotals,
+  newJournalLine,
+  type JournalLineInput,
+} from "../../components/JournalLinesEditor";
 
 type EntryStatus = "Draft" | "Posted" | "Reversed";
 
-interface JournalLine {
-  id: string;
-  account: string;
-  glCode: string;
-  debit: number;
-  credit: number;
-  description: string;
-}
+/** The shared posting-line shape, so the editor can be reused as-is. */
+type JournalLine = JournalLineInput;
 
 interface JournalEntry {
   id: string;
@@ -48,14 +47,7 @@ interface JournalEntry {
   reversalOfId?: string;
 }
 
-const blankLine = (): JournalLine => ({
-  id: `ln-${Date.now()}-${Math.random()}`,
-  account: "",
-  glCode: "",
-  debit: 0,
-  credit: 0,
-  description: "",
-});
+const blankLine = newJournalLine;
 
 const STATUS_STYLES: Record<EntryStatus, string> = {
   Draft: "bg-amber-100 text-amber-700",
@@ -182,36 +174,7 @@ export function JournalEntryPage() {
     setModalOpen(true);
   }
 
-  function addLine() {
-    setForm((f) => ({ ...f, lines: [...f.lines, blankLine()] }));
-  }
-
-  function removeLine(id: string) {
-    setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.id !== id) }));
-  }
-
-  function updateLine(
-    id: string,
-    field: keyof JournalLine,
-    value: string | number,
-  ) {
-    setForm((f) => ({
-      ...f,
-      lines: f.lines.map((l) => {
-        if (l.id !== id) return l;
-        const updated = { ...l, [field]: value };
-        if (field === "account") {
-          const acct = accounts.find((a) => a.name === value);
-          if (acct) updated.glCode = acct.code;
-        }
-        return updated;
-      }),
-    }));
-  }
-
-  const totalDebits = form.lines.reduce((s, l) => s + (l.debit || 0), 0);
-  const totalCredits = form.lines.reduce((s, l) => s + (l.credit || 0), 0);
-  const isBalanced = totalDebits === totalCredits && totalDebits > 0;
+  const { balanced: isBalanced } = journalTotals(form.lines);
 
   async function saveEntry(status: EntryStatus) {
     if (!form.description || !isBalanced || savingEntry) return;
@@ -523,146 +486,19 @@ export function JournalEntryPage() {
                 </div>
               </div>
 
-              {/* Lines */}
+              {/* Lines. The table, the running totals and the balance check
+                  are shared with every other posting screen, so a payment
+                  recorded against an invoice is validated exactly the way a
+                  manual journal is. */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-gray-700">
-                    Journal Lines
-                  </label>
-                  <button
-                    onClick={addLine}
-                    className="text-xs text-emerald-600 hover:underline flex items-center gap-1"
-                  >
-                    <Plus className="w-3 h-3" /> Add line
-                  </button>
-                </div>
-                <div className="rounded-lg border border-gray-200 overflow-x-auto">
-                  <table className="min-w-[720px] w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">
-                          Account
-                        </th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 w-20">
-                          GL Code
-                        </th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 w-28">
-                          Debit
-                        </th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 w-28">
-                          Credit
-                        </th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">
-                          Note
-                        </th>
-                        <th className="w-8" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {form.lines.map((line) => (
-                        <tr key={line.id}>
-                          <td className="px-2 py-1.5">
-                            <select
-                              value={line.account}
-                              onChange={(e) =>
-                                updateLine(line.id, "account", e.target.value)
-                              }
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            >
-                              <option value="">Select account</option>
-                              {accounts.map((a) => (
-                                <option key={a.code} value={a.name}>
-                                  {a.name}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              value={line.glCode}
-                              readOnly
-                              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded bg-gray-50 font-mono text-gray-500"
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              value={line.debit || ""}
-                              onChange={(e) =>
-                                updateLine(
-                                  line.id,
-                                  "debit",
-                                  parseFloat(e.target.value) || 0,
-                                )
-                              }
-                              placeholder="0"
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              value={line.credit || ""}
-                              onChange={(e) =>
-                                updateLine(
-                                  line.id,
-                                  "credit",
-                                  parseFloat(e.target.value) || 0,
-                                )
-                              }
-                              placeholder="0"
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              value={line.description}
-                              onChange={(e) =>
-                                updateLine(
-                                  line.id,
-                                  "description",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Note"
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            {form.lines.length > 2 && (
-                              <button
-                                onClick={() => removeLine(line.id)}
-                                className="p-1 text-gray-400 hover:text-red-500"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-gray-50 border-t border-gray-200">
-                      <tr>
-                        <td colSpan={2} className="px-3 py-2 text-xs font-semibold text-gray-600 text-right">Totals:</td>
-                        <td className="px-3 py-2 text-xs font-bold text-emerald-700">{formatNumberByGeneralSettings(totalDebits)}</td>
-                        <td className="px-3 py-2 text-xs font-bold text-red-600">{formatNumberByGeneralSettings(totalCredits)}</td>
-                        <td colSpan={2} className="px-3 py-2">
-                          {totalDebits > 0 && (
-                            <span
-                              className={`text-xs font-semibold ${isBalanced ? "text-emerald-600" : "text-red-600"}`}
-                            >
-                              {isBalanced
-                                ? "✓ Balanced"
-                                : `Difference: ${formatCurrencyByGeneralSettings(Math.abs(totalDebits - totalCredits), { minimumFractionDigits: 0 })}`}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                <label className="text-xs font-semibold text-gray-700 block mb-2">
+                  Journal Lines
+                </label>
+                <JournalLinesEditor
+                  lines={form.lines}
+                  onChange={(lines) => setForm((f) => ({ ...f, lines }))}
+                  accounts={accounts}
+                />
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">

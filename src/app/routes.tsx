@@ -195,6 +195,7 @@ const HRTasksPage = lazyPage(() => import("./pages/hr/HRTasksPage").then((m) => 
 const HRMyTasksPage = lazyPage(() => import("./pages/hr/HRMyTasksPage").then((m) => ({ default: m.HRMyTasksPage })));
 
 // Procurement new pages (lazy-loaded)
+const GeneralLedgerPage = lazyPage(() => import("./pages/finance/GeneralLedgerPage").then((m) => ({ default: m.GeneralLedgerPage })));
 const PurchaseInvoicePage = lazyPage(() => import("./pages/procurement/PurchaseInvoicePage").then((m) => ({ default: m.PurchaseInvoicePage })));
 const ProcurementTasksPage = lazyPage(() => import("./pages/procurement/ProcurementTasksPage").then((m) => ({ default: m.ProcurementTasksPage })));
 const ProcurementMyTasksPage = lazyPage(() => import("./pages/procurement/ProcurementMyTasksPage").then((m) => ({ default: m.ProcurementMyTasksPage })));
@@ -331,6 +332,7 @@ export const router = createBrowserRouter([
               { path: "payroll", Component: PayrollIntegrationPage },
               { path: "claims", Component: ClaimsManagementPage },
               { path: "approvals", Component: FinanceApprovalsPage },
+              { path: "general-ledger", Component: GeneralLedgerPage },
               { path: "ledger", Component: TransactionsLedgerPage },
               { path: "reports", Component: FinanceReportsPage },
               { path: "config", Component: FinanceConfigPage },

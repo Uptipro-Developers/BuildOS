@@ -94,9 +94,19 @@ export class ProcurementRequestsController {
     updateInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
     @Patch('purchase-invoices/:id')
     patchInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
-    @Delete('purchase-invoices/:id')
-    @RequiresProcess('p_purchase_invoices', 'delete')
-    deleteInvoice(@Param('id') id: string) { return this.svc.deleteInvoice(id); }
+    /**
+     * Cancels an invoice instead of deleting it.
+     *
+     * Deleting breaks the chain: the invoice is the link between a purchase
+     * order and its payment, so removing it leaves the order in Procurement
+     * pointing at nothing and the payment with no document behind it. The Delete
+     * endpoint is gone; this is what replaces it.
+     */
+    @Post('purchase-invoices/:id/cancel')
+    @RequiresProcess('p_purchase_invoices', 'edit')
+    cancelInvoice(@Param('id') id: string, @Body() body: any) {
+        return this.svc.cancelInvoice(id, body?.reason);
+    }
 
     // ── Sent RFQs ──
     @Get('sent-rfqs')
