@@ -28,11 +28,22 @@ export async function postJournalEntry(input: {
   lines: JournalLineInput[];
   /** Human reference of the document this settles, e.g. an invoice number. */
   reference?: string;
+  /** Which engine is posting — "Payment", "Purchase", "Payroll", "Journal". */
+  sourceModule?: string;
+  /** The originating record's model and id, so the ledger can link back to it. */
+  sourceType?: string;
+  sourceId?: string;
+  /** The configured process whose mapping produced these lines. */
+  process?: string;
 }): Promise<JournalEntry> {
   // Checked before anything is dropped. Filtering first would silently discard
   // a line carrying an amount but no account — and if the remaining lines
   // happened to balance without it, the posting would go through having quietly
   // lost part of what the user entered.
+  //
+  // The server enforces all of this too, and is the authority. Checking here as
+  // well is what lets the modal say what is wrong while the user still has the
+  // lines in front of them, instead of after a round trip.
   const orphaned = input.lines.find((l) => (l.debit || l.credit) && !l.glCode);
   if (orphaned) {
     throw new Error(
@@ -64,7 +75,14 @@ export async function postJournalEntry(input: {
       credit: l.credit || 0,
       description: l.description || undefined,
     })),
-    ...(input.reference ? { reference: input.reference } : {}),
+    // What the posting came from. Without these the General Ledger can show
+    // that money moved but not what moved it, and a line cannot be traced back
+    // to the invoice, payment or run behind it.
+    sourceModule: input.sourceModule ?? "Journal",
+    ...(input.sourceType ? { sourceType: input.sourceType } : {}),
+    ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+    ...(input.reference ? { sourceRef: input.reference } : {}),
+    ...(input.process ? { process: input.process } : {}),
   });
 }
 

@@ -1,4 +1,5 @@
 import { FinanceExtrasService } from './finance-extras.service';
+import { PostingEngineService } from './posting-engine.service';
 
 /**
  * The Posting Engine's configuration, and where it is kept.
@@ -33,7 +34,14 @@ function makeService(stored: Record<string, unknown> = {}) {
         allocate: jest.fn(() => Promise.resolve({ reference: 'JE-001' })),
     };
 
-    return { service: new FinanceExtrasService(prisma, numbering), settings, prisma };
+    const posting = new PostingEngineService(prisma, numbering);
+
+    return {
+        service: new FinanceExtrasService(prisma, numbering, posting),
+        settings,
+        prisma,
+        posting,
+    };
 }
 
 const CATEGORY = {

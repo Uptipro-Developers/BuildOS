@@ -238,6 +238,12 @@ export function PaymentManagementPage() {
               description: `Paid via ${payment.method}`,
             },
           ],
+          // So the General Ledger can name what moved the money and link back
+          // to it, rather than showing a posting with no origin.
+          reference: payment.reference || undefined,
+          sourceModule: "Payment",
+          sourceType: "Payment",
+          sourceId: payment.id,
         });
         postedRef = entry.reference;
       }

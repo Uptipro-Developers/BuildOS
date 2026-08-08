@@ -45,6 +45,7 @@ import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   csvAmountHeader,
   getCurrencySymbol,
+  formatDateByGeneralSettings,
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
 
@@ -220,7 +221,11 @@ function PayInvoiceModal({
               Pay Invoice — {invoice.invoiceNo}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {invoice.supplier} · Due {invoice.dueDate} · {fmt(total)}
+              {invoice.supplier} ·{" "}
+              {invoice.dueDate
+                ? `Due ${formatDateByGeneralSettings(invoice.dueDate)}`
+                : "No due date"}{" "}
+              · {fmt(total)}
             </p>
           </div>
           <button
@@ -496,6 +501,13 @@ export function PurchaseInvoicePage() {
         date: payload.date,
         createdBy: getAuthUserName() || "Current User",
         lines: payload.lines,
+        // The invoice number is the payment reference throughout: it is what
+        // the General Ledger cites, and what a ledger line traces back through
+        // to reach this invoice.
+        reference: inv.invoiceNo,
+        sourceModule: "Purchase",
+        sourceType: "PurchaseInvoice",
+        sourceId: inv.id,
       });
       setPayTarget(null);
       await updateStatus(
@@ -563,8 +575,8 @@ export function PurchaseInvoicePage() {
         inv.invoiceNo,
         inv.supplier,
         inv.poRef,
-        inv.issueDate,
-        inv.dueDate,
+        formatDateByGeneralSettings(inv.issueDate),
+        formatDateByGeneralSettings(inv.dueDate),
         lineTotal(inv.lines),
         inv.status,
       ]),
@@ -682,7 +694,10 @@ export function PurchaseInvoicePage() {
             className={`text-sm ${overdue ? "text-red-600 font-medium" : "text-gray-500"}`}
             title={overdue ? "Past its due date" : undefined}
           >
-            {inv.dueDate}
+            {/* The API serves these as ISO timestamps; rendering one raw put
+                "2026-03-01T00:00:00.000Z" in the column while every sibling
+                page showed the configured date format. */}
+            {formatDateByGeneralSettings(inv.dueDate) || "—"}
           </span>
         );
       },

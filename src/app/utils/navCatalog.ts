@@ -65,7 +65,7 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/finance/budget", label: "Budget Management", section: "Financial Management" },
     { id: "/apps/finance/payments", label: "Payment Management", section: "Financial Management" },
     { id: "/apps/finance/purchase-invoice", label: "Purchase Invoice", section: "Financial Management" },
-    { id: "/apps/finance/payroll", label: "Payroll Integration", section: "Payroll & Claims" },
+    { id: "/apps/finance/payroll", label: "Payroll Overview", section: "Payroll & Claims" },
     { id: "/apps/finance/claims", label: "Claims Management", section: "Payroll & Claims" },
     { id: "/apps/finance/year-end-close", label: "Year-End Close", section: "Period End" },
     { id: "/apps/finance/fiscal-years", label: "Fiscal Years", section: "Period End" },
