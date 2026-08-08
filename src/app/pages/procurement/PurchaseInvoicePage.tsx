@@ -652,7 +652,20 @@ export function PurchaseInvoicePage() {
       label: "Invoice No",
       sortable: true,
       filterable: true,
-      render: (inv) => <span className="font-mono text-xs text-gray-700">{inv.invoiceNo}</span>,
+      // The supplier numbers their own invoices, so an invoice number says
+      // nothing about which order it bills for. The purchase order reference
+      // goes underneath it — the same way a purchase request shows the material
+      // request it came from.
+      render: (inv) => (
+        <div>
+          <p className="font-mono text-xs text-gray-700">{inv.invoiceNo}</p>
+          {inv.poRef && (
+            <p className="font-mono text-xs text-gray-400 mt-0.5">
+              {inv.poRef}
+            </p>
+          )}
+        </div>
+      ),
     },
     {
       key: "supplier",

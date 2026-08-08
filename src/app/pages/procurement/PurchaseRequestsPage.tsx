@@ -16,7 +16,6 @@ import {
   Trash2,
   Send,
   Download,
-  Users,
   Eye,
   Pencil,
   Ban,
@@ -240,11 +239,17 @@ interface NewPRPayload {
  */
 function PRFormModal({
   initial,
+  opened,
   onClose,
   onSave,
 }: {
   /** The request being edited, or undefined when raising a new one. */
   initial?: PurchaseRequest;
+  /**
+   * Which row action opened it. Only the heading changes — raising a request is
+   * reviewing and completing it, so it is the same form either way.
+   */
+  opened?: "edit" | "raise";
   onClose: () => void;
   /** `raise` sends it to suppliers immediately; `draft` parks it. */
   onSave: (payload: NewPRPayload, intent: "draft" | "raise") => Promise<void>;
@@ -404,7 +409,11 @@ function PRFormModal({
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h2 className="text-base font-semibold text-gray-900">
-            {initial ? `Edit ${initial.prRef}` : "New Purchase Request"}
+            {!initial
+              ? "New Purchase Request"
+              : opened === "raise"
+                ? `Raise ${initial.prRef}`
+                : `Edit ${initial.prRef}`}
           </h2>
           <button
             onClick={onClose}
@@ -685,90 +694,6 @@ function PRFormModal({
   );
 }
 
-function SendToSuppliersModal({
-  pr,
-  onClose,
-  onSend,
-  sending,
-}: {
-  pr: PurchaseRequest;
-  onClose: () => void;
-  onSend: () => void;
-  sending: boolean;
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">
-            Send to Suppliers
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm">
-            <p className="font-medium text-blue-800">
-              {pr.prRef} · {pr.project}
-            </p>
-            <p className="text-xs text-blue-600 mt-0.5">
-              {pr.procurementType === "rfq"
-                ? "Request for Quote"
-                : "Direct Procurement"}{" "}
-              · {pr.suppliers.length} supplier
-              {pr.suppliers.length > 1 ? "s" : ""}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              Will be sent to:
-            </p>
-            <div className="space-y-1">
-              {pr.suppliers.map((s) => (
-                <div
-                  key={s.supplier}
-                  className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-sm"
-                >
-                  <Users className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-gray-700">{s.supplier}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <p className="text-xs text-gray-500">
-            {pr.procurementType === "rfq"
-              ? "Each supplier will receive the material requirements and be asked to submit a quote."
-              : "The selected supplier will receive the purchase request directly."}
-          </p>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              onSend();
-              onClose();
-            }}
-            disabled={sending || pr.suppliers.length === 0}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            <Send className="w-4 h-4" />{" "}
-            {sending ? "Sending…" : "Confirm & Send"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function PurchaseRequestsPage() {
   const { logChange } = useChangelog();
   const [prList, setPrList] = useState<PurchaseRequest[]>([]);
@@ -782,9 +707,19 @@ export function PurchaseRequestsPage() {
   }, []);
   const [activeTab, setActiveTab] = useState<PRStatus | "all">("all");
   const [showNewPR, setShowNewPR] = useState(false);
-  /** The draft being edited, if any. */
-  const [editPR, setEditPR] = useState<PurchaseRequest | null>(null);
-  const [sendFor, setSendFor] = useState<PurchaseRequest | null>(null);
+  /**
+   * The request open in the form, if any, and which action opened it.
+   *
+   * Edit and Raise share one form. Raising used to open a confirmation listing
+   * the suppliers already on the request with no way to change them — on a
+   * request created for you upstream that meant one arbitrary supplier, locked
+   * in. Raising a request is where the supplier gets chosen, so it has to be the
+   * form, with the items and the rest of the request there to check.
+   */
+  const [editPR, setEditPR] = useState<{
+    pr: PurchaseRequest;
+    opened: "edit" | "raise";
+  } | null>(null);
   /** Id of the request currently being sent, so the button can't be double-fired. */
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [viewPR, setViewPR] = useState<PurchaseRequest | null>(null);
@@ -943,7 +878,7 @@ export function PurchaseRequestsPage() {
                 <RowAction
                   icon={<Pencil className="w-3.5 h-3.5" />}
                   label="Edit"
-                  onClick={() => setEditPR(pr)}
+                  onClick={() => setEditPR({ pr, opened: "edit" })}
                 />
                 <RowAction
                   icon={<Send className="w-3.5 h-3.5" />}
@@ -951,7 +886,7 @@ export function PurchaseRequestsPage() {
                   tone="positive"
                   busy={sendingTo === pr.id}
                   busyLabel="Raising…"
-                  onClick={() => setSendFor(pr)}
+                  onClick={() => setEditPR({ pr, opened: "raise" })}
                 />
                 <RowAction
                   icon={<Ban className="w-3.5 h-3.5" />}
@@ -960,13 +895,6 @@ export function PurchaseRequestsPage() {
                   onClick={() => setCancelTarget(pr)}
                 />
               </>
-            )}
-            {pr.status === "raised" && (
-              <RowAction
-                icon={<Send className="w-3.5 h-3.5" />}
-                label="Sent Requests"
-                onClick={() => navigate("/apps/procurement/sent-requests")}
-              />
             )}
             {pr.status === "quotes_received" && (
               <RowAction
@@ -1155,7 +1083,7 @@ export function PurchaseRequestsPage() {
   ) {
     if (!editPR) return;
     try {
-      const updated = await updatePurchaseRequest(editPR.id, {
+      const updated = await updatePurchaseRequest(editPR.pr.id, {
         title: payload.title,
         projectId: payload.projectId,
         projectName: payload.projectName,
@@ -1283,18 +1211,10 @@ export function PurchaseRequestsPage() {
 
       {editPR && (
         <PRFormModal
-          initial={editPR}
+          initial={editPR.pr}
+          opened={editPR.opened}
           onClose={() => setEditPR(null)}
           onSave={handleEditPR}
-        />
-      )}
-
-      {sendFor && (
-        <SendToSuppliersModal
-          pr={sendFor}
-          onClose={() => setSendFor(null)}
-          sending={sendingTo === sendFor.id}
-          onSend={() => void raiseToSuppliers(sendFor.id)}
         />
       )}
 
