@@ -185,7 +185,6 @@ const TransactionsPage = lazyPage(() => import("./pages/finance/TransactionsPage
 const FinanceTasksPage = lazyPage(() => import("./pages/finance/FinanceTasksPage").then((m) => ({ default: m.FinanceTasksPage })));
 const FinanceMyTasksPage = lazyPage(() => import("./pages/finance/FinanceMyTasksPage").then((m) => ({ default: m.FinanceMyTasksPage })));
 const ProcessMappingPage = lazyPage(() => import("./pages/finance/ProcessMappingPage").then((m) => ({ default: m.ProcessMappingPage })));
-const PostingEnginePage = lazyPage(() => import("./pages/finance/PostingEnginePage").then((m) => ({ default: m.PostingEnginePage })));
 const AccrualsPage = lazyPage(() => import("./pages/finance/AccrualsPage").then((m) => ({ default: m.AccrualsPage })));
 const YearEndClosePage = lazyPage(() => import("./pages/finance/YearEndClosePage").then((m) => ({ default: m.YearEndClosePage })));
 const FiscalYearsPage = lazyPage(() => import("./pages/finance/FiscalYearsPage").then((m) => ({ default: m.FiscalYearsPage })));
@@ -337,7 +336,6 @@ export const router = createBrowserRouter([
               { path: "tasks", Component: FinanceTasksPage },
               { path: "my-tasks", Component: FinanceMyTasksPage },
               { path: "process-mapping", Component: ProcessMappingPage },
-              { path: "posting-engine", Component: PostingEnginePage },
               { path: "purchase-invoice", Component: PurchaseInvoicePage },
               { path: "budget-tracking", Component: BudgetTrackingPage },
               { path: "expenses-list", Component: ExpensesPage },

@@ -5,7 +5,7 @@ import { FinanceProvider } from "../../stores/financeStore";
 import {
   LayoutDashboard, BookOpen, Receipt, TrendingDown, TrendingUp,
   CreditCard, Users2, FileText, CheckSquare, List, BarChart3, Settings2, ListTodo, PenLine, User,
-  Zap, GitBranch, CalendarCheck, RefreshCw, ScrollText,
+  GitBranch, CalendarCheck, RefreshCw, ScrollText,
 } from "lucide-react";
 
 const sidebarSections = [
@@ -69,7 +69,6 @@ const sidebarSections = [
     label: "Ledger & Reports",
     items: [
       { label: "Transactions Ledger",  href: "/apps/finance/ledger",           icon: <List     className="w-4 h-4" />, end: true },
-      { label: "Posting Engine",        href: "/apps/finance/posting-engine",    icon: <Zap      className="w-4 h-4" />, end: true },
       { label: "Reports",              href: "/apps/finance/reports",           icon: <BarChart3  className="w-4 h-4" />, end: true },
     ],
   },
