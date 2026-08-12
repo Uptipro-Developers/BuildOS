@@ -91,19 +91,25 @@ enum NotificationStatus {
   failed
 }
 
+/// The purchase order's single lifecycle, matching the implemented workflow:
+/// draft → sent_to_finance → finance_accepted → paid → confirmation_requested
+/// → confirmed → goods_received, with finance_declined as the one branch off it.
+///
+/// `sent` ("Sent to Supplier") and `partially_received` were removed: no step in
+/// the workflow ever produced them, so they were labels for states the system
+/// could not reach. Payment used to be tracked in a parallel POPaymentStatus
+/// column, which meant an order carried two half-states and neither said whose
+/// turn it was; it is one chain now.
 enum POStatus {
   draft
-  sent
-  confirmed
-  partially_received
-  completed
-  cancelled
-}
-
-enum POPaymentStatus {
-  unpaid
-  confirmation_requested
+  sent_to_finance
+  finance_accepted
+  finance_declined
   paid
+  confirmation_requested
+  confirmed
+  goods_received
+  cancelled
 }
 
 enum ExpenseStatus {
@@ -426,7 +432,15 @@ model SupplierMaterial {
 // ─────────────── PURCHASE ORDERS ───────────────
 
 model PurchaseOrder {
-  id    String  @id @default(cuid())
+  id String @id @default(cuid())
+
+  /// The order's own human reference (PO-0007), from the PurchaseOrder sequence
+  /// in Settings › Numbering. The award screen allocated one and then threw it
+  /// away because there was no column for it, so every screen fell back to
+  /// showing the cuid under a heading that said "PO ID" — and a goods receipt
+  /// could not cite the order it was receiving against.
+  poRef String? @unique
+
   prRef String?
   mrRef String?
 
@@ -436,21 +450,38 @@ model PurchaseOrder {
   /// represented even though the UI offered the button.
   quoteRef String?
 
-  status        POStatus        @default(draft)
-  paymentStatus POPaymentStatus @default(unpaid)
-  sentToFinance Boolean         @default(false)
-  financeRef    String?
-  createdBy     String
-  createdDate   DateTime        @default(now())
-  expectedDate  DateTime
-  totalValue    Float           @default(0)
-  receivedValue Float           @default(0)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  status        POStatus @default(draft)
+  sentToFinance Boolean  @default(false)
 
-  supplier   Supplier @relation(fields: [supplierId], references: [id])
-  supplierId String
-  items      POItem[]
+  /// Invoice number of the PurchaseInvoice raised in Finance when this order was
+  /// sent there. The link is what lets a payment recorded in Finance show up on
+  /// the order in Procurement.
+  financeRef String?
+
+  createdBy     String
+  createdDate   DateTime @default(now())
+  expectedDate  DateTime
+  totalValue    Float    @default(0)
+  receivedValue Float    @default(0)
+
+  /// Milestones of the payment chain, so the order can say *when* each step
+  /// happened rather than only which step it is on.
+  sentToFinanceAt DateTime?
+  financeDecidedAt DateTime?
+  paidAt          DateTime?
+  confirmedAt     DateTime?
+
+  /// Why Finance declined, shown back on the order in Procurement so the buyer
+  /// knows what to fix.
+  declineReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier      Supplier       @relation(fields: [supplierId], references: [id])
+  supplierId    String
+  items         POItem[]
+  goodsReceipts GoodsReceipt[]
 }
 
 model POItem {
@@ -462,6 +493,61 @@ model POItem {
   received        Float         @default(0)
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   purchaseOrderId String
+}
+
+/// A delivery received against a purchase order.
+///
+/// Goods Receipt was previously a screen with no storage behind it at all: the
+/// list started empty on every load, "Accept & Update Stock" flipped a flag in
+/// React state, and nothing reached stock, materials or the storefront. This is
+/// the record that closes the chain — receiving one updates StockMovement,
+/// StoreItem and Material, and moves the order to `goods_received`.
+model GoodsReceipt {
+  id        String @id @default(cuid())
+  reference String @unique
+
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrderId String
+  /// Denormalised so a receipt still reads correctly in lists and exports
+  /// without joining the order.
+  poRef        String?
+  mrRef        String?
+  supplierName String
+
+  /// Where the goods landed. Stock is posted against this store.
+  storeId   String?
+  storeName String
+
+  deliveryNote String?
+  receivedBy   String
+  receivedDate DateTime @default(now())
+  status       String   @default("pending")
+  notes        String?
+
+  /// Set when the receipt is accepted and stock has been posted. Guards the
+  /// posting so a double-click cannot add the same delivery to stock twice.
+  stockPostedAt DateTime?
+
+  items GoodsReceiptItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([purchaseOrderId])
+}
+
+model GoodsReceiptItem {
+  id       String @id @default(cuid())
+  material String
+  unit     String
+  ordered  Float  @default(0)
+  received Float  @default(0)
+  accepted Float  @default(0)
+  rejected Float  @default(0)
+  reason   String?
+
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  goodsReceiptId String
 }
 
 // ─────────────── EXPENSES ───────────────
@@ -809,7 +895,10 @@ model PurchaseRequest {
   title         String
   projectId     String?
   projectName   String?
-  status        String   @default("Draft")
+  /// "draft" | "not_raised" | "raised" | "quotes_received" | "po_created" |
+  /// "cancelled". A purchase request carries no approval status of its own —
+  /// see the POStatus comment and src/app/utils/procurementWorkflow.tsx.
+  status        String   @default("not_raised")
   priority      String   @default("Normal")
   requestedBy   String
   daysToDeliver Int?
@@ -848,7 +937,8 @@ model PurchaseInvoice {
   subtotal     Float     @default(0)
   vatTotal     Float     @default(0)
   total        Float     @default(0)
-  status       String    @default("Pending")
+  /// "pending_review" | "accepted" | "declined" | "paid" | "cancelled".
+  status       String    @default("pending_review")
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -888,7 +978,8 @@ model ReceivedQuote {
   rfqRef       String?
   supplierName String
   supplierId   String?
-  status       String    @default("Received")
+  /// "pending_review" | "approved" | "rejected" | "po_created".
+  status       String    @default("pending_review")
   items        Json      @default("[]")
   receivedDate DateTime  @default(now())
   validUntil   DateTime?
@@ -988,17 +1079,37 @@ model PayrollPeriod {
 
 model PayrollRun {
   id            String         @id @default(cuid())
+  /// Human reference shown as "Payroll Code" in the Finance Payroll Overview.
+  /// Allocated from Settings → Numbering, so it follows the same convention as
+  /// every other document reference rather than exposing the cuid.
+  code          String?        @unique
   periodId      String?
   period        PayrollPeriod? @relation(fields: [periodId], references: [id])
   periodName    String
   month         Int
   year          Int
+  /// HR side: "Draft" | "Processing" | "Approved". Finance side then carries it
+  /// through "Pending Posting Approval" → "Posting Approved" → "Posted".
+  /// Approval to post is deliberately separate from posting: the person who
+  /// authorises the accounting is not always the one who runs it.
   status        String         @default("Draft")
   totalGross    Float          @default(0)
   totalNet      Float          @default(0)
   employeeCount Int            @default(0)
   processedBy   String?
   processedAt   DateTime?
+
+  // Finance posting trail.
+  postingRequestedBy String?
+  postingRequestedAt DateTime?
+  postingApprovedBy  String?
+  postingApprovedAt  DateTime?
+  postedBy           String?
+  postedAt           DateTime?
+  /// The journal entry this run posted as, so the Overview can cite it and the
+  /// General Ledger can be traced back to the run.
+  journalEntryId     String?
+
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   entries       PayrollEntry[]
@@ -1115,9 +1226,28 @@ model JournalEntry {
   reversalOfId String?
   reversalOf   JournalEntry?  @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
   reversedBy   JournalEntry[] @relation("JournalReversal")
+
+  // Where this posting came from. Every engine — Journal Entries, Payments,
+  // Purchases, Payroll — posts through the same service, and these are what let
+  // a General Ledger line be traced back to the thing that caused it. A hand
+  // keyed entry is sourceModule "Journal" with no source record behind it.
+  /// "Journal" | "Payment" | "Purchase" | "Payroll" | …
+  sourceModule String  @default("Journal")
+  /// The originating record's model, e.g. "PurchaseInvoice", "PayrollRun".
+  sourceType   String?
+  /// The originating record's id, for deep-linking back to it.
+  sourceId     String?
+  /// The originating document's own human reference, e.g. an invoice number.
+  sourceRef    String?
+  /// The configured process whose mapping produced the lines, when one did.
+  process      String?
+
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   lines       JournalLine[]
+
+  @@index([sourceModule, sourceId])
+  @@index([status, date])
 }
 
 model JournalLine {

@@ -31,24 +31,88 @@ function makeService() {
         }),
     });
 
+    const purchaseOrders: any[] = [];
+    const purchaseOrderUpdates: any[] = [];
+    const purchaseRequestUpdates: any[] = [];
+    const quoteUpdates: any[] = [];
+
     const prisma: any = {
-        purchaseRequest: record('purchaseRequest'),
+        purchaseRequest: {
+            ...record('purchaseRequest'),
+            findUnique: jest.fn(() =>
+                Promise.resolve({ prRef: 'PR-0019', mrRef: 'MR-0007', daysToDeliver: 10 }),
+            ),
+            updateMany: jest.fn((args: any) => {
+                purchaseRequestUpdates.push(args);
+                return Promise.resolve({ count: 1 });
+            }),
+        },
         sentRFQ: record('sentRFQ'),
-        receivedQuote: record('receivedQuote'),
+        receivedQuote: {
+            ...record('receivedQuote'),
+            update: jest.fn(({ where, data }: any) => {
+                quoteUpdates.push({ where, data });
+                return Promise.resolve({ ...quoteRow, ...data });
+            }),
+            updateMany: jest.fn((args: any) => {
+                quoteUpdates.push(args);
+                return Promise.resolve({ count: 1 });
+            }),
+            findUniqueOrThrow: jest.fn(() =>
+                Promise.resolve({ ...quoteRow, status: 'po_created' }),
+            ),
+        },
+        purchaseOrder: {
+            findFirst: jest.fn(() => Promise.resolve(null)),
+            create: jest.fn(({ data }: any) => {
+                purchaseOrders.push(data);
+                return Promise.resolve({
+                    id: 'po-1',
+                    ...data,
+                    supplier: { name: 'Dangote Cement' },
+                    items: [],
+                });
+            }),
+            updateMany: jest.fn((args: any) => {
+                purchaseOrderUpdates.push(args);
+                return Promise.resolve({ count: 1 });
+            }),
+        },
+        purchaseInvoice: {
+            create: jest.fn(({ data }: any) => Promise.resolve({ id: 'inv-1', ...data })),
+            update: jest.fn(({ data }: any) =>
+                Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', poRef: 'PO-0031', supplierName: 'Dangote Cement', ...data }),
+            ),
+            findUnique: jest.fn(() =>
+                Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', poRef: 'PO-0031', status: 'accepted', notes: null }),
+            ),
+        },
         materialRequest: {
             updateMany: jest.fn((args: any) => {
                 materialRequestUpdates.push(args);
                 return Promise.resolve({ count: 1 });
             }),
         },
-        supplier: { findUnique: jest.fn(() => Promise.resolve(null)) },
+        supplier: {
+            findUnique: jest.fn(() => Promise.resolve(null)),
+            findFirst: jest.fn(() => Promise.resolve({ id: 'sup-1' })),
+        },
     };
 
     const webhooks: any = { triggerWebhook: jest.fn(() => Promise.resolve()) };
     const mailQueue: any = { enqueueEmail: jest.fn(() => Promise.resolve()) };
     const numbering: any = {
         allocate: jest.fn((seq: string) =>
-            Promise.resolve({ reference: seq === 'RFQ' ? 'RFQ-0011' : 'PR-0019' }),
+            Promise.resolve({
+                reference:
+                    seq === 'RFQ'
+                        ? 'RFQ-0011'
+                        : seq === 'PurchaseOrder'
+                          ? 'PO-0032'
+                          : seq === 'PurchaseInvoice'
+                            ? 'PI-004'
+                            : 'PR-0019',
+            }),
         ),
     };
 
@@ -63,8 +127,32 @@ function makeService() {
         numbering,
         notifications,
     );
-    return { service, created, materialRequestUpdates, numbering, notifications };
+    return {
+        service,
+        created,
+        materialRequestUpdates,
+        numbering,
+        notifications,
+        purchaseOrders,
+        purchaseOrderUpdates,
+        purchaseRequestUpdates,
+        quoteUpdates,
+        prisma,
+    };
 }
+
+/** The quote every award test starts from. */
+const quoteRow = {
+    id: 'quote-1',
+    prRef: 'PR-0019',
+    supplierId: 'sup-1',
+    supplierName: 'Dangote Cement',
+    totalValue: 4_250_000,
+    validUntil: null,
+    items: [
+        { material: 'OPC Cement', qty: 500, unit: 'bags', unitPrice: 8500 },
+    ],
+};
 
 describe('creating a purchase request', () => {
     it('stores the material request it was raised from', async () => {
@@ -215,5 +303,171 @@ describe('recording a supplier quote', () => {
         await service.createQuote({ supplierName: 'CemCo', items: [] });
 
         expect(created.receivedQuote[0].totalValue).toBe(0);
+    });
+});
+
+
+/**
+ * Approving a quote *is* raising the order.
+ *
+ * "Create PO" was a separate button on Received Quotes, so a quote could sit
+ * approved with no order behind it — or be turned into an order without ever
+ * being approved. The two lists then disagreed about what had actually been
+ * bought.
+ */
+describe('approving a supplier quote', () => {
+    it('raises the purchase order the quote won', async () => {
+        const { service, purchaseOrders } = makeService();
+        await service.updateQuote('quote-1', { status: 'approved' });
+
+        expect(purchaseOrders).toHaveLength(1);
+        expect(purchaseOrders[0]).toMatchObject({
+            poRef: 'PO-0032',
+            prRef: 'PR-0019',
+            quoteRef: 'quote-1',
+            supplierId: 'sup-1',
+            status: 'draft',
+            totalValue: 4_250_000,
+        });
+    });
+
+    it('orders what was quoted, at the price that was quoted', async () => {
+        const { service, purchaseOrders } = makeService();
+        await service.updateQuote('quote-1', { status: 'approved' });
+
+        expect(purchaseOrders[0].items).toEqual({
+            create: [
+                { material: 'OPC Cement', qty: 500, unit: 'bags', unitCost: 8500 },
+            ],
+        });
+    });
+
+    it('carries the material request through, so the chain stays joined end to end', async () => {
+        const { service, purchaseOrders } = makeService();
+        await service.updateQuote('quote-1', { status: 'approved' });
+
+        expect(purchaseOrders[0].mrRef).toBe('MR-0007');
+    });
+
+    it('closes the losing quotes for the same request', async () => {
+        // Otherwise the list keeps offering an approval for something already
+        // bought — and a second click raises a second order.
+        const { service, quoteUpdates } = makeService();
+        await service.updateQuote('quote-1', { status: 'approved' });
+
+        expect(quoteUpdates).toContainEqual(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    prRef: 'PR-0019',
+                    id: { not: 'quote-1' },
+                    status: 'pending_review',
+                }),
+                data: { status: 'rejected' },
+            }),
+        );
+    });
+
+    it('will not raise a second order for a quote that already has one', async () => {
+        const { service, prisma, purchaseOrders } = makeService();
+        prisma.purchaseOrder.findFirst = jest.fn(() => Promise.resolve({ id: 'po-1' }));
+
+        await service.updateQuote('quote-1', { status: 'approved' });
+        expect(purchaseOrders).toHaveLength(0);
+    });
+
+    it('raises nothing when the supplier is not on the supplier list', async () => {
+        // There is nobody to owe the money to. The quote stays approved and the
+        // buyer is told to add the supplier.
+        const { service, prisma, purchaseOrders } = makeService();
+        prisma.supplier.findFirst = jest.fn(() => Promise.resolve(null));
+        prisma.receivedQuote.update = jest.fn(({ data }: any) =>
+            Promise.resolve({ ...quoteRow, supplierId: null, ...data }),
+        );
+
+        await service.updateQuote('quote-1', { status: 'approved' });
+        expect(purchaseOrders).toHaveLength(0);
+    });
+
+    it('leaves the order alone when a quote is rejected', async () => {
+        const { service, purchaseOrders } = makeService();
+        await service.updateQuote('quote-1', { status: 'rejected' });
+
+        expect(purchaseOrders).toHaveLength(0);
+    });
+});
+
+/**
+ * Finance's decision has to reach back to Procurement.
+ *
+ * The two modules were lists that happened to mention the same PO reference:
+ * Finance could approve and pay an invoice and the order in Procurement still
+ * read "Unpaid" forever, because nothing joined them.
+ */
+describe('recording a decision on a purchase invoice', () => {
+    it('accepts the order in Procurement when Finance accepts the invoice', async () => {
+        const { service, purchaseOrderUpdates } = makeService();
+        await service.updateInvoice('inv-1', { status: 'accepted' });
+
+        expect(purchaseOrderUpdates[0].data).toMatchObject({
+            status: 'finance_accepted',
+        });
+        expect(purchaseOrderUpdates[0].data.financeDecidedAt).toBeInstanceOf(Date);
+    });
+
+    it('marks the order paid, which is what Procurement was waiting to see', async () => {
+        const { service, purchaseOrderUpdates } = makeService();
+        await service.updateInvoice('inv-1', { status: 'paid' });
+
+        expect(purchaseOrderUpdates[0].data).toMatchObject({ status: 'paid' });
+        expect(purchaseOrderUpdates[0].data.paidAt).toBeInstanceOf(Date);
+    });
+
+    it('sends the reason back with a decline, so the buyer knows what to fix', async () => {
+        const { service, purchaseOrderUpdates } = makeService();
+        await service.updateInvoice('inv-1', {
+            status: 'declined',
+            notes: 'Budget line exhausted',
+        });
+
+        expect(purchaseOrderUpdates[0].data).toMatchObject({
+            status: 'finance_declined',
+            declineReason: 'Budget line exhausted',
+        });
+    });
+
+    it('finds the order by reference or by id, since older invoices stored either', async () => {
+        const { service, purchaseOrderUpdates } = makeService();
+        await service.updateInvoice('inv-1', { status: 'paid' });
+
+        expect(purchaseOrderUpdates[0].where).toEqual({
+            OR: [{ poRef: 'PO-0031' }, { id: 'PO-0031' }],
+        });
+    });
+
+    it('refuses to cancel a paid invoice', async () => {
+        // It is the record that the money left. Removing or voiding it leaves
+        // the order pointing at nothing and the payment with no document.
+        const { service, prisma } = makeService();
+        prisma.purchaseInvoice.findUnique = jest.fn(() =>
+            Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', poRef: 'PO-0031', status: 'paid' }),
+        );
+
+        await expect(service.cancelInvoice('inv-1')).rejects.toThrow(
+            /paid invoice cannot be cancelled/i,
+        );
+    });
+});
+
+describe('creating a purchase invoice', () => {
+    it('takes its number from the configured sequence, not the clock', async () => {
+        const { service, numbering, prisma } = makeService();
+        await service.createInvoice({ supplierName: 'Dangote Cement' });
+
+        expect(numbering.allocate).toHaveBeenCalledWith('PurchaseInvoice');
+        expect(prisma.purchaseInvoice.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                data: expect.objectContaining({ invoiceNo: 'PI-004' }),
+            }),
+        );
     });
 });

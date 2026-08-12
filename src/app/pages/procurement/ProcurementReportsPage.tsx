@@ -294,9 +294,9 @@ export function ProcurementReportsPage() {
     } else if (reportId === "spend") {
       headers = [
         "PO Reference",
+        "PR Reference",
         "Supplier",
         "Status",
-        "Payment Status",
         "Items",
         csvAmountHeader("Total Value"),
         csvAmountHeader("Received Value"),
@@ -305,10 +305,10 @@ export function ProcurementReportsPage() {
         "Expected Date",
       ];
       rows = purchaseOrders.map((po) => [
-        po.prRef || po.id,
+        po.poRef,
+        po.prRef,
         po.supplier,
         po.status,
-        po.paymentStatus,
         po.totalItems ?? 0,
         po.totalValue ?? 0,
         po.receivedValue ?? 0,

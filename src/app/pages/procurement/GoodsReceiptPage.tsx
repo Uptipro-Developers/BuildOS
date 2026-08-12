@@ -1,244 +1,174 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   PackageCheck,
   Search,
-  Truck,
-  CheckCircle,
-  AlertTriangle,
   ChevronDown,
   ChevronRight,
   XCircle,
   X,
   Plus,
-  Trash2,
   LinkIcon,
 } from "lucide-react";
+import { notifyLoadFailure } from "../../utils/loadFailure";
 import { getReferenceData } from "../../api/reference-data";
 import { fetchPurchaseOrders } from "../../api/purchase-orders";
+import {
+  getGoodsReceipts,
+  openGoodsReceipt,
+  receiveGoods,
+  rejectGoodsReceipt,
+  type GoodsReceipt,
+} from "../../api/goods-receipts";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
-import { useNumbering } from "../../stores/numberingStore";
-import { useProcurementUnits } from "../../utils/useProcurementUnits";
+import { getAuthUserName } from "../../utils/useAuthUser";
+import { StatusBadge } from "../../components/StatusBadge";
+import { RowAction, RowActionNote, RowActions } from "../../components/RowAction";
+import {
+  GOODS_RECEIPT_STATUS,
+  statusDef,
+} from "../../utils/procurementWorkflow";
 
-type GRNStatus = "pending" | "partial" | "completed" | "over_supply";
-
-type GRNRecord = {
-  id: string;
-  poRef: string;
-  mrRef: string;
-  supplier: string;
-  receivedBy: string;
-  receivedDate: string;
-  status: GRNStatus;
-  warehouse: string;
-  deliveryNote: string;
-  items: {
-    material: string;
-    ordered: number;
-    received: number;
-    accepted: number;
-    rejected: number;
-    unit: string;
-    reason?: string;
-  }[];
-};
-
-const tabs: { key: GRNStatus | "all"; label: string }[] = [
+const TABS: { key: string; label: string }[] = [
   { key: "all", label: "All GRNs" },
-  { key: "pending", label: "Pending" },
-  { key: "partial", label: "Partial" },
-  { key: "completed", label: "Completed" },
-  { key: "over_supply", label: "Over Supply" },
+  { key: "pending", label: "Awaiting Receipt" },
+  { key: "received", label: "Received" },
+  { key: "rejected", label: "Rejected" },
 ];
 
-const statusConfig: Record<
-  GRNStatus,
-  { label: string; badge: string; border: string; icon: string }
-> = {
-  pending: {
-    label: "Pending",
-    badge: "bg-amber-100 text-amber-700",
-    border: "border-amber-200",
-    icon: "Clock",
-  },
-  partial: {
-    label: "Partial",
-    badge: "bg-blue-100 text-blue-700",
-    border: "border-blue-200",
-    icon: "Package",
-  },
-  completed: {
-    label: "Completed",
-    badge: "bg-emerald-100 text-emerald-700",
-    border: "border-emerald-200",
-    icon: "CheckCircle2",
-  },
-  over_supply: {
-    label: "Over Supply",
-    badge: "bg-red-100 text-red-700",
-    border: "border-red-200",
-    icon: "AlertTriangle",
-  },
-};
-
-interface GRNItem {
+/** One line as it is being keyed in the receive form. */
+interface ReceiveLineForm {
   material: string;
-  ordered: string;
+  unit: string;
+  ordered: number;
   received: string;
   accepted: string;
   rejected: string;
-  unit: string;
   reason: string;
 }
 
-function RecordDeliveryModal({
+/**
+ * Records what arrived and posts it to stock.
+ *
+ * The quantities are keyed against the lines of the purchase order the receipt
+ * was opened for, so a receipt can only ever be for something that was actually
+ * ordered — the old form let a delivery be typed in from scratch, against a
+ * free-text material and a hand-entered "ordered" figure, and then stored none
+ * of it anywhere.
+ */
+function ReceiveDeliveryModal({
+  grn,
   onClose,
-  onSave,
-  existingGrn,
+  onDone,
 }: {
+  grn: GoodsReceipt;
   onClose: () => void;
-  onSave: (grn: GRNRecord) => void;
-  existingGrn?: GRNRecord;
+  onDone: (updated: GoodsReceipt) => void;
 }) {
-  const today = new Date();
-  const fmtDate = (d: Date) => formatDateByGeneralSettings(d);
-  const isAdditional = !!existingGrn;
-
-  const [poRef, setPoRef] = useState(existingGrn?.poRef || "");
-  const [poRefs, setPoRefs] = useState<string[]>([]);
-  const [supplier, setSupplier] = useState(existingGrn?.supplier || "");
-  const [warehouses, setWarehouses] = useState<string[]>([]);
-  const [warehouse, setWarehouse] = useState(existingGrn?.warehouse || "");
-  const [deliveryNote, setDeliveryNote] = useState("");
-  // The material catalogue, so a receipt line can only reference a material
-  // that already exists rather than a free-typed name.
-  const [materialOptions, setMaterialOptions] = useState<
-    { name: string; unit: string }[]
-  >([]);
-
-  // Load open purchase orders for the PO reference dropdown.
-  useEffect(() => {
-    fetchPurchaseOrders()
-      .then((orders) => {
-        const refs = (orders as any[])
-          .map((o) => String(o.poNumber ?? o.reference ?? o.id ?? ""))
-          .filter(Boolean);
-        setPoRefs(refs);
-        setPoRef((prev) => prev || refs[0] || "");
-      })
-      .catch(() => {
-        /* leave dropdown empty on failure */
-      });
-  }, []);
+  const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
+  const [storeId, setStoreId] = useState(grn.storeId ?? "");
+  const [deliveryNote, setDeliveryNote] = useState(grn.deliveryNote ?? "");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [lines, setLines] = useState<ReceiveLineForm[]>(
+    grn.items.map((it) => ({
+      material: it.material,
+      unit: it.unit,
+      ordered: it.ordered,
+      // Defaults to the full order, which is what usually turns up; anything
+      // short or damaged is corrected line by line.
+      received: String(it.ordered),
+      accepted: String(it.ordered),
+      rejected: "0",
+      reason: "",
+    })),
+  );
 
   useEffect(() => {
     getReferenceData()
       .then((data) => {
-        const storeNames = data.stores.map((s) => s.name);
-        setWarehouses(storeNames);
-        setWarehouse(
-          (prev) => prev || existingGrn?.warehouse || storeNames[0] || "",
-        );
-        setMaterialOptions(
-          (data.materials ?? [])
-            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
-            .filter((m) => m.name),
-        );
+        const list = (data.stores ?? []).map((s: { id: string; name: string }) => ({
+          id: s.id,
+          name: s.name,
+        }));
+        setStores(list);
+        setStoreId((prev) => prev || list[0]?.id || "");
       })
       .catch(() => {});
-  }, [existingGrn?.warehouse]);
+  }, []);
 
-  const units = useProcurementUnits();
-  const [items, setItems] = useState<GRNItem[]>(
-    existingGrn
-      ? existingGrn.items
-          .filter((it) => it.received < it.ordered)
-          .map((it) => ({
-            material: it.material,
-            ordered: String(it.ordered),
-            received: "",
-            accepted: "",
-            rejected: "0",
-            unit: it.unit,
-            reason: "",
-          }))
-      : [
-          {
-            material: "",
-            ordered: "",
-            received: "",
-            accepted: "",
-            rejected: "0",
-            unit: units[0],
-            reason: "",
-          },
-        ],
-  );
+  function update(i: number, key: keyof ReceiveLineForm, value: string) {
+    setLines((prev) =>
+      prev.map((l, j) => {
+        if (j !== i) return l;
+        const next = { ...l, [key]: value };
+        // Accepted follows received minus rejected unless it is being edited
+        // directly, so the common case needs one number rather than three.
+        if (key === "received" || key === "rejected") {
+          const received = parseFloat(next.received) || 0;
+          const rejected = parseFloat(next.rejected) || 0;
+          next.accepted = String(Math.max(received - rejected, 0));
+        }
+        return next;
+      }),
+    );
+  }
 
-  const addItem = () =>
-    setItems((p) => [
-      ...p,
-      {
-        material: "",
-        ordered: "",
-        received: "",
-        accepted: "",
-        rejected: "0",
-        unit: units[0],
-        reason: "",
-      },
-    ]);
-  const removeItem = (i: number) =>
-    setItems((p) => p.filter((_, j) => j !== i));
-  const updateItem = (i: number, k: keyof GRNItem, v: string) =>
-    setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
-  const { allocate } = useNumbering();
-  const valid =
-    poRef &&
-    deliveryNote.trim() &&
-    items.every((it) => it.material.trim() && it.received.trim());
+  const problems = lines.flatMap((l) => {
+    const received = parseFloat(l.received) || 0;
+    const accepted = parseFloat(l.accepted) || 0;
+    const rejected = parseFloat(l.rejected) || 0;
+    if (accepted + rejected > received)
+      return [`${l.material}: accepted plus rejected exceeds what was received.`];
+    if (rejected > 0 && !l.reason.trim())
+      return [`${l.material}: give a reason for the rejected quantity.`];
+    return [];
+  });
+  const anyReceived = lines.some((l) => (parseFloat(l.received) || 0) > 0);
+  const valid = Boolean(storeId) && anyReceived && problems.length === 0;
 
-  async function handleSave() {
-    if (!valid) return;
-    const nextId = await allocate("GoodsReceipt");
-    const builtItems = items.map((it) => ({
-      material: it.material,
-      ordered: parseFloat(it.ordered) || 0,
-      received: parseFloat(it.received) || 0,
-      accepted: parseFloat(it.accepted || it.received) || 0,
-      rejected: parseFloat(it.rejected) || 0,
-      unit: it.unit,
-      ...(it.reason.trim() ? { reason: it.reason.trim() } : {}),
-    }));
-    const allComplete = builtItems.every((it) => it.received >= it.ordered);
-    const hasOver = builtItems.some((it) => it.received > it.ordered);
-    const status: GRNStatus = hasOver
-      ? "over_supply"
-      : allComplete
-        ? "completed"
-        : "partial";
-    onSave({
-      id: nextId,
-      poRef,
-      mrRef: "",
-      supplier: supplier.trim() || poRef,
-      receivedBy: "Chukwudi Eze",
-      receivedDate: fmtDate(today),
-      status,
-      warehouse,
-      deliveryNote: deliveryNote.trim(),
-      items: builtItems,
-    });
+  async function save() {
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      const updated = await receiveGoods(grn.id, {
+        storeId,
+        storeName: stores.find((s) => s.id === storeId)?.name ?? "",
+        deliveryNote: deliveryNote.trim() || undefined,
+        receivedBy: getAuthUserName() || "Current User",
+        notes: notes.trim() || undefined,
+        items: lines.map((l) => ({
+          material: l.material,
+          unit: l.unit,
+          ordered: l.ordered,
+          received: parseFloat(l.received) || 0,
+          accepted: parseFloat(l.accepted) || 0,
+          rejected: parseFloat(l.rejected) || 0,
+          reason: l.reason.trim() || undefined,
+        })),
+      });
+      onDone(updated);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not record the delivery.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h2 className="text-base font-semibold text-gray-900">
-            {isAdditional
-              ? `Additional Delivery — ${existingGrn!.id}`
-              : "Record New Delivery"}
-          </h2>
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">
+              Receive Delivery — {grn.reference}
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {grn.supplierName} · purchase order {grn.poRef}
+            </p>
+          </div>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600"
@@ -250,217 +180,114 @@ function RecordDeliveryModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Purchase Order Ref <span className="text-red-500">*</span>
+                Receiving store <span className="text-red-500">*</span>
               </label>
-              {isAdditional ? (
-                <div className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-700">
-                  {poRef}
-                </div>
-              ) : (
-                <select
-                  value={poRef}
-                  onChange={(e) => setPoRef(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select PO…</option>
-                  {poRefs.map((r) => (
-                    <option key={r}>{r}</option>
-                  ))}
-                </select>
-              )}
+              {/* Stock has to land somewhere specific: this store is what the
+                  movement, the shelf quantity and the storefront all update
+                  against. */}
+              <select
+                value={storeId}
+                onChange={(e) => setStoreId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select a store…</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Supplier
-              </label>
-              <input
-                value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
-                placeholder="Auto-filled from PO"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Delivery Note No. <span className="text-red-500">*</span>
+                Delivery note no.
               </label>
               <input
                 value={deliveryNote}
                 onChange={(e) => setDeliveryNote(e.target.value)}
-                placeholder="DN-XXXX-0000"
+                placeholder="DN-0000"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Warehouse / Location
-              </label>
-              <select
-                value={warehouse}
-                onChange={(e) => setWarehouse(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {warehouses.map((w) => (
-                  <option key={w}>{w}</option>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 overflow-x-auto">
+            <table className="min-w-[720px] w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
+                  <th className="text-left px-3 py-2">Material</th>
+                  <th className="px-3 py-2 text-right">Ordered</th>
+                  <th className="px-3 py-2">Received</th>
+                  <th className="px-3 py-2">Accepted</th>
+                  <th className="px-3 py-2">Rejected</th>
+                  <th className="px-3 py-2">Rejection reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {lines.map((l, i) => (
+                  <tr key={`${l.material}-${i}`}>
+                    <td className="px-3 py-1.5 font-medium text-gray-800">
+                      {l.material}
+                      <span className="text-gray-400 font-normal"> ({l.unit})</span>
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-gray-600">
+                      {l.ordered}
+                    </td>
+                    {(["received", "accepted", "rejected"] as const).map((k) => (
+                      <td key={k} className="px-2 py-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          value={l[k]}
+                          onChange={(e) => update(i, k, e.target.value)}
+                          className="w-20 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </td>
+                    ))}
+                    <td className="px-2 py-1.5">
+                      <input
+                        value={l.reason}
+                        onChange={(e) => update(i, "reason", e.target.value)}
+                        placeholder={
+                          (parseFloat(l.rejected) || 0) > 0
+                            ? "Required"
+                            : "If any rejections"
+                        }
+                        className="w-40 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </td>
+                  </tr>
                 ))}
-              </select>
-            </div>
+              </tbody>
+            </table>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-gray-600">
-                Delivery Items <span className="text-red-500">*</span>
-              </label>
-              {!isAdditional && (
-                <button
-                  onClick={addItem}
-                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                >
-                  <Plus className="w-3 h-3" /> Add Line
-                </button>
-              )}
-            </div>
-            <div className="rounded-lg border border-gray-200 overflow-x-auto">
-              <table className="min-w-[720px] w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
-                    <th className="text-left px-3 py-2">Material</th>
-                    <th className="px-3 py-2">Unit</th>
-                    <th className="px-3 py-2">Ordered</th>
-                    <th className="px-3 py-2">Received</th>
-                    <th className="px-3 py-2">Accepted</th>
-                    <th className="px-3 py-2">Rejected</th>
-                    <th className="px-3 py-2">Rejection Reason</th>
-                    {!isAdditional && <th className="px-3 py-2"></th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {items.map((item, i) => (
-                    <tr key={i}>
-                      <td className="px-2 py-1.5">
-                        {isAdditional ? (
-                          <span className="text-sm font-medium text-gray-800">
-                            {item.material}
-                          </span>
-                        ) : (
-                          <select
-                            value={item.material}
-                            onChange={(e) => {
-                              const name = e.target.value;
-                              updateItem(i, "material", name);
-                              // Adopt the catalogue's unit for the chosen material.
-                              const chosen = materialOptions.find(
-                                (m) => m.name === name,
-                              );
-                              if (chosen?.unit)
-                                updateItem(i, "unit", chosen.unit);
-                            }}
-                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          >
-                            <option value="">
-                              {materialOptions.length === 0
-                                ? "No materials in the catalogue"
-                                : "Select material…"}
-                            </option>
-                            {materialOptions.map((m) => (
-                              <option key={m.name} value={m.name}>
-                                {m.name}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <select
-                          value={item.unit}
-                          onChange={(e) =>
-                            updateItem(i, "unit", e.target.value)
-                          }
-                          className="border border-gray-300 rounded px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        >
-                          {/* Include the line's own unit so a catalogue unit
-                              outside the configured list still renders as selected. */}
-                          {Array.from(
-                            new Set([...units, item.unit].filter(Boolean)),
-                          ).map((u) => (
-                            <option key={u}>{u}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          value={item.ordered}
-                          onChange={(e) =>
-                            updateItem(i, "ordered", e.target.value)
-                          }
-                          placeholder="0"
-                          readOnly={isAdditional}
-                          className={`w-16 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 ${isAdditional ? "bg-gray-50" : ""}`}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          value={item.received}
-                          onChange={(e) =>
-                            updateItem(i, "received", e.target.value)
-                          }
-                          placeholder="0"
-                          className="w-16 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          value={item.accepted}
-                          onChange={(e) =>
-                            updateItem(i, "accepted", e.target.value)
-                          }
-                          placeholder={item.received || "0"}
-                          className="w-16 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          value={item.rejected}
-                          onChange={(e) =>
-                            updateItem(i, "rejected", e.target.value)
-                          }
-                          placeholder="0"
-                          className="w-16 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          value={item.reason}
-                          onChange={(e) =>
-                            updateItem(i, "reason", e.target.value)
-                          }
-                          placeholder="If any rejections"
-                          className="w-32 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      </td>
-                      {!isAdditional && (
-                        <td className="px-2 py-1.5">
-                          {items.length > 1 && (
-                            <button
-                              onClick={() => removeItem(i)}
-                              className="text-red-400 hover:text-red-600"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Notes
+            </label>
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Anything worth recording about this delivery…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
+
+          {problems.length > 0 && (
+            <ul className="text-xs text-red-600 space-y-0.5">
+              {problems.map((p) => (
+                <li key={p}>• {p}</li>
+              ))}
+            </ul>
+          )}
+          <p className="text-xs text-gray-400">
+            Accepted quantities are added to the chosen store and to the material
+            catalogue, and recorded as an incoming stock movement against{" "}
+            {grn.reference}. Rejected quantities are recorded but not added to
+            stock.
+          </p>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button
@@ -470,11 +297,12 @@ function RecordDeliveryModal({
             Cancel
           </button>
           <button
-            onClick={handleSave}
-            disabled={!valid}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            onClick={() => void save()}
+            disabled={!valid || saving}
+            className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <PackageCheck className="w-4 h-4" /> Save Delivery Record
+            <PackageCheck className="w-4 h-4" />
+            {saving ? "Posting to stock…" : "Receive & Update Stock"}
           </button>
         </div>
       </div>
@@ -482,23 +310,56 @@ function RecordDeliveryModal({
   );
 }
 
-function RaiseRejectionModal({
-  grn,
+/** Opens a receipt for a confirmed order that does not have one yet. */
+function OpenReceiptModal({
   onClose,
   onDone,
 }: {
-  grn: GRNRecord;
   onClose: () => void;
-  onDone: (reason: string) => void;
+  onDone: (grn: GoodsReceipt) => void;
 }) {
-  const [reason, setReason] = useState("");
-  const [returnMethod, setReturnMethod] = useState("Supplier Pickup");
+  const [orders, setOrders] = useState<
+    { id: string; poRef: string; supplier: string }[]
+  >([]);
+  const [orderId, setOrderId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    // Only confirmed orders: the goods are paid for and on their way, which is
+    // the point at which a delivery can be expected.
+    fetchPurchaseOrders({ status: "confirmed" })
+      .then((rows) => {
+        const list = rows.map((o) => ({
+          id: o.id,
+          poRef: o.poRef,
+          supplier: o.supplier,
+        }));
+        setOrders(list);
+        setOrderId((prev) => prev || list[0]?.id || "");
+      })
+      .catch((err) => notifyLoadFailure("purchase orders", err));
+  }, []);
+
+  async function save() {
+    if (!orderId || saving) return;
+    setSaving(true);
+    try {
+      onDone(await openGoodsReceipt(orderId));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not open the goods receipt.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">
-            Raise Rejection Note — {grn.id}
+            Open a goods receipt
           </h2>
           <button
             onClick={onClose}
@@ -507,63 +368,32 @@ function RaiseRejectionModal({
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-sm">
-            <span className="font-medium text-red-800">{grn.id}</span> ·{" "}
-            <span className="text-red-700">{grn.supplier}</span>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-gray-600 mb-2">
-              Rejected Items
-            </p>
-            {grn.items
-              .filter((it) => it.rejected > 0)
-              .map((it, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm py-1">
-                  <XCircle className="w-4 h-4 text-red-400" />
-                  <span className="font-medium text-gray-800">
-                    {it.material}
-                  </span>
-                  <span className="text-red-600">
-                    {it.rejected} {it.unit}
-                  </span>
-                  {it.reason && (
-                    <span className="text-gray-400">— {it.reason}</span>
-                  )}
-                </div>
-              ))}
-          </div>
+        <div className="px-6 py-5 space-y-3">
+          <p className="text-xs text-gray-500">
+            Confirming a purchase order opens its receipt automatically. This is
+            here for orders confirmed before that was the case.
+          </p>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
-              Return Method
+              Confirmed purchase order
             </label>
             <select
-              value={returnMethod}
-              onChange={(e) => setReturnMethod(e.target.value)}
+              value={orderId}
+              onChange={(e) => setOrderId(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              {[
-                "Supplier Pickup",
-                "Credit Note Requested",
-                "Replacement Requested",
-                "Disposed On-Site",
-              ].map((m) => (
-                <option key={m}>{m}</option>
+              <option value="">
+                {orders.length === 0
+                  ? "No confirmed orders awaiting delivery"
+                  : "Select an order…"}
+              </option>
+              {orders.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.poRef} — {o.supplier}
+                </option>
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Additional Notes <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              placeholder="Additional details about the rejection…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button
@@ -573,90 +403,11 @@ function RaiseRejectionModal({
             Cancel
           </button>
           <button
-            onClick={() =>
-              reason.trim() && onDone(`${returnMethod}: ${reason.trim()}`)
-            }
-            disabled={!reason.trim()}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            onClick={() => void save()}
+            disabled={!orderId || saving}
+            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <XCircle className="w-4 h-4" /> Raise Note
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NotifySupplierModal({
-  grn,
-  onClose,
-  onDone,
-}: {
-  grn: GRNRecord;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const overItems = grn.items.filter((it) => it.received > it.ordered);
-  const [email, setEmail] = useState("");
-  const [message, setMessage] = useState(
-    `Dear ${grn.supplier},\n\nWe received your delivery (${grn.deliveryNote}) and noted the following over-supply:\n\n${overItems.map((it) => `• ${it.material}: ordered ${it.ordered}, received ${it.received} ${it.unit} (+${it.received - it.ordered})`).join("\n")}\n\nKindly advise on how you wish to proceed.\n\nRegards,\nProcurement Team`,
-  );
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">
-            Notify Supplier — Over Supply
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-sm">
-            <span className="font-medium text-purple-800">{grn.id}</span> ·{" "}
-            <span className="text-purple-700">{grn.supplier}</span>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Supplier Email <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="procurement@supplier.ng"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Message
-            </label>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={7}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => email.trim() && onDone()}
-            disabled={!email.trim()}
-            className="px-4 py-2 text-sm bg-purple-700 text-white rounded-xl hover:bg-purple-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            <AlertTriangle className="w-4 h-4" /> Send Notification
+            {saving ? "Opening…" : "Open receipt"}
           </button>
         </div>
       </div>
@@ -665,45 +416,73 @@ function NotifySupplierModal({
 }
 
 export function GoodsReceiptPage() {
-  const [grnList, setGrnList] = useState<GRNRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<GRNStatus | "all">("all");
+  const [grnList, setGrnList] = useState<GoodsReceipt[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [showNewDelivery, setShowNewDelivery] = useState(false);
-  const [additionalDelivery, setAdditionalDelivery] =
-    useState<GRNRecord | null>(null);
-  const [rejectGrn, setRejectGrn] = useState<GRNRecord | null>(null);
-  const [notifyGrn, setNotifyGrn] = useState<GRNRecord | null>(null);
+  const [receiveGrn, setReceiveGrn] = useState<GoodsReceipt | null>(null);
+  const [rejectGrn, setRejectGrn] = useState<GoodsReceipt | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showOpen, setShowOpen] = useState(false);
 
-  const filtered = grnList.filter((g) => {
-    const matchTab = activeTab === "all" || g.status === activeTab;
-    const matchSearch =
-      g.id.toLowerCase().includes(search.toLowerCase()) ||
-      g.supplier.toLowerCase().includes(search.toLowerCase()) ||
-      g.poRef.toLowerCase().includes(search.toLowerCase());
-    return matchTab && matchSearch;
-  });
+  useEffect(() => {
+    getGoodsReceipts()
+      .then(setGrnList)
+      .catch((err) => notifyLoadFailure("goods receipts", err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return grnList.filter((g) => {
+      const matchTab = activeTab === "all" || g.status === activeTab;
+      const matchSearch =
+        !q ||
+        g.reference.toLowerCase().includes(q) ||
+        g.supplierName.toLowerCase().includes(q) ||
+        (g.poRef ?? "").toLowerCase().includes(q);
+      return matchTab && matchSearch;
+    });
+  }, [grnList, activeTab, search]);
+
+  async function confirmReject() {
+    const grn = rejectGrn;
+    if (!grn) return;
+    const reason = rejectReason.trim();
+    setRejectGrn(null);
+    setRejectReason("");
+    try {
+      const updated = await rejectGoodsReceipt(grn.id, reason);
+      setGrnList((prev) => prev.map((g) => (g.id === grn.id ? updated : g)));
+      toast.success(`${grn.reference} rejected. Nothing was added to stock.`);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not reject the delivery.",
+      );
+    }
+  }
+
+  if (loading)
+    return <div className="p-8 text-center text-gray-400 text-sm">Loading…</div>;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Goods Receipt
-          </h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Goods Receipt</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Receive, inspect, and record deliveries against Purchase Orders
+            Receive confirmed purchase orders into stock
           </p>
         </div>
         <button
-          onClick={() => setShowNewDelivery(true)}
+          onClick={() => setShowOpen(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800"
         >
-          <PackageCheck className="w-3.5 h-3.5" /> Record New Delivery
+          <Plus className="w-3.5 h-3.5" /> Open Receipt
         </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         {[
           {
@@ -712,19 +491,19 @@ export function GoodsReceiptPage() {
             color: "bg-gray-50 border-gray-200 text-gray-900",
           },
           {
-            label: "Pending Inspection",
+            label: "Awaiting Receipt",
             value: grnList.filter((g) => g.status === "pending").length,
             color: "bg-amber-50 border-amber-200 text-amber-700",
           },
           {
-            label: "Partial Deliveries",
-            value: grnList.filter((g) => g.status === "partial").length,
-            color: "bg-blue-50 border-blue-200 text-blue-700",
+            label: "Received",
+            value: grnList.filter((g) => g.status === "received").length,
+            color: "bg-emerald-50 border-emerald-200 text-emerald-700",
           },
           {
-            label: "Completed",
-            value: grnList.filter((g) => g.status === "completed").length,
-            color: "bg-green-50 border-green-200 text-green-700",
+            label: "Rejected",
+            value: grnList.filter((g) => g.status === "rejected").length,
+            color: "bg-red-50 border-red-200 text-red-700",
           },
         ].map((s) => (
           <div key={s.label} className={`p-4 rounded-lg border ${s.color}`}>
@@ -734,9 +513,8 @@ export function GoodsReceiptPage() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {tabs.map((tab) => {
+      <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+        {TABS.map((tab) => {
           const count =
             tab.key === "all"
               ? grnList.length
@@ -745,7 +523,7 @@ export function GoodsReceiptPage() {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.key ? "border-blue-700 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${activeTab === tab.key ? "border-blue-700 text-blue-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}
             >
               {tab.label}{" "}
               <span
@@ -762,21 +540,16 @@ export function GoodsReceiptPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
           type="text"
-          placeholder="Search GRNs..."
+          placeholder="Search GRNs…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
 
-      {/* GRN Cards */}
       <div className="space-y-3">
         {filtered.map((grn) => {
-          const cfg = statusConfig[grn.status] ?? {
-            badge: "bg-gray-100 text-gray-700",
-            icon: null,
-            label: String(grn.status ?? "Unknown"),
-          };
+          const cfg = statusDef(GOODS_RECEIPT_STATUS, grn.status);
           const isExpanded = expanded === grn.id;
           const hasRejections = grn.items.some((i) => i.rejected > 0);
           return (
@@ -791,7 +564,7 @@ export function GoodsReceiptPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <span className="text-sm font-semibold text-gray-900">
-                      {grn.id}
+                      {grn.reference}
                     </span>
                     <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
                       PO: {grn.poRef}
@@ -802,33 +575,60 @@ export function GoodsReceiptPage() {
                         MR: {grn.mrRef}
                       </span>
                     )}
-                    <span
-                      className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium ${cfg.badge}`}
-                    >
-                      {cfg.icon}
-                      {cfg.label}
-                    </span>
+                    <StatusBadge {...cfg} />
                     {hasRejections && (
-                      <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-red-100 text-red-700 font-medium">
+                      <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
                         <XCircle className="w-3 h-3" /> Rejections
                       </span>
                     )}
                   </div>
                   <p className="text-sm text-gray-700 font-medium mt-1">
-                    {grn.supplier}
+                    {grn.supplierName}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Received by {grn.receivedBy} · {grn.items.length} line item
-                    {grn.items.length > 1 ? "s" : ""} · DN: {grn.deliveryNote}
+                    {grn.items.length} line item
+                    {grn.items.length === 1 ? "" : "s"}
+                    {grn.receivedBy ? ` · received by ${grn.receivedBy}` : ""}
+                    {grn.deliveryNote ? ` · DN: ${grn.deliveryNote}` : ""}
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-sm font-semibold text-gray-900">
-                    {grn.warehouse}
+                    {grn.storeName || "—"}
                   </p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {grn.receivedDate}
+                    {grn.stockPostedAt
+                      ? formatDateByGeneralSettings(grn.stockPostedAt)
+                      : "Not yet received"}
                   </p>
+                </div>
+                <div onClick={(e) => e.stopPropagation()}>
+                  {/* Receive or reject — nothing else. "Accept & Update Stock"
+                      used to set a status in React state and touch no stock at
+                      all; this posts the movement, the store shelf and the
+                      material catalogue in one go. */}
+                  <RowActions>
+                    {grn.status === "pending" ? (
+                      <>
+                        <RowAction
+                          icon={<PackageCheck className="w-3.5 h-3.5" />}
+                          label="Receive & Update Stock"
+                          tone="positive"
+                          onClick={() => setReceiveGrn(grn)}
+                        />
+                        <RowAction
+                          icon={<XCircle className="w-3.5 h-3.5" />}
+                          label="Reject"
+                          tone="negative"
+                          onClick={() => setRejectGrn(grn)}
+                        />
+                      </>
+                    ) : grn.status === "received" ? (
+                      <RowActionNote>Posted to {grn.storeName}</RowActionNote>
+                    ) : (
+                      <RowActionNote>Rejected</RowActionNote>
+                    )}
+                  </RowActions>
                 </div>
                 {isExpanded ? (
                   <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
@@ -836,15 +636,16 @@ export function GoodsReceiptPage() {
                   <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
                 )}
               </div>
+
               {isExpanded && (
                 <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
                   <div className="grid grid-cols-4 gap-4 mb-4 text-sm">
                     {[
-                      { label: "GRN Number", value: grn.id },
-                      { label: "Purchase Order", value: grn.poRef },
+                      { label: "GRN Number", value: grn.reference },
+                      { label: "Purchase Order", value: grn.poRef || "—" },
                       { label: "Material Request", value: grn.mrRef || "—" },
-                      { label: "Delivery Note", value: grn.deliveryNote },
-                      { label: "Warehouse", value: grn.warehouse },
+                      { label: "Delivery Note", value: grn.deliveryNote || "—" },
+                      { label: "Store", value: grn.storeName || "—" },
                     ].map((f) => (
                       <div key={f.label}>
                         <p className="text-xs text-gray-500">{f.label}</p>
@@ -854,176 +655,176 @@ export function GoodsReceiptPage() {
                       </div>
                     ))}
                   </div>
-                  <table className="w-full text-sm bg-white rounded-md border border-gray-200 mb-4">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200 text-left">
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500">
-                          Material
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500 text-right">
-                          Ordered
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500 text-right">
-                          Received
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500 text-right">
-                          Accepted
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500 text-right">
-                          Rejected
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500">
-                          Variance
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-gray-500">
-                          Notes
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {grn.items.map((item, i) => {
-                        const variance = item.received - item.ordered;
-                        return (
-                          <tr
-                            key={i}
-                            className={`hover:bg-gray-50 ${item.rejected > 0 ? "bg-red-50/40" : ""}`}
-                          >
-                            <td className="px-3 py-2 font-medium text-gray-900">
-                              {item.material}
-                            </td>
-                            <td className="px-3 py-2 text-right text-gray-600">
-                              {item.ordered} {item.unit}
-                            </td>
-                            <td className="px-3 py-2 text-right font-medium text-gray-900">
-                              {item.received} {item.unit}
-                            </td>
-                            <td className="px-3 py-2 text-right text-green-700 font-medium">
-                              {item.accepted} {item.unit}
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              {item.rejected > 0 ? (
-                                <span className="text-red-600 font-medium">
-                                  {item.rejected} {item.unit}
-                                </span>
-                              ) : (
-                                <span className="text-gray-300">—</span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              {variance === 0 ? (
-                                <span className="text-gray-400 text-xs">
-                                  Exact
-                                </span>
-                              ) : variance > 0 ? (
-                                <span className="text-purple-600 text-xs font-medium">
-                                  +{variance} over
-                                </span>
-                              ) : (
-                                <span className="text-amber-600 text-xs font-medium">
-                                  {variance} short
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-xs text-gray-400">
-                              {item.reason || "—"}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <div className="flex justify-end gap-2">
-                    {grn.status === "pending" && (
-                      <>
-                        <button
-                          onClick={() => setRejectGrn(grn)}
-                          className="px-4 py-2 text-sm border border-red-300 text-red-600 rounded-md hover:bg-red-50"
-                        >
-                          Raise Rejection Note
-                        </button>
-                        <button
-                          onClick={() =>
-                            setGrnList((prev) =>
-                              prev.map((g) =>
-                                g.id === grn.id
-                                  ? { ...g, status: "completed" as const }
-                                  : g,
-                              ),
-                            )
-                          }
-                          className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-1.5"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5" /> Accept &
-                          Update Stock
-                        </button>
-                      </>
-                    )}
-                    {grn.status === "partial" && (
-                      <button
-                        onClick={() => setAdditionalDelivery(grn)}
-                        className="px-4 py-2 text-sm bg-blue-700 text-white rounded-md hover:bg-blue-800 flex items-center gap-1.5"
-                      >
-                        <Truck className="w-3.5 h-3.5" /> Record Remaining
-                        Delivery
-                      </button>
-                    )}
-                    {grn.status === "over_supply" && (
-                      <button
-                        onClick={() => setNotifyGrn(grn)}
-                        className="px-4 py-2 text-sm bg-amber-500 text-white rounded-md hover:bg-amber-600"
-                      >
-                        Notify Supplier
-                      </button>
-                    )}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[640px] w-full text-sm bg-white rounded-md border border-gray-200">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-left">
+                          {[
+                            "Material",
+                            "Ordered",
+                            "Received",
+                            "Accepted",
+                            "Rejected",
+                            "Variance",
+                            "Notes",
+                          ].map((h) => (
+                            <th
+                              key={h}
+                              className="px-3 py-2 text-xs font-medium text-gray-500"
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {grn.items.map((item) => {
+                          const variance = item.received - item.ordered;
+                          return (
+                            <tr
+                              key={item.id}
+                              className={item.rejected > 0 ? "bg-red-50/40" : ""}
+                            >
+                              <td className="px-3 py-2 font-medium text-gray-900">
+                                {item.material}
+                              </td>
+                              <td className="px-3 py-2 text-gray-600">
+                                {item.ordered} {item.unit}
+                              </td>
+                              <td className="px-3 py-2 font-medium text-gray-900">
+                                {item.received} {item.unit}
+                              </td>
+                              <td className="px-3 py-2 text-green-700 font-medium">
+                                {item.accepted} {item.unit}
+                              </td>
+                              <td className="px-3 py-2">
+                                {item.rejected > 0 ? (
+                                  <span className="text-red-600 font-medium">
+                                    {item.rejected} {item.unit}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">
+                                {grn.status === "pending" ? (
+                                  <span className="text-gray-300 text-xs">—</span>
+                                ) : variance === 0 ? (
+                                  <span className="text-gray-400 text-xs">
+                                    Exact
+                                  </span>
+                                ) : variance > 0 ? (
+                                  <span className="text-purple-600 text-xs font-medium">
+                                    +{variance} over
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-600 text-xs font-medium">
+                                    {variance} short
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-xs text-gray-400">
+                                {item.reason || "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
+                  {grn.notes && (
+                    <p className="text-xs text-gray-500 mt-3 whitespace-pre-line">
+                      {grn.notes}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
           );
         })}
+        {filtered.length === 0 && (
+          <div className="text-center py-12 text-gray-400">
+            <PackageCheck className="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">
+              No goods receipts yet. Confirming a purchase order opens one.
+            </p>
+          </div>
+        )}
       </div>
 
-      {showNewDelivery && (
-        <RecordDeliveryModal
-          onClose={() => setShowNewDelivery(false)}
-          onSave={(grn) => {
-            setGrnList((prev) => [grn, ...prev]);
-            setShowNewDelivery(false);
-          }}
-        />
-      )}
-      {additionalDelivery && (
-        <RecordDeliveryModal
-          existingGrn={additionalDelivery}
-          onClose={() => setAdditionalDelivery(null)}
-          onSave={(grn) => {
-            setGrnList((prev) => [grn, ...prev]);
-            setAdditionalDelivery(null);
-          }}
-        />
-      )}
-      {rejectGrn && (
-        <RaiseRejectionModal
-          grn={rejectGrn}
-          onClose={() => setRejectGrn(null)}
-          onDone={(_reason) => {
+      {receiveGrn && (
+        <ReceiveDeliveryModal
+          grn={receiveGrn}
+          onClose={() => setReceiveGrn(null)}
+          onDone={(updated) => {
             setGrnList((prev) =>
-              prev.map((g) =>
-                g.id === rejectGrn.id
-                  ? { ...g, status: "completed" as const }
-                  : g,
-              ),
+              prev.map((g) => (g.id === updated.id ? updated : g)),
             );
-            setRejectGrn(null);
+            setReceiveGrn(null);
+            toast.success(`${updated.reference} received into ${updated.storeName}.`, {
+              description:
+                "Stock movement recorded, and the material is now available in inventory.",
+            });
           }}
         />
       )}
-      {notifyGrn && (
-        <NotifySupplierModal
-          grn={notifyGrn}
-          onClose={() => setNotifyGrn(null)}
-          onDone={() => setNotifyGrn(null)}
+
+      {showOpen && (
+        <OpenReceiptModal
+          onClose={() => setShowOpen(false)}
+          onDone={(grn) => {
+            setGrnList((prev) =>
+              prev.some((g) => g.id === grn.id) ? prev : [grn, ...prev],
+            );
+            setShowOpen(false);
+          }}
         />
+      )}
+
+      {rejectGrn && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-base font-semibold text-gray-900">
+                Reject delivery — {rejectGrn.reference}
+              </h2>
+              <button
+                onClick={() => setRejectGrn(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-xs text-gray-500">
+                Nothing will be added to stock. The receipt stays on record
+                against {rejectGrn.poRef}.
+              </p>
+              <textarea
+                rows={3}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Why is this delivery being rejected?"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
+              <button
+                onClick={() => setRejectGrn(null)}
+                className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmReject()}
+                disabled={!rejectReason.trim()}
+                className="px-4 py-2 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-40 flex items-center gap-2"
+              >
+                <XCircle className="w-4 h-4" /> Reject delivery
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

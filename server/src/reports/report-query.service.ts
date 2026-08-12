@@ -116,7 +116,6 @@ const REPORT_SOURCES: ReportSource[] = [
                 queryable: false,
             },
             { key: 'status', label: 'Status', type: 'status', column: 'status' },
-            { key: 'payment_status', label: 'Payment Status', type: 'status', column: 'paymentStatus' },
             { key: 'total_value', label: 'Total Value', type: 'number', column: 'totalValue' },
             { key: 'received_value', label: 'Received Value', type: 'number', column: 'receivedValue' },
             {

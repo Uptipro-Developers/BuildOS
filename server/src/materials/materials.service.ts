@@ -1,13 +1,31 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProcurementRequestsService } from '../procurement-requests/procurement-requests.service';
 
 /** Must match the key AdminExtrasService writes its settings row under. */
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
+/**
+ * The request reference behind an item row's `<ref>/<n>` reference.
+ *
+ * Mirrors src/app/utils/materialRequestRef.ts on the frontend: a multi-item
+ * Material Request writes one row per material under `<requestRef>/<n>` because
+ * `reference` is UNIQUE. Grouping the rows back together needs the base.
+ */
+function baseMaterialRequestRef(reference: string): string {
+    if (!reference) return '';
+    const cut = reference.lastIndexOf('/');
+    if (cut <= 0) return reference;
+    return /^\d+$/.test(reference.slice(cut + 1)) ? reference.slice(0, cut) : reference;
+}
+
 @Injectable()
 export class MaterialsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private procurementRequests: ProcurementRequestsService,
+    ) { }
 
     // ── Materials ──
     findAllMaterials(search?: string, category?: string) {
@@ -189,7 +207,76 @@ export class MaterialsService {
     }
 
     updateRequest(id: string, data: any) {
-        return this.prisma.materialRequest.update({ where: { id }, data });
+        return this.prisma.materialRequest.update({ where: { id }, data }).then(async (row) => {
+            // Approval is the trigger for procurement: an approved Material
+            // Request automatically raises a Purchase Request. This replaces the
+            // old manual "Raise Purchase Request" button, so the workflow moves
+            // itself forward rather than waiting on a second click.
+            if (String(data?.status ?? '').toLowerCase() === 'approved') {
+                await this.maybeRaisePurchaseRequest(row).catch(() => undefined);
+            }
+            return row;
+        });
+    }
+
+    /**
+     * Raises a Purchase Request for an approved Material Request, once per
+     * request group.
+     *
+     * A multi-item Material Request is stored as sibling `<ref>/<n>` rows, so
+     * this is guarded two ways to create exactly one PR: only the lead row acts,
+     * and it no-ops if any sibling already carries a `prRef`. The new PR opens in
+     * `not_raised` — the approval already happened at the Material Request level,
+     * so it needs no further approval, only to be raised to suppliers.
+     */
+    private async maybeRaisePurchaseRequest(row: {
+        reference: string;
+        prRef?: string | null;
+        projectName?: string | null;
+        projectId?: string | null;
+        requestedBy?: string | null;
+    }) {
+        const base = baseMaterialRequestRef(row.reference);
+        // Only the lead row of a group raises the PR, so siblings approved in the
+        // same batch cannot each create one.
+        const isLead = row.reference === base || row.reference === `${base}/1`;
+        if (!isLead) return;
+
+        const siblings = await this.prisma.materialRequest.findMany({
+            where: { OR: [{ reference: base }, { reference: { startsWith: `${base}/` } }] },
+        });
+        // Idempotent: a PR already exists for this request.
+        if (siblings.some((s) => s.prRef)) return;
+
+        const items = siblings.map((s) => ({
+            description: s.materialName,
+            material: s.materialName,
+            qty: s.qty,
+            unit: s.unit,
+            unitPrice: 0,
+        }));
+
+        const pr = await this.procurementRequests.createPR({
+            title: `${row.projectName ?? 'Procurement'} — ${base}`,
+            projectId: row.projectId ?? null,
+            projectName: row.projectName ?? null,
+            requestedBy: row.requestedBy ?? 'System',
+            status: 'not_raised',
+            procurementType: 'rfq',
+            suppliers: [],
+            mrRef: base,
+            items,
+            notes: `Automatically raised from approved Material Request ${base}.`,
+        });
+
+        // Backlink and move every row of the group into procurement. createPR
+        // only backlinks the exact base reference, which misses the `<ref>/<n>`
+        // rows, so the whole group is updated here.
+        await this.prisma.materialRequest.updateMany({
+            where: { OR: [{ reference: base }, { reference: { startsWith: `${base}/` } }] },
+            data: { prRef: pr.prRef, status: 'in_procurement' },
+        });
+        return pr;
     }
 
     // ── Material Returns ──

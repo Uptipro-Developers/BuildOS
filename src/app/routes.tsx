@@ -75,7 +75,7 @@ const ExpenseManagementPage = lazyPage(() => import("./pages/finance/ExpenseMana
 const IncomeManagementPage = lazyPage(() => import("./pages/finance/IncomeManagementPage").then((m) => ({ default: m.IncomeManagementPage })));
 const BudgetManagementPage = lazyPage(() => import("./pages/finance/BudgetManagementPage").then((m) => ({ default: m.BudgetManagementPage })));
 const PaymentManagementPage = lazyPage(() => import("./pages/finance/PaymentManagementPage").then((m) => ({ default: m.PaymentManagementPage })));
-const PayrollIntegrationPage = lazyPage(() => import("./pages/finance/PayrollIntegrationPage").then((m) => ({ default: m.PayrollIntegrationPage })));
+const PayrollOverviewPage = lazyPage(() => import("./pages/finance/PayrollOverviewPage").then((m) => ({ default: m.PayrollOverviewPage })));
 const ClaimsManagementPage = lazyPage(() => import("./pages/finance/ClaimsManagementPage").then((m) => ({ default: m.ClaimsManagementPage })));
 const TransactionsLedgerPage = lazyPage(() => import("./pages/finance/TransactionsLedgerPage").then((m) => ({ default: m.TransactionsLedgerPage })));
 const FinanceReportsPage = lazyPage(() => import("./pages/finance/FinanceReportsPage").then((m) => ({ default: m.FinanceReportsPage })));
@@ -195,6 +195,7 @@ const HRTasksPage = lazyPage(() => import("./pages/hr/HRTasksPage").then((m) => 
 const HRMyTasksPage = lazyPage(() => import("./pages/hr/HRMyTasksPage").then((m) => ({ default: m.HRMyTasksPage })));
 
 // Procurement new pages (lazy-loaded)
+const GeneralLedgerPage = lazyPage(() => import("./pages/finance/GeneralLedgerPage").then((m) => ({ default: m.GeneralLedgerPage })));
 const PurchaseInvoicePage = lazyPage(() => import("./pages/procurement/PurchaseInvoicePage").then((m) => ({ default: m.PurchaseInvoicePage })));
 const ProcurementTasksPage = lazyPage(() => import("./pages/procurement/ProcurementTasksPage").then((m) => ({ default: m.ProcurementTasksPage })));
 const ProcurementMyTasksPage = lazyPage(() => import("./pages/procurement/ProcurementMyTasksPage").then((m) => ({ default: m.ProcurementMyTasksPage })));
@@ -328,9 +329,10 @@ export const router = createBrowserRouter([
               { path: "income", Component: IncomeManagementPage },
               { path: "budget", Component: BudgetManagementPage },
               { path: "payments", Component: PaymentManagementPage },
-              { path: "payroll", Component: PayrollIntegrationPage },
+              { path: "payroll", Component: PayrollOverviewPage },
               { path: "claims", Component: ClaimsManagementPage },
               { path: "approvals", Component: FinanceApprovalsPage },
+              { path: "general-ledger", Component: GeneralLedgerPage },
               { path: "ledger", Component: TransactionsLedgerPage },
               { path: "reports", Component: FinanceReportsPage },
               { path: "config", Component: FinanceConfigPage },

@@ -11,7 +11,11 @@ import {
 } from "lucide-react";
 import { apiFetch } from "../../api/client";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
-import { formatDateTimeByGeneralSettings } from "../../utils/generalSettings";
+import {
+  formatDateTimeByGeneralSettings,
+  getCurrencyCode,
+} from "../../utils/generalSettings";
+import { GlobalCurrencyField } from "../../components/GlobalCurrencyField";
 
 /** Shown in System Information; the HR module's own release, not a setting. */
 const HR_MODULE_VERSION = "HR v2.4.1";
@@ -117,7 +121,9 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
     probationMonths: "3",
     noticePeriodDays: "30",
     retirementAge: "60",
-    currency: "USD",
+    // Not editable here — read from Admin › General Settings, and kept in the
+    // saved payload so the stored HR config agrees with it.
+    currency: getCurrencyCode(),
     fiscalYearStart: "January",
     payrollFrequency: "Monthly",
     taxRate: "15",
@@ -144,6 +150,9 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
         setForm((prev) => {
           const next = { ...prev };
           for (const key of Object.keys(prev) as (keyof typeof prev)[]) {
+            // Currency is global. A value stored here before it became global
+            // would otherwise reinstate the old override on load.
+            if (key === "currency") continue;
             const value = saved[key];
             // A field absent from the stored setup keeps its default rather
             // than becoming "undefined" and turning the input uncontrolled.
@@ -185,7 +194,9 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
   function save() {
     apiFetch("/setup", {
       method: "POST",
-      body: JSON.stringify(form),
+      // Currency comes from Admin, not the form — saving the form's copy would
+      // re-pin whatever was stored before it became global.
+      body: JSON.stringify({ ...form, currency: getCurrencyCode() }),
     })
       .then(() => {
         setSaved(true);
@@ -319,13 +330,13 @@ export function HRGeneralSetupPage({ embedded }: { embedded?: boolean } = {}) {
               type="number"
               suffix="yrs"
             />
-            <Field
-              label="Currency"
-              value={form.currency}
-              onChange={f("currency")}
-              type="select"
-              options={["USD", "NGN", "GBP", "EUR", "GHS"]}
-              hint="Payroll currency. Anything other than NGN switches income tax to the flat Default Tax Rate."
+            {/* Payroll pays in the organisation's currency: salaries, bands and
+                payslips are all bare numbers rendered through the one formatter,
+                so choosing a different one here relabelled the figures without
+                converting any of them. */}
+            <GlobalCurrencyField
+              label="Payroll Currency"
+              hint="Anything other than NGN switches income tax to the flat Default Tax Rate."
             />
           </div>
         </div>

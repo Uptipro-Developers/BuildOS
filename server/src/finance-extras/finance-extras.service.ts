@@ -1,11 +1,13 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NumberingService } from '../numbering/numbering.service';
+import { PostingEngineService } from './posting-engine.service';
 
 const FINANCE_CONFIG_KEY = 'finance-config';
 const SCHEDULED_POSTINGS_KEY = 'finance-scheduled-postings';
 const PAYMENT_METHODS_KEY = 'finance-payment-methods';
 const PROCESS_MAPPINGS_KEY = 'finance-process-mappings';
+const PROCESS_CATEGORIES_KEY = 'finance-process-categories';
 const FISCAL_YEARS_KEY = 'finance-fiscal-years';
 
 @Injectable()
@@ -13,6 +15,7 @@ export class FinanceExtrasService {
     constructor(
         private prisma: PrismaService,
         private numbering: NumberingService,
+        private posting: PostingEngineService,
     ) { }
 
     // ── Transactions ──
@@ -112,70 +115,46 @@ export class FinanceExtrasService {
         })
     }
 
-    /**
-     * Reverses a posted journal entry.
-     *
-     * Posts a mirror entry with every debit and credit swapped rather than
-     * editing or deleting the original: a posted entry is a permanent record,
-     * and the ledger has to show both the original and its contra. The original
-     * is marked Reversed and linked to the entry that reversed it.
-     */
-    async reverseJournal(id: string, body: { date?: string; createdBy?: string } = {}) {
-        const original = await this.prisma.journalEntry.findUniqueOrThrow({
-            where: { id },
-            include: { lines: true },
-        });
-
-        if (original.status === 'Reversed') {
-            throw new BadRequestException('This journal entry has already been reversed.');
-        }
-        if (original.status !== 'Posted') {
-            throw new BadRequestException('Only a posted journal entry can be reversed.');
-        }
-
-        const when = body.date ? new Date(body.date) : new Date();
-        if (Number.isNaN(when.getTime())) {
-            throw new BadRequestException('The reversal date is not a valid date.');
-        }
-
-        const { reference } = await this.numbering.allocate('JournalEntry');
-
-        // Both writes land together: an original marked Reversed with no contra
-        // entry — or a contra with the original still Posted — would double-count
-        // in the trial balance.
-        const [, reversal] = await this.prisma.$transaction([
-            this.prisma.journalEntry.update({
-                where: { id },
-                data: { status: 'Reversed', reversedAt: when },
-            }),
-            this.prisma.journalEntry.create({
-                data: {
-                    reference,
-                    date: when,
-                    description: `Reversal of ${original.reference} — ${original.description}`,
-                    status: 'Posted',
-                    postedAt: when,
-                    createdBy: body.createdBy || original.createdBy || 'System',
-                    reversalOfId: original.id,
-                    lines: {
-                        create: original.lines.map((l) => ({
-                            accountCode: l.accountCode,
-                            accountName: l.accountName,
-                            // The swap is the reversal.
-                            debit: l.credit,
-                            credit: l.debit,
-                            description: l.description ?? undefined,
-                        })),
-                    },
-                },
-                include: { lines: true },
-            }),
-        ]);
-
-        return { original: await this.findJournal(id), reversal };
+    /** Turns a draft into a ledger record. Balances move here, not at save. */
+    postJournal(id: string, body: { postedBy?: string; date?: string } = {}) {
+        return this.posting.postDraft(id, body.postedBy, body.date);
     }
-    updateJournal(id: string, data: any) {
-        const { lines, ...rest } = data;
+
+    /** Rebuilds Chart of Accounts balances from the posted journal lines. */
+    recomputeAccountBalances() {
+        return this.posting.recomputeBalances();
+    }
+
+    /**
+     * Reverses a posted journal entry by posting its mirror. The original is
+     * marked Reversed and linked to the entry that reversed it; both the entry
+     * and the balance movement it undoes are handled by the posting engine.
+     */
+    reverseJournal(id: string, body: { date?: string; createdBy?: string } = {}) {
+        return this.posting.reverse(id, body);
+    }
+
+    /**
+     * Edits a journal entry.
+     *
+     * Only a draft may be edited. A posted entry has already moved account
+     * balances and been reported on; changing its lines afterwards would leave
+     * the Chart of Accounts holding the effect of numbers that no longer exist.
+     * Correcting a posted entry is a reversal followed by a fresh posting, which
+     * is what `reverseJournal` is for.
+     */
+    async updateJournal(id: string, data: any) {
+        const existing = await this.prisma.journalEntry.findUniqueOrThrow({
+            where: { id },
+            select: { status: true, reference: true },
+        });
+        if (existing.status !== 'Draft') {
+            throw new BadRequestException(
+                `${existing.reference} is ${existing.status.toLowerCase()} and can no longer be edited. Reverse it and post a corrected entry instead.`,
+            );
+        }
+
+        const { lines, reference: _ignored, status: _statusIgnored, ...rest } = data;
         return this.prisma.journalEntry.update({
             where: { id },
             data: {
@@ -184,7 +163,13 @@ export class FinanceExtrasService {
                     ? {
                         lines: {
                             deleteMany: {},
-                            create: lines,
+                            create: this.posting.normalizeLines(lines).map((l) => ({
+                                accountCode: l.accountCode,
+                                accountName: l.accountName || '',
+                                debit: l.debit ?? 0,
+                                credit: l.credit ?? 0,
+                                description: l.description ?? null,
+                            })),
                         },
                     }
                     : {}),
@@ -192,8 +177,100 @@ export class FinanceExtrasService {
             include: { lines: true },
         });
     }
-    deleteJournal(id: string) {
+
+    /** Only a draft can be deleted, for the same reason it is the only thing that can be edited. */
+    async deleteJournal(id: string) {
+        const existing = await this.prisma.journalEntry.findUniqueOrThrow({
+            where: { id },
+            select: { status: true, reference: true },
+        });
+        if (existing.status !== 'Draft') {
+            throw new BadRequestException(
+                `${existing.reference} is ${existing.status.toLowerCase()} and cannot be deleted. Reverse it instead — the ledger has to keep both sides.`,
+            );
+        }
         return this.prisma.journalEntry.delete({ where: { id } });
+    }
+
+    /**
+     * The General Ledger: every posted line across every engine, in posting
+     * order, with a running balance per account.
+     *
+     * Built server-side from the journal entries rather than in the browser
+     * because the running balance is only meaningful over the *whole* posted
+     * set — a page of entries cannot compute it, and the client was loading
+     * every entry to work around that.
+     */
+    async buildGeneralLedger(params: {
+        from?: string;
+        to?: string;
+        accountCode?: string;
+        sourceModule?: string;
+    } = {}) {
+        const range = this.toDateRange(params.from, params.to);
+        const entries = await this.prisma.journalEntry.findMany({
+            where: {
+                // Drafts are excluded: a draft has not been posted, and showing
+                // it here would put money in the ledger nobody has committed.
+                // Reversed entries stay — the reversal is its own entry and the
+                // ledger has to show both sides or it stops reconciling.
+                status: { in: ['Posted', 'Reversed'] },
+                ...(range ? { date: range } : {}),
+                ...(params.sourceModule ? { sourceModule: params.sourceModule } : {}),
+            },
+            include: { lines: true },
+            orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+        });
+
+        const balanceByAccount: Record<string, number> = {};
+        const rows: any[] = [];
+        let totalDebit = 0;
+        let totalCredit = 0;
+
+        for (const entry of entries) {
+            for (const line of entry.lines) {
+                const code = line.accountCode || '(unassigned)';
+                balanceByAccount[code] =
+                    (balanceByAccount[code] ?? 0) + (line.debit || 0) - (line.credit || 0);
+
+                // Filtered after the running balance is accumulated, so a single
+                // account's view still shows the balance it actually carries.
+                if (params.accountCode && code !== params.accountCode) continue;
+
+                totalDebit += line.debit || 0;
+                totalCredit += line.credit || 0;
+                rows.push({
+                    id: line.id,
+                    date: entry.date,
+                    reference: entry.reference,
+                    sourceModule: entry.sourceModule,
+                    sourceType: entry.sourceType,
+                    sourceId: entry.sourceId,
+                    sourceRef: entry.sourceRef,
+                    process: entry.process,
+                    journalId: entry.id,
+                    journalStatus: entry.status,
+                    accountCode: line.accountCode,
+                    accountName: line.accountName,
+                    description: [entry.description, line.description].filter(Boolean).join(' — '),
+                    debit: line.debit || 0,
+                    credit: line.credit || 0,
+                    balance: balanceByAccount[code],
+                    postedBy: entry.createdBy,
+                });
+            }
+        }
+
+        return {
+            rows,
+            totals: {
+                debit: Number(totalDebit.toFixed(2)),
+                credit: Number(totalCredit.toFixed(2)),
+                balanced: Math.round((totalDebit - totalCredit) * 100) === 0,
+                entries: entries.length,
+                lines: rows.length,
+            },
+        };
     }
 
     // ── Chart of Accounts ──
@@ -474,6 +551,26 @@ export class FinanceExtrasService {
     async saveProcessMappings(mappings: any[]) {
         const list = Array.isArray(mappings) ? mappings : [];
         await this.writeSetting(PROCESS_MAPPINGS_KEY, list);
+        return list;
+    }
+
+    /**
+     * The Posting Engine's process categories — the buckets transactions arrive
+     * under, and the debit/credit pair each posts to.
+     *
+     * These had nowhere to live at all: the page held them in component state
+     * seeded with an empty array, so the category list was empty on every load,
+     * a category created by hand vanished on refresh, and posting to the ledger
+     * — which looks its category up first — could never run. Stored as a setting
+     * rather than a table for the same reason the mappings are: it is a short
+     * configured list edited as a whole, not a growing record set.
+     */
+    getProcessCategories() {
+        return this.readSetting<any[]>(PROCESS_CATEGORIES_KEY, []);
+    }
+    async saveProcessCategories(categories: any[]) {
+        const list = Array.isArray(categories) ? categories : [];
+        await this.writeSetting(PROCESS_CATEGORIES_KEY, list);
         return list;
     }
 

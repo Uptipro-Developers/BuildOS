@@ -3,9 +3,12 @@ import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { GoodsReceiptsModule } from '../goods-receipts/goods-receipts.module';
 
 @Module({
-    imports: [PrismaModule, IntegrationsModule],
+    // GoodsReceiptsModule supplies GoodsReceiptsService, used to open a receipt
+    // as soon as an order's payment is confirmed.
+    imports: [PrismaModule, IntegrationsModule, GoodsReceiptsModule],
     controllers: [PurchaseOrdersController],
     providers: [PurchaseOrdersService],
 })

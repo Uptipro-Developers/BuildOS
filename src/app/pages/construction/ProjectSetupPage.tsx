@@ -104,7 +104,26 @@ function levelMaps(levels: { level: number; name: string; prefix: string }[]) {
     names[l.level] = l.name;
     prefixes[l.level] = l.prefix;
   });
-  return { names, prefixes };
+  // The configured levels in order. The breakdown is a strict hierarchy — a
+  // Work Package hangs off a Sub-summary Task, which hangs off a Summary Task,
+  // which hangs off a Stage — so both the level picker and the parent picker
+  // have to be driven by this rather than by a hardcoded [1, 2, 3, 4].
+  const ordered = [...levels].sort((a, b) => a.level - b.level).map((l) => l.level);
+  return { names, prefixes, ordered };
+}
+
+/**
+ * Whether `parent` is a legal parent for a task at `level`.
+ *
+ * Exactly one level up, always. The parent picker used to offer every task with
+ * a *lower* level number, so a Work Package could be hung straight off a Stage,
+ * skipping the two levels between — which makes the breakdown four labels
+ * rather than four levels, and leaves the intermediate rollups with nothing
+ * under them.
+ */
+function isLegalParent(parentLevel: number, level: number, ordered: number[]) {
+  const idx = ordered.indexOf(level);
+  return idx > 0 && parentLevel === ordered[idx - 1];
 }
 
 export function ProjectSetupPage() {
@@ -348,10 +367,16 @@ export function ProjectSetupPage() {
    * the fallback for when nothing has been configured yet.
    */
   const constructionConfig = useConstructionSettings();
-  const { names: LEVEL_NAMES, prefixes: LEVEL_PREFIX } = useMemo(
+  const {
+    names: LEVEL_NAMES,
+    prefixes: LEVEL_PREFIX,
+    ordered: LEVEL_ORDER,
+  } = useMemo(
     () => levelMaps(constructionConfig.scheduleLevels),
     [constructionConfig.scheduleLevels],
   );
+  /** The deepest configured level — the one that does the actual work. */
+  const LEAF_LEVEL = LEVEL_ORDER[LEVEL_ORDER.length - 1] ?? 4;
   // Trade types are configured in Settings; this read a static import.
   const tradeTypeOptions = constructionConfig.tradeTypes;
 
@@ -940,6 +965,25 @@ export function ProjectSetupPage() {
 
   const addTask = () => {
     if (!taskForm.name.trim()) return;
+    // Anything below the top level must hang off the level directly above it.
+    // Without this a Level 3 task could be created with no parent at all, and
+    // then rendered as a root beside the Stages — four levels of labels over a
+    // flat list.
+    if (taskForm.level !== LEVEL_ORDER[0]) {
+      const parent = projectTasks.find((t) => t.id === taskForm.parentTaskId);
+      if (!parent) {
+        toast.error(
+          `A ${LEVEL_NAMES[taskForm.level]} must sit under a ${LEVEL_NAMES[LEVEL_ORDER[LEVEL_ORDER.indexOf(taskForm.level) - 1]]}.`,
+        );
+        return;
+      }
+      if (!isLegalParent(parent.level, taskForm.level, LEVEL_ORDER)) {
+        toast.error(
+          `${LEVEL_NAMES[taskForm.level]} sits directly under ${LEVEL_NAMES[LEVEL_ORDER[LEVEL_ORDER.indexOf(taskForm.level) - 1]]}, not ${LEVEL_NAMES[parent.level]}.`,
+        );
+        return;
+      }
+    }
     const prefix = LEVEL_PREFIX[taskForm.level];
     const newId = `${prefix}-${String(maxTaskId).padStart(3, "0")}`;
     const s = taskForm.plannedStart || new Date().toISOString().split("T")[0];
@@ -985,7 +1029,7 @@ export function ProjectSetupPage() {
     });
     setTaskForm({
       name: "",
-      level: 4,
+      level: LEAF_LEVEL as 1 | 2 | 3 | 4,
       parentTaskId: "",
       plannedStart: "",
       plannedEnd: "",
@@ -1040,11 +1084,27 @@ export function ProjectSetupPage() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
         const newTasks: Task[] = [];
+        const skipped: string[] = [];
         let maxLvl = maxTaskId;
         for (let i = 1; i < rows.length; i++) {
           const [levelStr, name, parentId, start, end] = rows[i];
           const level = Number(levelStr);
-          if (!name || isNaN(level) || level < 1 || level > 4) continue;
+          if (!name || isNaN(level) || !LEVEL_ORDER.includes(level)) {
+            if (name) skipped.push(`${name}: level ${levelStr} is not configured`);
+            continue;
+          }
+          // The import used to accept any parent id, or none, for any level, so
+          // a spreadsheet could flatten the whole breakdown in one go.
+          if (level !== LEVEL_ORDER[0]) {
+            const parent =
+              [...projectTasks, ...newTasks].find((t) => t.id === parentId) ?? null;
+            if (!parent || !isLegalParent(parent.level, level, LEVEL_ORDER)) {
+              skipped.push(
+                `${name}: needs a ${LEVEL_NAMES[LEVEL_ORDER[LEVEL_ORDER.indexOf(level) - 1]]} as its parent`,
+              );
+              continue;
+            }
+          }
           maxLvl++;
           const prefix = LEVEL_PREFIX[level as 1 | 2 | 3 | 4];
           const id = `${prefix}-${String(maxLvl).padStart(3, "0")}`;
@@ -1081,6 +1141,12 @@ export function ProjectSetupPage() {
             notes: "",
             structureEntryId: undefined,
           });
+        }
+        if (skipped.length > 0) {
+          toast.warning(
+            `${skipped.length} row${skipped.length === 1 ? "" : "s"} skipped.`,
+            { description: skipped.slice(0, 3).join("; ") },
+          );
         }
         if (newTasks.length > 0) {
           setProjectTasks((prev) => [...prev, ...newTasks]);
@@ -2395,40 +2461,57 @@ export function ProjectSetupPage() {
                   className="w-full px-3 py-2 rounded-lg border text-sm"
                   style={{ borderColor: "#E2E8F0", backgroundColor: "#F7F8FA" }}
                 >
-                  {[1, 2, 3, 4].map((l) => (
+                  {LEVEL_ORDER.map((l) => (
                     <option key={l} value={l}>
                       Level {l} — {LEVEL_NAMES[l]}
                     </option>
                   ))}
                 </select>
               </div>
-              {taskForm.level > 1 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Parent Task
-                  </label>
-                  <select
-                    value={taskForm.parentTaskId}
-                    onChange={(e) =>
-                      setTaskForm({ ...taskForm, parentTaskId: e.target.value })
-                    }
-                    className="w-full px-3 py-2 rounded-lg border text-sm"
-                    style={{
-                      borderColor: "#E2E8F0",
-                      backgroundColor: "#F7F8FA",
-                    }}
-                  >
-                    <option value="">Select parent...</option>
-                    {projectTasks
-                      .filter((t) => t.level < taskForm.level && t.level >= 1)
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {"—".repeat(t.level)} {t.name} ({t.id})
+              {taskForm.level !== LEVEL_ORDER[0] &&
+                (() => {
+                  const parentLevel =
+                    LEVEL_ORDER[LEVEL_ORDER.indexOf(taskForm.level) - 1];
+                  // Only tasks one level up. The old filter was
+                  // `t.level < taskForm.level`, which offered Stages as parents
+                  // for Work Packages and let the middle two levels be skipped.
+                  const candidates = projectTasks.filter(
+                    (t) => t.level === parentLevel,
+                  );
+                  return (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Parent {LEVEL_NAMES[parentLevel]}{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={taskForm.parentTaskId}
+                        onChange={(e) =>
+                          setTaskForm({
+                            ...taskForm,
+                            parentTaskId: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 rounded-lg border text-sm"
+                        style={{
+                          borderColor: "#E2E8F0",
+                          backgroundColor: "#F7F8FA",
+                        }}
+                      >
+                        <option value="">
+                          {candidates.length === 0
+                            ? `Add a ${LEVEL_NAMES[parentLevel]} first`
+                            : "Select parent…"}
                         </option>
-                      ))}
-                  </select>
-                </div>
-              )}
+                        {candidates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.id})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

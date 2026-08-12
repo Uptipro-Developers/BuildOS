@@ -18,6 +18,45 @@ export interface JournalEntry {
     reversedAt?: string;
     /** On a reversing entry, the id of the entry it reverses. */
     reversalOfId?: string;
+    /** Which engine raised the posting — "Journal", "Payment", "Purchase", "Payroll". */
+    sourceModule?: string;
+    /** The originating record's model and id, for tracing back to it. */
+    sourceType?: string;
+    sourceId?: string;
+    /** The originating document's own reference, e.g. an invoice number. */
+    sourceRef?: string;
+    /** The configured process whose mapping produced the lines. */
+    process?: string;
+}
+
+/** One posted line, as the General Ledger serves it. */
+export interface GeneralLedgerRow {
+    id: string;
+    date: string;
+    reference: string;
+    sourceModule: string;
+    sourceType?: string | null;
+    sourceId?: string | null;
+    sourceRef?: string | null;
+    process?: string | null;
+    journalId: string;
+    journalStatus: string;
+    accountCode: string;
+    accountName: string;
+    description: string;
+    debit: number;
+    credit: number;
+    /** Running balance for this line's account, across the whole posted set. */
+    balance: number;
+    postedBy?: string;
+}
+
+export interface GeneralLedger {
+    rows: GeneralLedgerRow[];
+    totals: {
+        debit: number; credit: number; balanced: boolean;
+        entries: number; lines: number;
+    };
 }
 export interface ChartAccount {
     id: string; code: string; name: string; type: string;
@@ -71,6 +110,27 @@ export const reverseJournalEntry = (id: string, data?: { date?: string; createdB
         { method: 'POST', body: JSON.stringify(data ?? {}) },
     );
 
+/**
+ * Posts a saved draft. The balance check runs server-side at this point, not
+ * when the draft was saved — a draft is allowed to be half-finished.
+ */
+export const postJournalDraft = (id: string, data?: { postedBy?: string; date?: string }) =>
+    apiFetch<JournalEntry>(`/journal-entries/${id}/post`, {
+        method: 'POST',
+        body: JSON.stringify(data ?? {}),
+    });
+
+// General Ledger — every posted line across every engine, with the running
+// balance computed over the whole posted set rather than the loaded page.
+export const getGeneralLedger = (params: {
+    from?: string; to?: string; accountCode?: string; sourceModule?: string;
+} = {}) => {
+    const qs = new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v) as [string, string][],
+    ).toString();
+    return apiFetch<GeneralLedger>(qs ? `/general-ledger?${qs}` : '/general-ledger');
+};
+
 // Chart of Accounts
 export const getChartAccounts = (type?: string) =>
     apiFetch<ChartAccount[]>(type ? `/chart-accounts?type=${type}` : '/chart-accounts');
@@ -81,6 +141,15 @@ export const updateChartAccount = (id: string, data: Partial<ChartAccount>) =>
     apiFetch<ChartAccount>(`/chart-accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteChartAccount = (id: string) =>
     apiFetch<void>(`/chart-accounts/${id}`, { method: 'DELETE' });
+/**
+ * Rebuilds every balance from the posted journal lines. Accounts seeded before
+ * the posting engine existed never had their balances maintained, and this is
+ * also the reconciliation to reach for if one is ever doubted.
+ */
+export const recomputeAccountBalances = () =>
+    apiFetch<{ accounts: number; adjusted: number }>('/chart-accounts/recompute-balances', {
+        method: 'POST',
+    });
 
 // Bank Accounts
 export const getBankAccounts = () => apiFetch<BankAccount[]>('/bank-accounts');
@@ -122,6 +191,86 @@ export const togglePaymentMethod = (id: string) =>
 export const getProcessMappings = () => apiFetch<any[]>('/process-mappings');
 export const saveProcessMappings = (mappings: any[]) =>
     apiFetch<any[]>('/process-mappings', { method: 'PUT', body: JSON.stringify({ mappings }) });
+
+/**
+ * The Posting Engine's process categories. Stored and saved as a whole list,
+ * the same way the mappings are — the screen edits the set, not one row.
+ */
+export const getProcessCategories = () => apiFetch<any[]>('/process-categories');
+export const saveProcessCategories = (categories: any[]) =>
+    apiFetch<any[]>('/process-categories', { method: 'PUT', body: JSON.stringify({ categories }) });
+
+// ── Payroll Overview ──────────────────────────────────────────────────────────
+/**
+ * A payroll run's journey from HR into the ledger.
+ *
+ * "Approved" is HR's sign-off — the point at which the run reaches Finance.
+ * From there, approving the posting and performing it are two separate acts,
+ * so that authorising payroll to hit the accounts is not the same keystroke as
+ * doing it.
+ */
+export type PayrollPostingStatus =
+    | 'Approved'
+    | 'Pending Posting Approval'
+    | 'Posting Approved'
+    | 'Posted';
+
+export interface PayrollOverviewRow {
+    id: string;
+    /** The Payroll Code, allocated from Settings → Numbering. */
+    code: string;
+    periodName: string;
+    month: number;
+    year: number;
+    status: PayrollPostingStatus | string;
+    employeeCount: number;
+    totalEarnings: number;
+    totalDeductions: number;
+    netPay: number;
+    postingRequestedBy?: string | null;
+    postingRequestedAt?: string | null;
+    postingApprovedBy?: string | null;
+    postingApprovedAt?: string | null;
+    postedBy?: string | null;
+    postedAt?: string | null;
+    journalEntryId?: string | null;
+    journalReference?: string | null;
+}
+
+/** The double entry a run would post, shown before anyone commits to it. */
+export interface PayrollPostingPreview {
+    process: string;
+    mapped: boolean;
+    totals: {
+        totalEarnings: number; totalDeductions: number; netPay: number;
+        tax: number; pension: number; allowances: number; overtime: number;
+    };
+    lines: {
+        accountCode: string; accountName: string;
+        debit: number; credit: number; description?: string;
+    }[];
+    totalDebit: number;
+    totalCredit: number;
+    difference: number;
+    balanced: boolean;
+}
+
+export const getPayrollOverview = () => apiFetch<PayrollOverviewRow[]>('/payroll-overview');
+export const getPayrollPostingPreview = (id: string) =>
+    apiFetch<PayrollPostingPreview>(`/payroll-overview/${id}/posting-preview`);
+export const sendPayrollForPostingApproval = (id: string) =>
+    apiFetch<PayrollOverviewRow>(`/payroll-overview/${id}/send-for-posting-approval`, {
+        method: 'POST', body: JSON.stringify({}),
+    });
+export const approvePayrollPosting = (id: string) =>
+    apiFetch<PayrollOverviewRow>(`/payroll-overview/${id}/approve-posting`, {
+        method: 'POST', body: JSON.stringify({}),
+    });
+export const postPayroll = (id: string) =>
+    apiFetch<{ run: PayrollOverviewRow; journalEntry: JournalEntry }>(
+        `/payroll-overview/${id}/post`,
+        { method: 'POST', body: JSON.stringify({}) },
+    );
 
 // Fiscal years. Written as one collection: closing a year and making another
 // current is a single change to the register.

@@ -12,6 +12,7 @@ import {
 } from "../utils/authSession";
 import { ChangelogProvider } from "../stores/changelogStore";
 import { NumberingProvider } from "../stores/numberingStore";
+import { FinanceProvider } from "../stores/financeStore";
 import { PermissionsProvider } from "../utils/usePermissions";
 
 export function AppLayout() {
@@ -70,22 +71,28 @@ export function AppLayout() {
   if (!ready) return null;
 
   return (
-    <ChangelogProvider>
-      <HRConfigProvider>
-        <ResourceProvider>
-          <TaskProvider>
-            <RolesProvider>
-              <NumberingProvider>
-                <PermissionsProvider>
-                  <div className="min-h-screen bg-gray-50">
-                    <Outlet />
-                  </div>
-                </PermissionsProvider>
-              </NumberingProvider>
-            </RolesProvider>
-          </TaskProvider>
-        </ResourceProvider>
-      </HRConfigProvider>
-    </ChangelogProvider>
+    // FinanceProvider sits above every module, not inside FinanceLayout: paying
+    // a supplier invoice and completing a payment both post to the ledger, and
+    // those screens live outside Finance. Scoped to the layout, the Chart of
+    // Accounts was unreachable from the very places that move money.
+    <FinanceProvider>
+      <ChangelogProvider>
+        <HRConfigProvider>
+          <ResourceProvider>
+            <TaskProvider>
+              <RolesProvider>
+                <NumberingProvider>
+                  <PermissionsProvider>
+                    <div className="min-h-screen bg-gray-50">
+                      <Outlet />
+                    </div>
+                  </PermissionsProvider>
+                </NumberingProvider>
+              </RolesProvider>
+            </TaskProvider>
+          </ResourceProvider>
+        </HRConfigProvider>
+      </ChangelogProvider>
+    </FinanceProvider>
   );
 }
