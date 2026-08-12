@@ -66,8 +66,16 @@ export const createPurchaseInvoice = (data: Partial<PurchaseInvoice>) =>
     apiFetch<PurchaseInvoice>('/purchase-invoices', { method: 'POST', body: JSON.stringify(data) });
 export const updatePurchaseInvoice = (id: string, data: Partial<PurchaseInvoice>) =>
     apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-export const deletePurchaseInvoice = (id: string) =>
-    apiFetch<void>(`/purchase-invoices/${id}`, { method: 'DELETE' });
+/**
+ * Cancels an invoice. There is deliberately no delete: the invoice is the link
+ * between a purchase order and its payment, so removing it leaves the order in
+ * Procurement pointing at nothing and the payment with no document behind it.
+ */
+export const cancelPurchaseInvoice = (id: string, reason?: string) =>
+    apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+    });
 
 // Sent RFQs
 export const getSentRFQs = (status?: string) =>

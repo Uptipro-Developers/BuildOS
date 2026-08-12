@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AlertCircle } from "lucide-react";
 
 interface ConfirmationModalProps {
@@ -8,6 +9,15 @@ interface ConfirmationModalProps {
   cancelLabel?: string;
   isDangerous?: boolean;
   isLoading?: boolean;
+  /**
+   * Detail the decision depends on — the entries a posting would write, the
+   * records a delete would take with it. Shown between the description and the
+   * buttons, and widens the dialog, because a confirmation that hides what it
+   * is about is a confirmation nobody can give meaningfully.
+   */
+  children?: ReactNode;
+  /** Disables the confirm button — for a confirmation whose detail rules it out. */
+  confirmDisabled?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
@@ -37,6 +47,8 @@ export function ConfirmationModal({
   cancelLabel = "Cancel",
   isDangerous = false,
   isLoading = false,
+  children,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmationModalProps) {
@@ -52,7 +64,11 @@ export function ConfirmationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-5">
+      <div
+        className={`bg-white rounded-2xl shadow-xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto ${
+          children ? "max-w-lg" : "max-w-sm"
+        }`}
+      >
         {/* Icon & Title */}
         <div className="flex gap-3">
           {isDangerous && (
@@ -67,6 +83,7 @@ export function ConfirmationModal({
               {title}
             </h2>
             <p className="text-sm text-gray-600 mt-1">{description}</p>
+            {children}
           </div>
         </div>
 
@@ -81,7 +98,7 @@ export function ConfirmationModal({
           </button>
           <button
             onClick={handleConfirm}
-            disabled={isLoading}
+            disabled={isLoading || confirmDisabled}
             className={`px-4 py-2 text-sm font-medium rounded-lg text-white transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
               isDangerous
                 ? "bg-red-600 hover:bg-red-700 disabled:hover:bg-red-600"

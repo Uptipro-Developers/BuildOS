@@ -5,7 +5,6 @@ import {
   getPurchaseRequests,
   createPurchaseRequest,
   updatePurchaseRequest,
-  deletePurchaseRequest,
   createSentRFQ,
   PurchaseRequest as ApiPR,
 } from "../../api/procurement-requests";
@@ -17,12 +16,20 @@ import {
   Trash2,
   Send,
   Download,
-  Users,
   Eye,
+  Pencil,
+  Ban,
 } from "lucide-react";
 import { DataTable, type Column } from "../../components/DataTable";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
-import { useApprovalRights } from "../../utils/useApprovalRights";
+import { StatusBadge } from "../../components/StatusBadge";
+import { RowAction, RowActionNote, RowActions } from "../../components/RowAction";
+import {
+  PURCHASE_REQUEST_STATUS,
+  PR_EDITABLE,
+  statusDef,
+  type PurchaseRequestStatus,
+} from "../../utils/procurementWorkflow";
 import { useAuthUser, getAuthUserName } from "../../utils/useAuthUser";
 import { toast } from "sonner";
 import { useChangelog } from "../../stores/changelogStore";
@@ -47,14 +54,17 @@ import {
 } from "../../utils/generalSettings";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type PRStatus =
-  | "draft"
-  | "pending_approval"
-  | "approved"
-  | "sent_to_suppliers"
-  | "quotes_received"
-  | "po_created"
-  | "cancelled";
+/**
+ * A purchase request has no approval of its own.
+ *
+ * One raised from a Material Request was already approved there, so
+ * "Pending Approval" asked the same person to approve the same spend twice —
+ * and an approved request then sat waiting for a second, manual push. What is
+ * tracked instead is whether the request has been *raised* to suppliers:
+ * `draft` for one saved but not finished, `not_raised` for one created for you
+ * by an approved Material Request.
+ */
+type PRStatus = PurchaseRequestStatus;
 type SupplierStatus =
   | "not_sent"
   | "request_sent"
@@ -111,19 +121,11 @@ interface PurchaseRequest {
 
 // ── API mapper ────────────────────────────────────────────────────────────────
 function fromApi(r: ApiPR): PurchaseRequest {
-  const validStatuses: PRStatus[] = [
-    "draft",
-    "pending_approval",
-    "approved",
-    "sent_to_suppliers",
-    "quotes_received",
-    "po_created",
-    "cancelled",
-  ];
-  const rawStatus = r.status?.toLowerCase().replace(/\s+/g, "_") ?? "draft";
-  const status: PRStatus = validStatuses.includes(rawStatus as PRStatus)
-    ? (rawStatus as PRStatus)
-    : "draft";
+  const rawStatus = r.status?.toLowerCase().replace(/[\s-]+/g, "_") ?? "not_raised";
+  const status: PRStatus =
+    rawStatus in PURCHASE_REQUEST_STATUS
+      ? (rawStatus as PRStatus)
+      : "not_raised";
   return {
     id: r.id,
     prRef: r.prRef ?? r.id,
@@ -173,31 +175,11 @@ function fmt(n: number) {
   return `${symbol}${n}`;
 }
 
-const PR_STATUS_CFG: Record<PRStatus, { label: string; badge: string }> = {
-  draft: { label: "Draft", badge: "bg-gray-100 text-gray-600" },
-  pending_approval: {
-    label: "Pending Approval",
-    badge: "bg-amber-100 text-amber-700",
-  },
-  approved: { label: "Approved", badge: "bg-green-100 text-green-700" },
-  sent_to_suppliers: {
-    label: "Sent to Suppliers",
-    badge: "bg-blue-100 text-blue-700",
-  },
-  quotes_received: {
-    label: "Quotes Received",
-    badge: "bg-purple-100 text-purple-700",
-  },
-  po_created: { label: "PO Created", badge: "bg-teal-100 text-teal-700" },
-  cancelled: { label: "Cancelled", badge: "bg-red-100 text-red-700" },
-};
-
 const TABS: { key: PRStatus | "all"; label: string }[] = [
   { key: "all", label: "All PRs" },
   { key: "draft", label: "Draft" },
-  { key: "pending_approval", label: "Pending Approval" },
-  { key: "approved", label: "Approved" },
-  { key: "sent_to_suppliers", label: "Sent to Suppliers" },
+  { key: "not_raised", label: "Not Raised" },
+  { key: "raised", label: "Raised" },
   { key: "quotes_received", label: "Quotes Received" },
   { key: "po_created", label: "PO Created" },
 ];
@@ -218,15 +200,7 @@ const PR_FILTER_FIELDS: FilterFieldDef[] = [
     key: "status",
     label: "Status",
     type: "select",
-    options: [
-      "draft",
-      "pending_approval",
-      "approved",
-      "sent_to_suppliers",
-      "quotes_received",
-      "po_created",
-      "cancelled",
-    ],
+    options: Object.keys(PURCHASE_REQUEST_STATUS),
   },
 ];
 
@@ -256,12 +230,29 @@ interface NewPRPayload {
   }[];
 }
 
-function NewPRModal({
+/**
+ * The create/edit form for a purchase request.
+ *
+ * Doubles as the editor because a request that has not gone out to suppliers is
+ * still just a request — there was previously no way to correct one at all, so
+ * a typo in a line item meant deleting it and starting again.
+ */
+function PRFormModal({
+  initial,
+  opened,
   onClose,
   onSave,
 }: {
+  /** The request being edited, or undefined when raising a new one. */
+  initial?: PurchaseRequest;
+  /**
+   * Which row action opened it. Only the heading changes — raising a request is
+   * reviewing and completing it, so it is the same form either way.
+   */
+  opened?: "edit" | "raise";
   onClose: () => void;
-  onSave: (payload: NewPRPayload) => void;
+  /** `raise` sends it to suppliers immediately; `draft` parks it. */
+  onSave: (payload: NewPRPayload, intent: "draft" | "raise") => Promise<void>;
 }) {
   const today = new Date();
   const fmtDate = (d: Date) => formatDateByGeneralSettings(d);
@@ -280,17 +271,29 @@ function NewPRModal({
   const [materialOptions, setMaterialOptions] = useState<
     { name: string; unit: string }[]
   >([]);
-  const [project, setProject] = useState("");
-  const [mrRef, setMrRef] = useState("");
+  const [project, setProject] = useState(initial?.project ?? "");
+  const [mrRef, setMrRef] = useState(initial?.materialRequestRef ?? "");
+  const [saving, setSaving] = useState<"draft" | "raise" | null>(null);
   /** References of material requests that could justify this request. */
   const [materialRequestRefs, setMaterialRequestRefs] = useState<string[]>([]);
-  const [procType, setProcType] = useState<"direct" | "rfq">("direct");
-  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
+  const [procType, setProcType] = useState<"direct" | "rfq">(
+    initial?.procurementType ?? "direct",
+  );
+  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>(
+    initial?.suppliers.map((sup) => sup.supplier) ?? [],
+  );
   const [daysToDeliver, setDaysToDeliver] = useState("7");
   const units = useProcurementUnits();
-  const [items, setItems] = useState<NewPRItemForm[]>([
-    { material: "", qty: "", unit: units[0], estimatedUnitCost: "" },
-  ]);
+  const [items, setItems] = useState<NewPRItemForm[]>(
+    initial?.items.length
+      ? initial.items.map((it) => ({
+          material: it.material,
+          qty: String(it.qty),
+          unit: it.unit,
+          estimatedUnitCost: String(it.estimatedUnitCost || ""),
+        }))
+      : [{ material: "", qty: "", unit: units[0], estimatedUnitCost: "" }],
+  );
 
   // Projects come from /projects directly so the dropdown always reflects the
   // real project list; suppliers still come from the reference-data bundle.
@@ -299,7 +302,7 @@ function NewPRModal({
       .then((rows) => {
         const list = rows.map((p) => ({ id: p.id, name: p.name }));
         setProjects(list);
-        setProject((prev) => prev || list[0]?.name || "");
+        setProject((prev) => prev || initial?.project || list[0]?.name || "");
       })
       .catch(() => {});
 
@@ -311,7 +314,9 @@ function NewPRModal({
           Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
         );
         setSelectedSuppliers((prev) =>
-          prev.length ? prev : supplierNames.slice(0, 1),
+          // An edited request keeps the suppliers it already names, and a draft
+          // is allowed to have none — only raising it needs one.
+          prev.length || initial ? prev : supplierNames.slice(0, 1),
         );
         setMaterialOptions(
           (data.materials ?? [])
@@ -351,37 +356,52 @@ function NewPRModal({
   const valid =
     project && items.every((it) => it.material.trim() && it.qty.trim());
 
-  async function save() {
-    if (!valid || !selectedSuppliers.length) return;
-    // Consumes the next PR number for the numbering config's sequence, even
-    // though PurchaseRequest has no field of its own to store it in yet.
-    await allocate("PurchaseRequest");
-    onSave({
-      title: mrRef.trim()
-        ? `${project} — ${mrRef.trim()}`
-        : `Purchase Request — ${project}`,
-      projectId: projects.find((p) => p.name === project)?.id,
-      projectName: project,
-      requestedBy: getAuthUserName() || "Current User",
-      daysToDeliver: parseInt(daysToDeliver) || 7,
-      // The form has always collected these three; nothing was ever sent, so a
-      // request created here opened with no suppliers and "Send to Suppliers"
-      // had nothing to send to.
-      mrRef: mrRef.trim() || undefined,
-      procurementType: procType,
-      suppliers: selectedSuppliers.map((name) => ({
-        supplier: name,
-        supplierId: supplierIds[name],
-        status: "not_sent" as SupplierStatus,
-      })),
-      items: items.map((it) => ({
-        description: it.material,
-        qty: parseFloat(it.qty) || 0,
-        unit: it.unit,
-        unitPrice: parseFloat(it.estimatedUnitCost) || 0,
-      })),
-    });
-    onClose();
+  async function save(intent: "draft" | "raise") {
+    if (!valid || saving) return;
+    // Raising means going out to suppliers, so it needs at least one. A draft
+    // is allowed to be incomplete — that is the point of saving one.
+    if (intent === "raise" && !selectedSuppliers.length) {
+      toast.error("Choose at least one supplier before raising this request.");
+      return;
+    }
+    setSaving(intent);
+    try {
+      // Consumes the next PR number for the numbering config's sequence. Only a
+      // brand-new request takes one; editing must not burn another.
+      if (!initial) await allocate("PurchaseRequest");
+      await onSave(
+        {
+          title: mrRef.trim()
+            ? `${project} — ${mrRef.trim()}`
+            : `Purchase Request — ${project}`,
+          projectId: projects.find((p) => p.name === project)?.id,
+          projectName: project,
+          requestedBy:
+            initial?.raisedBy || getAuthUserName() || "Current User",
+          daysToDeliver: parseInt(daysToDeliver) || 7,
+          // The form has always collected these three; nothing was ever sent, so a
+          // request created here opened with no suppliers and "Send to Suppliers"
+          // had nothing to send to.
+          mrRef: mrRef.trim() || undefined,
+          procurementType: procType,
+          suppliers: selectedSuppliers.map((name) => ({
+            supplier: name,
+            supplierId: supplierIds[name],
+            status: "not_sent" as SupplierStatus,
+          })),
+          items: items.map((it) => ({
+            description: it.material,
+            qty: parseFloat(it.qty) || 0,
+            unit: it.unit,
+            unitPrice: parseFloat(it.estimatedUnitCost) || 0,
+          })),
+        },
+        intent,
+      );
+      onClose();
+    } finally {
+      setSaving(null);
+    }
   }
 
   return (
@@ -389,7 +409,11 @@ function NewPRModal({
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h2 className="text-base font-semibold text-gray-900">
-            New Purchase Request
+            {!initial
+              ? "New Purchase Request"
+              : opened === "raise"
+                ? `Raise ${initial.prRef}`
+                : `Edit ${initial.prRef}`}
           </h2>
           <button
             onClick={onClose}
@@ -648,95 +672,21 @@ function NewPRModal({
             Cancel
           </button>
           <button
-            onClick={save}
-            disabled={!valid || !selectedSuppliers.length}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => void save("draft")}
+            disabled={!valid || Boolean(saving)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Create PR
+            {saving === "draft" ? "Saving…" : "Save as Draft"}
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SendToSuppliersModal({
-  pr,
-  onClose,
-  onSend,
-  sending,
-}: {
-  pr: PurchaseRequest;
-  onClose: () => void;
-  onSend: () => void;
-  sending: boolean;
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">
-            Send to Suppliers
-          </h2>
+          {/* Raising is the step that sends the request out, so it is the one
+              that needs suppliers — a draft deliberately does not. */}
           <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm">
-            <p className="font-medium text-blue-800">
-              {pr.prRef} · {pr.project}
-            </p>
-            <p className="text-xs text-blue-600 mt-0.5">
-              {pr.procurementType === "rfq"
-                ? "Request for Quote"
-                : "Direct Procurement"}{" "}
-              · {pr.suppliers.length} supplier
-              {pr.suppliers.length > 1 ? "s" : ""}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              Will be sent to:
-            </p>
-            <div className="space-y-1">
-              {pr.suppliers.map((s) => (
-                <div
-                  key={s.supplier}
-                  className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-sm"
-                >
-                  <Users className="w-3.5 h-3.5 text-gray-400" />
-                  <span className="text-gray-700">{s.supplier}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <p className="text-xs text-gray-500">
-            {pr.procurementType === "rfq"
-              ? "Each supplier will receive the material requirements and be asked to submit a quote."
-              : "The selected supplier will receive the purchase request directly."}
-          </p>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              onSend();
-              onClose();
-            }}
-            disabled={sending || pr.suppliers.length === 0}
+            onClick={() => void save("raise")}
+            disabled={!valid || !selectedSuppliers.length || Boolean(saving)}
             className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <Send className="w-4 h-4" />{" "}
-            {sending ? "Sending…" : "Confirm & Send"}
+            <Send className="w-4 h-4" />
+            {saving === "raise" ? "Raising…" : "Raise Purchase Request"}
           </button>
         </div>
       </div>
@@ -757,51 +707,70 @@ export function PurchaseRequestsPage() {
   }, []);
   const [activeTab, setActiveTab] = useState<PRStatus | "all">("all");
   const [showNewPR, setShowNewPR] = useState(false);
-  const [sendFor, setSendFor] = useState<PurchaseRequest | null>(null);
+  /**
+   * The request open in the form, if any, and which action opened it.
+   *
+   * Edit and Raise share one form. Raising used to open a confirmation listing
+   * the suppliers already on the request with no way to change them — on a
+   * request created for you upstream that meant one arbitrary supplier, locked
+   * in. Raising a request is where the supplier gets chosen, so it has to be the
+   * form, with the items and the rest of the request there to check.
+   */
+  const [editPR, setEditPR] = useState<{
+    pr: PurchaseRequest;
+    opened: "edit" | "raise";
+  } | null>(null);
   /** Id of the request currently being sent, so the button can't be double-fired. */
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [viewPR, setViewPR] = useState<PurchaseRequest | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<PurchaseRequest | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<PurchaseRequest | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [advFilters, setAdvFilters] = useState<ActiveFilters>({});
   const [advSort, setAdvSort] = useState<SortConfig>(null);
 
   const navigate = useNavigate();
-  const { canApprove } = useApprovalRights();
   const authUser = useAuthUser();
-  /** Purchase Requests process id from the backend process catalog. */
-  const mayApprovePRs = canApprove("p_purchase_requests");
 
   /**
-   * Whether the signed-in user raised this request. Matched on name or email,
-   * the same two identities the server compares `requestedBy` against.
+   * Cancels the request rather than deleting it.
+   *
+   * Delete was offered on every row, including ones already sent to suppliers
+   * and ones with a purchase order behind them — removing those takes the RFQs,
+   * quotes and order history with them. Cancelling leaves the trail intact,
+   * which is what the rest of the chain reads back.
    */
-  const raisedByMe = (pr: PurchaseRequest) => {
-    const raised = String(pr.raisedBy ?? "").trim().toLowerCase();
-    if (!raised) return false;
-    return [authUser.name, authUser.email]
-      .map((v) => String(v ?? "").trim().toLowerCase())
-      .filter(Boolean)
-      .includes(raised);
-  };
-
-  /** Deletes the request, then re-reads so the table reflects the database. */
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    setDeleting(true);
+  async function confirmCancel() {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    const previous = prList;
     try {
-      await deletePurchaseRequest(deleteTarget.id);
-      setPrList((prev) => prev.filter((pr) => pr.id !== deleteTarget.id));
-      toast.success(`Purchase request ${deleteTarget.prRef} deleted.`);
-      setDeleteTarget(null);
+      await updatePurchaseRequest(cancelTarget.id, { status: "cancelled" });
+      setPrList((prev) =>
+        prev.map((pr) =>
+          pr.id === cancelTarget.id
+            ? { ...pr, status: "cancelled" as PRStatus }
+            : pr,
+        ),
+      );
+      logChange({
+        module: "procurement",
+        action: "cancelled",
+        entityType: "purchase_request",
+        entityId: cancelTarget.id,
+        summary: `Cancelled PR ${cancelTarget.prRef}`,
+        performedBy: authUser.name || "Unknown",
+      });
+      toast.success(`Purchase request ${cancelTarget.prRef} cancelled.`);
+      setCancelTarget(null);
     } catch (err) {
+      setPrList(previous);
       toast.error(
         err instanceof Error
           ? err.message
-          : "Could not delete the purchase request.",
+          : "Could not cancel the purchase request.",
       );
     } finally {
-      setDeleting(false);
+      setCancelling(false);
     }
   }
 
@@ -876,224 +845,81 @@ export function PurchaseRequestsPage() {
       label: "Status",
       sortable: true,
       filterable: true,
-      render: (pr) => {
-        const cfg = PR_STATUS_CFG[pr.status] ?? {
-          badge: "bg-gray-100 text-gray-700",
-          label: String(pr.status ?? "Unknown"),
-        };
-        return (
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.badge}`}
-          >
-            {cfg.label}
-          </span>
-        );
-      },
+      render: (pr) => <StatusBadge {...statusDef(PURCHASE_REQUEST_STATUS, pr.status)} />,
     },
     {
       key: "actions",
       label: "Actions",
       sortable: false,
       filterable: false,
+      headerClassName: "text-right",
       /**
-       * Every row gets View and Delete; the rest depend on where the request is in
-       * its lifecycle.
+       * The actions are the workflow.
        *
-       * Previously the whole cell was status-conditional, so a draft, cancelled or
-       * po_created row rendered an empty Actions column — four of the seven statuses
-       * showed nothing at all. There was also no way to view or delete a request,
-       * and the PO button had an empty handler.
+       * A request that has not gone out is editable and can be raised; once it
+       * has, there is nothing to do here but watch it — the next decision
+       * belongs to Sent Requests and then Received Quotes. The old cell offered
+       * Submit for Approval, Approve and Reject, none of which belong on a
+       * document whose approval already happened upstream, and Delete on every
+       * row including ones with a purchase order behind them.
        */
-      render: (pr) => (
-        <div className="flex items-center gap-1">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setViewPR(pr);
-            }}
-            title="View this request"
-            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
-          >
-            <Eye className="w-4 h-4" />
-          </button>
-          {pr.status === "draft" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                submitPRForApproval(pr.id);
-              }}
-              title="Submit this request for approval"
-              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
-              Submit for Approval
-            </button>
-          )}
-          {/* A requester may not decide their own request — the server enforces
-              this and returns 403. Surfaced here so the button is not offered
-              only to fail on click. */}
-          {pr.status === "pending_approval" && mayApprovePRs && raisedByMe(pr) && (
-            <span
-              className="px-2 py-1 text-xs text-gray-400 italic"
-              title="You raised this request, so it must be approved by someone else."
-            >
-              Awaiting another approver
-            </span>
-          )}
-          {pr.status === "pending_approval" &&
-            !raisedByMe(pr) &&
-            (mayApprovePRs ? (
+      render: (pr) => {
+        const editable = PR_EDITABLE.includes(pr.status);
+        return (
+          <RowActions>
+            <RowAction
+              icon={<Eye className="w-3.5 h-3.5" />}
+              label="View"
+              tone="primary"
+              onClick={() => setViewPR(pr)}
+            />
+            {editable && (
               <>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    rejectPR(pr.id);
-                  }}
-                  className="px-2 py-1 text-xs border border-red-200 text-red-700 rounded hover:bg-red-50"
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    approvePR(pr.id);
-                  }}
-                  className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                >
-                  Approve
-                </button>
+                <RowAction
+                  icon={<Pencil className="w-3.5 h-3.5" />}
+                  label="Edit"
+                  onClick={() => setEditPR({ pr, opened: "edit" })}
+                />
+                <RowAction
+                  icon={<Send className="w-3.5 h-3.5" />}
+                  label="Raise Purchase Request"
+                  tone="positive"
+                  busy={sendingTo === pr.id}
+                  busyLabel="Raising…"
+                  onClick={() => setEditPR({ pr, opened: "raise" })}
+                />
+                <RowAction
+                  icon={<Ban className="w-3.5 h-3.5" />}
+                  label="Cancel"
+                  tone="negative"
+                  onClick={() => setCancelTarget(pr)}
+                />
               </>
-            ) : (
-              <span
-                className="px-2 py-1 text-xs text-gray-400 italic"
-                title="Only the approver configured for Purchase Requests can decide it."
-              >
-                Awaiting approver
-              </span>
-            ))}
-          {pr.status === "approved" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setSendFor(pr);
-              }}
-              className="px-2 py-1 text-xs bg-blue-700 text-white rounded hover:bg-blue-800 flex items-center gap-1"
-            >
-              <Send className="w-3 h-3" /> Send
-            </button>
-          )}
-          {(pr.status === "quotes_received" ||
-            pr.status === "sent_to_suppliers") && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                // Quotes are compared and turned into a PO on Received Quotes,
-                // which is where the supplier responses live.
-                navigate("/apps/procurement/received-quotes");
-              }}
-              title="Raise a purchase order from the received quotes"
-              className="px-2 py-1 text-xs bg-purple-700 text-white rounded hover:bg-purple-800 flex items-center gap-1"
-            >
-              <ShoppingCart className="w-3 h-3" /> PO
-            </button>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setDeleteTarget(pr);
-            }}
-            title="Delete this request"
-            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      ),
+            )}
+            {pr.status === "quotes_received" && (
+              <RowAction
+                icon={<ShoppingCart className="w-3.5 h-3.5" />}
+                label="Received Quotes"
+                tone="primary"
+                onClick={() => navigate("/apps/procurement/received-quotes")}
+              />
+            )}
+            {pr.status === "po_created" && (
+              <RowAction
+                icon={<ShoppingCart className="w-3.5 h-3.5" />}
+                label="Purchase Order"
+                tone="primary"
+                onClick={() => navigate("/apps/procurement/purchase-orders")}
+              />
+            )}
+            {pr.status === "cancelled" && (
+              <RowActionNote>Cancelled</RowActionNote>
+            )}
+          </RowActions>
+        );
+      },
     },
   ];
-
-  /**
-   * Records a decision on a purchase request.
-   *
-   * Both handlers used to call `setPrList` only, so an approval or rejection lived
-   * in React state and was gone on the next refresh — the table said "Approved"
-   * while the database still said pending. The status is written first and the row
-   * is only updated once the server has accepted it; on failure the table is left
-   * untouched rather than showing a decision that did not persist.
-   */
-  async function decidePR(
-    id: string,
-    status: Extract<PRStatus, "approved" | "cancelled">,
-    action: string,
-  ) {
-    const previous = prList;
-    setPrList((prev) =>
-      prev.map((pr) => (pr.id === id ? { ...pr, status } : pr)),
-    );
-    try {
-      await updatePurchaseRequest(id, { status });
-      logChange({
-        module: "procurement",
-        action,
-        entityType: "purchase_request",
-        entityId: id,
-        summary: `${action === "approved" ? "Approved" : "Rejected"} PR ${id}`,
-        performedBy: authUser.name || "Unknown",
-      });
-      toast.success(
-        `Purchase request ${id} ${status === "approved" ? "approved" : "rejected"}.`,
-      );
-    } catch (err) {
-      setPrList(previous);
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Could not record the decision. Please try again.",
-      );
-    }
-  }
-
-  function approvePR(id: string) {
-    void decidePR(id, "approved", "approved");
-  }
-
-  function rejectPR(id: string) {
-    void decidePR(id, "cancelled", "rejected");
-  }
-
-  /**
-   * Submits a draft request for approval.
-   *
-   * `pending_approval` was referenced by the status config, the tab filter and
-   * the Approve/Reject gate, but nothing ever assigned it: requests are created
-   * as Draft (the column default) and there was no action anywhere that moved
-   * one out of Draft. So every request sat in Draft forever and the Approve
-   * button — which only renders for `pending_approval` — could never appear.
-   */
-  async function submitPRForApproval(id: string) {
-    const previous = prList;
-    setPrList((prev) =>
-      prev.map((pr) => (pr.id === id ? { ...pr, status: "pending_approval" } : pr)),
-    );
-    try {
-      await updatePurchaseRequest(id, { status: "pending_approval" });
-      logChange({
-        module: "procurement",
-        action: "submitted",
-        entityType: "purchase_request",
-        entityId: id,
-        summary: `Submitted PR ${id} for approval`,
-        performedBy: authUser.name || "Unknown",
-      });
-      toast.success("Purchase request submitted for approval.");
-    } catch (err) {
-      setPrList(previous);
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Could not submit the request. Please try again.",
-      );
-    }
-  }
 
   /**
    * Sends the request out to its suppliers as RFQs.
@@ -1111,8 +937,10 @@ export function PurchaseRequestsPage() {
    * way — the supplier is already chosen, but they still have to send a price
    * back, and an RFQ is how a price gets into BuildOS.
    */
-  async function sendToSuppliers(id: string) {
-    const pr = prList.find((p) => p.id === id);
+  async function raiseToSuppliers(id: string, fresh?: PurchaseRequest) {
+    // `fresh` is the row we just wrote; prList has not necessarily re-rendered
+    // with it yet when the create flow raises immediately.
+    const pr = fresh ?? prList.find((p) => p.id === id);
     if (!pr || sendingTo) return;
     if (pr.suppliers.length === 0) {
       toast.error("This request has no suppliers to send to.");
@@ -1153,20 +981,20 @@ export function PurchaseRequestsPage() {
       }
 
       await updatePurchaseRequest(id, {
-        status: "sent_to_suppliers",
+        status: "raised",
         suppliers: sent,
       });
 
       setPrList((prev) =>
         prev.map((p) =>
           p.id === id
-            ? { ...p, status: "sent_to_suppliers" as PRStatus, suppliers: sent }
+            ? { ...p, status: "raised" as PRStatus, suppliers: sent }
             : p,
         ),
       );
       logChange({
         module: "procurement",
-        action: "sent_to_suppliers",
+        action: "raised",
         entityType: "purchase_request",
         entityId: id,
         summary: `Sent ${pr.prRef} to ${sent.length} supplier${sent.length > 1 ? "s" : ""}`,
@@ -1206,14 +1034,25 @@ export function PurchaseRequestsPage() {
         pr.project,
         pr.estimatedValue,
         pr.raisedDate,
-        PR_STATUS_CFG[pr.status].label,
+        statusDef(PURCHASE_REQUEST_STATUS, pr.status).label,
       ]),
     );
   }
 
-  async function handleCreatePR(payload: NewPRPayload) {
+  /**
+   * Creates a request, and raises it straight away when that is what was asked
+   * for — "Raise Purchase Request" is one action, not a create followed by a
+   * second click on a different button.
+   */
+  async function handleCreatePR(
+    payload: NewPRPayload,
+    intent: "draft" | "raise",
+  ) {
     try {
-      const created = await createPurchaseRequest(payload);
+      const created = await createPurchaseRequest({
+        ...payload,
+        status: intent === "raise" ? "not_raised" : "draft",
+      });
       const pr = fromApi(created);
       setPrList((prev) => [pr, ...prev]);
       setShowNewPR(false);
@@ -1225,9 +1064,54 @@ export function PurchaseRequestsPage() {
         summary: `Created PR ${pr.prRef} for ${pr.project}`,
         performedBy: authUser.name || "Current User",
       });
+      if (intent === "raise") {
+        await raiseToSuppliers(pr.id, pr);
+      } else {
+        toast.success(`${pr.prRef} saved as a draft.`);
+      }
     } catch (e) {
       toast.error(
         e instanceof Error ? e.message : "Failed to create the purchase request.",
+      );
+    }
+  }
+
+  /** Saves an edit to a request that has not been raised yet. */
+  async function handleEditPR(
+    payload: NewPRPayload,
+    intent: "draft" | "raise",
+  ) {
+    if (!editPR) return;
+    try {
+      const updated = await updatePurchaseRequest(editPR.pr.id, {
+        title: payload.title,
+        projectId: payload.projectId,
+        projectName: payload.projectName,
+        daysToDeliver: payload.daysToDeliver,
+        mrRef: payload.mrRef,
+        procurementType: payload.procurementType,
+        suppliers: payload.suppliers,
+        items: payload.items,
+      });
+      const pr = fromApi(updated);
+      setPrList((prev) => prev.map((p) => (p.id === pr.id ? pr : p)));
+      setEditPR(null);
+      logChange({
+        module: "procurement",
+        action: "updated",
+        entityType: "purchase_request",
+        entityId: pr.id,
+        summary: `Edited PR ${pr.prRef}`,
+        performedBy: authUser.name || "Current User",
+      });
+      if (intent === "raise") {
+        await raiseToSuppliers(pr.id, pr);
+      } else {
+        toast.success(`${pr.prRef} updated.`);
+      }
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Failed to update the purchase request.",
       );
     }
   }
@@ -1319,18 +1203,18 @@ export function PurchaseRequestsPage() {
       />
 
       {showNewPR && (
-        <NewPRModal
+        <PRFormModal
           onClose={() => setShowNewPR(false)}
           onSave={handleCreatePR}
         />
       )}
 
-      {sendFor && (
-        <SendToSuppliersModal
-          pr={sendFor}
-          onClose={() => setSendFor(null)}
-          sending={sendingTo === sendFor.id}
-          onSend={() => void sendToSuppliers(sendFor.id)}
+      {editPR && (
+        <PRFormModal
+          initial={editPR.pr}
+          opened={editPR.opened}
+          onClose={() => setEditPR(null)}
+          onSave={handleEditPR}
         />
       )}
 
@@ -1423,18 +1307,18 @@ export function PurchaseRequestsPage() {
       )}
 
       <ConfirmationModal
-        isOpen={Boolean(deleteTarget)}
-        title="Delete purchase request"
+        isOpen={Boolean(cancelTarget)}
+        title="Cancel purchase request"
         description={
-          deleteTarget
-            ? `Delete ${deleteTarget.prRef} for ${deleteTarget.project}? This cannot be undone.`
+          cancelTarget
+            ? `Cancel ${cancelTarget.prRef} for ${cancelTarget.project}? It stays on record but will not be raised to suppliers.`
             : ""
         }
-        confirmLabel="Delete"
+        confirmLabel="Cancel request"
         isDangerous
-        isLoading={deleting}
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
+        isLoading={cancelling}
+        onConfirm={confirmCancel}
+        onCancel={() => setCancelTarget(null)}
       />
     </div>
   );

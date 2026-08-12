@@ -150,6 +150,59 @@ const TAB_LABELS: Record<Tab, string> = {
   numbering: "Numbering",
 };
 
+/**
+ * One collapsible settings block.
+ *
+ * Declared at module scope on purpose. It used to be a function *inside*
+ * SettingsPage, which made it a brand-new component type on every render: React
+ * cannot match a new type to the old one, so it unmounted and remounted the
+ * whole section each time any state changed. That is why the panel appeared to
+ * show the right information and then vanish — and why typing into "Add
+ * category…" lost focus after a single character, since the input was destroyed
+ * and recreated on each keystroke. Reloading appeared to fix it because the
+ * first paint happens before any state change.
+ */
+function Section({
+  icon,
+  title,
+  description,
+  isCollapsed,
+  onToggle,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  isCollapsed: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-5">
+      <button
+        onClick={onToggle}
+        className="flex items-center justify-between w-full text-left mb-1"
+      >
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        </div>
+        {isCollapsed ? (
+          <ChevronRight className="w-4 h-4 text-gray-400" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-gray-400" />
+        )}
+      </button>
+      {!isCollapsed && (
+        <>
+          <p className="text-xs text-gray-400 mb-4">{description}</p>
+          {children}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const { roles, addRole, updateRole, deleteRole } = useRoles();
   const [editingRole, setEditingRole] = useState<string | null>(null);
@@ -209,46 +262,6 @@ export function SettingsPage() {
       else next.add(id);
       return next;
     });
-  }
-
-  function Section({
-    id,
-    icon,
-    title,
-    description,
-    children,
-  }: {
-    id: SectionId;
-    icon: React.ReactNode;
-    title: string;
-    description: string;
-    children: React.ReactNode;
-  }) {
-    const isCollapsed = collapsed.has(id);
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <button
-          onClick={() => toggleCollapse(id)}
-          className="flex items-center justify-between w-full text-left mb-1"
-        >
-          <div className="flex items-center gap-2">
-            {icon}
-            <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-          </div>
-          {isCollapsed ? (
-            <ChevronRight className="w-4 h-4 text-gray-400" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-gray-400" />
-          )}
-        </button>
-        {!isCollapsed && (
-          <>
-            <p className="text-xs text-gray-400 mb-4">{description}</p>
-            {children}
-          </>
-        )}
-      </div>
-    );
   }
 
   function handleSave() {
@@ -513,7 +526,8 @@ export function SettingsPage() {
       <div className="grid grid-cols-1 gap-5">
         {tab === "projects" && (
         <Section
-          id="project-types"
+          isCollapsed={collapsed.has("project-types")}
+          onToggle={() => toggleCollapse("project-types")}
           icon={<Tags className="w-4 h-4 text-gray-400" />}
           title="Project Types"
           description="Configure sectors, categories, and descriptors available during project setup"
@@ -632,7 +646,8 @@ export function SettingsPage() {
 
         {tab === "schedule" && (
         <Section
-          id="schedule-levels"
+          isCollapsed={collapsed.has("schedule-levels")}
+          onToggle={() => toggleCollapse("schedule-levels")}
           icon={<Layers className="w-4 h-4 text-gray-400" />}
           title="Schedule Levels"
           description="Configure the task hierarchy levels used in the schedule builder. Each level can have resources assigned."
@@ -716,7 +731,8 @@ export function SettingsPage() {
 
         {tab === "weather" && (
         <Section
-          id="weather"
+          isCollapsed={collapsed.has("weather")}
+          onToggle={() => toggleCollapse("weather")}
           icon={<Sun className="w-4 h-4 text-gray-400" />}
           title="Weather Types"
           description="Configure weather options available in daily reports"
@@ -768,7 +784,8 @@ export function SettingsPage() {
 
         {tab === "resources" && (
         <Section
-          id="hr-classification"
+          isCollapsed={collapsed.has("hr-classification")}
+          onToggle={() => toggleCollapse("hr-classification")}
           icon={<Users className="w-4 h-4 text-indigo-600" />}
           title="Human Resource Classification"
           description="Human resource types available in the system and where each type is managed."
@@ -845,7 +862,8 @@ export function SettingsPage() {
 
         {tab === "resources" && (
         <Section
-          id="project-roles"
+          isCollapsed={collapsed.has("project-roles")}
+          onToggle={() => toggleCollapse("project-roles")}
           icon={<Shield className="w-4 h-4 text-orange-500" />}
           title="Project Roles"
           description="Define project roles and map them to daily report section permissions. Roles are used across all projects."
@@ -1012,7 +1030,8 @@ export function SettingsPage() {
 
         {tab === "resources" && (
         <Section
-          id="trade-types"
+          isCollapsed={collapsed.has("trade-types")}
+          onToggle={() => toggleCollapse("trade-types")}
           icon={<Settings className="w-4 h-4 text-gray-400" />}
           title="Trade Types"
           description="Project trade categories used for resource classification and planning"
@@ -1054,7 +1073,8 @@ export function SettingsPage() {
 
         {tab === "reports" && (
         <Section
-          id="report-settings"
+          isCollapsed={collapsed.has("report-settings")}
+          onToggle={() => toggleCollapse("report-settings")}
           icon={<Settings className="w-4 h-4 text-gray-400" />}
           title="Default Report Settings"
           description="Configure default options for generated reports"

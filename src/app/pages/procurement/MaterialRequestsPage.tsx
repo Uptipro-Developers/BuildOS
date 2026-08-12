@@ -1,5 +1,6 @@
 import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useApprovalRights } from "../../utils/useApprovalRights";
 import { useAuthUser } from "../../utils/useAuthUser";
@@ -21,7 +22,6 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCircle,
-  Clock,
   XCircle,
   X,
   Trash2,
@@ -38,11 +38,16 @@ import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
 import { getUnits } from "../../api/admin-extras";
 import { getAuthUserName } from "../../utils/useAuthUser";
-import { createPurchaseRequest } from "../../api/procurement-requests";
 import {
   itemReference,
   baseMaterialRequestRef,
 } from "../../utils/materialRequestRef";
+import { StatusBadge } from "../../components/StatusBadge";
+import { RowAction, RowActionNote } from "../../components/RowAction";
+import {
+  MATERIAL_REQUEST_STATUS,
+  statusDef,
+} from "../../utils/procurementWorkflow";
 
 type ReqStatus =
   "pending" | "approved" | "rejected" | "in_procurement" | "fulfilled";
@@ -71,6 +76,8 @@ type LocalMR = {
   /** Fulfilling store — required by the backend MaterialRequest model. */
   storeId?: string;
   storeName?: string;
+  /** The Purchase Request auto-raised when this request was approved. */
+  prRef?: string;
   items: {
     material: string;
     qty: number;
@@ -112,6 +119,7 @@ function fromApiMR(r: ApiMR): LocalMR {
     neededBy: r.neededBy ? formatDateByGeneralSettings(r.neededBy) : "",
     totalItems: 1,
     justification: r.purpose ?? r.notes ?? "",
+    prRef: r.prRef,
     items: [
       {
         material: r.materialName,
@@ -152,37 +160,6 @@ function groupApiRequests(rows: ApiMR[]): LocalMR[] {
   }
   return [...grouped.values()];
 }
-
-const statusConfig: Record<
-  ReqStatus,
-  { label: string; badge: string; icon: React.ReactNode }
-> = {
-  pending: {
-    label: "Pending Review",
-    badge: "bg-amber-100 text-amber-700",
-    icon: <Clock className="w-3.5 h-3.5 text-amber-500" />,
-  },
-  approved: {
-    label: "Approved",
-    badge: "bg-green-100 text-green-700",
-    icon: <CheckCircle className="w-3.5 h-3.5 text-green-600" />,
-  },
-  rejected: {
-    label: "Rejected",
-    badge: "bg-red-100 text-red-700",
-    icon: <XCircle className="w-3.5 h-3.5 text-red-500" />,
-  },
-  in_procurement: {
-    label: "In Procurement",
-    badge: "bg-blue-100 text-blue-700",
-    icon: <ClipboardList className="w-3.5 h-3.5 text-blue-600" />,
-  },
-  fulfilled: {
-    label: "Fulfilled",
-    badge: "bg-gray-100 text-gray-600",
-    icon: <CheckCircle className="w-3.5 h-3.5 text-gray-500" />,
-  },
-};
 
 const priorityConfig = {
   urgent: "bg-red-100 text-red-700",
@@ -759,223 +736,16 @@ function MoreInfoMRModal({
   );
 }
 
-function RaisePRModal({
-  req,
-  onClose,
-  onDone,
-}: {
-  req: LocalMR;
-  onClose: () => void;
-  // The type and supplier selection used to be handed back here for the caller
-  // to do something with, and it did nothing with them. They are now stored on
-  // the purchase request itself, so the reference is all this needs to report.
-  onDone: (prId: string) => void;
-}) {
-  const [procType, setProcType] = useState<"direct" | "rfq">("direct");
-  const [suppliers, setSuppliers] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const { allocate } = useNumbering();
-  /**
-   * Supplier ids by name. The picker works in names because that is what it
-   * shows, but the purchase request stores ids as well — an RFQ can only be
-   * emailed to a supplier the server can look up.
-   */
-  const [supplierIds, setSupplierIds] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    getReferenceData()
-      .then((data) => {
-        const supplierNames = data.suppliers.map((s) => s.name);
-        setSuppliers(supplierNames);
-        setSupplierIds(
-          Object.fromEntries(data.suppliers.map((s) => [s.name, s.id])),
-        );
-        setSelected((prev) => (prev.length ? prev : supplierNames.slice(0, 1)));
-      })
-      .catch(() => {});
-  }, []);
-
-  function toggleSupplier(s: string) {
-    if (procType === "direct") {
-      setSelected([s]);
-    } else {
-      setSelected((prev) =>
-        prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
-      );
-    }
-  }
-
-  async function submit() {
-    if (!selected.length || submitting) return;
-    setSubmitting(true);
-    try {
-      // nextId is discarded once the server returns the real prRef; allocate()
-      // is still called for its numbering-sequence side effect.
-      await allocate("PurchaseRequest");
-      const created = await createPurchaseRequest({
-        title: `${req.project} — ${req.id}`,
-        projectName: req.project,
-        requestedBy: getAuthUserName() || "Current User",
-        notes: `Raised from Material Request ${req.id} (${procType === "direct" ? "Direct Procurement" : "RFQ"}, supplier${selected.length > 1 ? "s" : ""}: ${selected.join(", ")}).`,
-        // The sourcing decision made here used to live only in the sentence
-        // above, so the purchase request opened with no suppliers and no memory
-        // of whether it was meant to be competed or placed directly.
-        mrRef: req.id,
-        procurementType: procType,
-        suppliers: selected.map((name) => ({
-          supplier: name,
-          supplierId: supplierIds[name],
-          status: "not_sent",
-        })),
-        items: req.items.map((it) => ({
-          description: it.material,
-          qty: it.qty,
-          unit: it.unit,
-          unitPrice: 0,
-        })),
-      });
-      onDone(created.prRef ?? created.id);
-      onClose();
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to raise the purchase request.",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">
-            Raise Purchase Request
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-5">
-          {/* MR summary */}
-          <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 flex items-center gap-3">
-            <ClipboardList className="w-4 h-4 text-blue-500 flex-shrink-0" />
-            <div className="text-sm">
-              <span className="font-semibold text-blue-800">{req.id}</span>
-              <span className="text-blue-600 ml-2">· {req.project}</span>
-              <p className="text-xs text-blue-500 mt-0.5">
-                {req.totalItems} item{req.totalItems > 1 ? "s" : ""} · Due date{" "}
-                {req.neededBy}
-              </p>
-            </div>
-          </div>
-
-          {/* Procurement type */}
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              Procurement Type
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              {(["direct", "rfq"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    setProcType(t);
-                    if (t === "direct")
-                      setSelected([selected[0] ?? suppliers[0] ?? ""]);
-                  }}
-                  className={`p-3 rounded-xl border text-left transition-colors ${
-                    procType === t
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <p
-                    className={`text-sm font-semibold ${procType === t ? "text-blue-700" : "text-gray-700"}`}
-                  >
-                    {t === "direct"
-                      ? "Direct Procurement"
-                      : "Request for Quote (RFQ)"}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {t === "direct"
-                      ? "Single supplier — fastest turnaround"
-                      : "Multiple suppliers compete on price"}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Supplier selection */}
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-              {procType === "direct"
-                ? "Select Supplier"
-                : "Select Suppliers (RFQ will be sent to all)"}
-            </p>
-            <div className="border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
-              {suppliers.map((s) => {
-                const isSelected = selected.includes(s);
-                return (
-                  <button
-                    key={s}
-                    onClick={() => toggleSupplier(s)}
-                    className={`w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 border-b border-gray-50 last:border-0 ${
-                      isSelected ? "bg-blue-50" : ""
-                    }`}
-                  >
-                    <span
-                      className={
-                        isSelected
-                          ? "text-blue-700 font-medium"
-                          : "text-gray-700"
-                      }
-                    >
-                      {s}
-                    </span>
-                    {isSelected && (
-                      <CheckCircle className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-xs text-gray-400 mt-1">
-              {selected.length} supplier{selected.length !== 1 ? "s" : ""}{" "}
-              selected
-            </p>
-          </div>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={!selected.length || submitting}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            <ShoppingCart className="w-4 h-4" />{" "}
-            {submitting ? "Creating…" : "Create Purchase Request"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Success toast ──────────────────────────────────────────────────────────────
-function PRCreatedToast({
+/**
+ * Reports the purchase request that approval raised.
+ *
+ * Approving a material request *is* the decision to buy, so the purchase
+ * request is created for you rather than waiting behind a second "Raise
+ * Purchase Request" button — which asked the same person to confirm the same
+ * decision twice, and left an approved request going nowhere if they didn't.
+ */
+function PRRaisedToast({
   prId,
   onClose,
 }: {
@@ -987,11 +757,11 @@ function PRCreatedToast({
       <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
       <div className="flex-1">
         <p className="text-sm font-semibold text-gray-900">
-          Purchase Request Created
+          Purchase Request Raised
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
-          <span className="font-semibold text-blue-600">{prId}</span> has been
-          raised and is pending approval.
+          <span className="font-semibold text-blue-600">{prId}</span> was created
+          automatically and is waiting to be raised to suppliers.
         </p>
       </div>
       <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -1004,8 +774,8 @@ function PRCreatedToast({
 export function MaterialRequestsPage() {
   const [reqList, setReqList] = useState<LocalMR[]>([]);
   const [loading, setLoading] = useState(true);
-  const [raisePRFor, setRaisePRFor] = useState<LocalMR | null>(null);
   const [prToast, setPrToast] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ReqStatus | "all">("all");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -1034,10 +804,18 @@ export function MaterialRequestsPage() {
     return Boolean(raisedBy) && mine.includes(raisedBy);
   }
 
+  /** Reloads the list, and hands the caller the rows it just stored. */
   function loadRequests() {
     return getMaterialRequests()
-      .then((data) => setReqList(groupApiRequests(data)))
-      .catch((err) => notifyLoadFailure("material requests", err));
+      .then((data) => {
+        const grouped = groupApiRequests(data);
+        setReqList(grouped);
+        return grouped;
+      })
+      .catch((err) => {
+        notifyLoadFailure("material requests", err);
+        return undefined;
+      });
   }
 
   useEffect(() => {
@@ -1056,6 +834,17 @@ export function MaterialRequestsPage() {
       await Promise.all(
         req.apiIds.map((apiId) => updateMaterialRequest(apiId, { status })),
       );
+      // Approval raises the purchase request server-side, so the card has to be
+      // re-read to learn its reference — and to pick up the `in_procurement`
+      // status the server moved it to.
+      if (status === "approved") {
+        const refreshed = await loadRequests();
+        const raised = refreshed?.find((r) => r.id === req.id)?.prRef;
+        if (raised) {
+          setPrToast(raised);
+          setTimeout(() => setPrToast(null), 6000);
+        }
+      }
     } catch (error) {
       setReqList(previous);
       toast.error(
@@ -1154,11 +943,7 @@ export function MaterialRequestsPage() {
       {/* Cards */}
       <div className="space-y-3">
         {filtered.map((req) => {
-          const cfg = statusConfig[req.status] ?? {
-            badge: "bg-gray-100 text-gray-700",
-            icon: null,
-            label: String(req.status ?? "Unknown"),
-          };
+          const cfg = statusDef(MATERIAL_REQUEST_STATUS, req.status);
           const isExpanded = expanded === req.id;
           return (
             <div
@@ -1179,12 +964,7 @@ export function MaterialRequestsPage() {
                     >
                       {req.priority}
                     </span>
-                    <span
-                      className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium ${cfg.badge}`}
-                    >
-                      {cfg.icon}
-                      {cfg.label}
-                    </span>
+                    <StatusBadge {...cfg} />
                   </div>
                   <p className="text-sm text-gray-600 mt-1">{req.project}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
@@ -1345,18 +1125,36 @@ export function MaterialRequestsPage() {
                             : "Awaiting approval from the approver configured for Material Requests."}
                         </p>
                       ))}
-                    {req.status === "approved" && mayApproveRequests && (
-                      <div className="flex gap-2 mt-4 justify-end">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRaisePRFor(req);
-                          }}
-                          className="px-4 py-2 text-sm bg-blue-700 text-white rounded-md hover:bg-blue-800 flex items-center gap-2"
-                        >
-                          <ShoppingCart className="w-4 h-4" /> Raise Purchase
-                          Request
-                        </button>
+                    {/* Approval already raised the purchase request, so there
+                        is nothing to click here — only somewhere to go. */}
+                    {(req.status === "approved" ||
+                      req.status === "in_procurement") && (
+                      <div className="flex items-center justify-end gap-3 mt-4">
+                        {req.prRef ? (
+                          <>
+                            <span className="text-xs text-gray-500">
+                              Purchase request{" "}
+                              <span className="font-mono font-medium text-gray-700">
+                                {req.prRef}
+                              </span>{" "}
+                              was raised automatically.
+                            </span>
+                            <RowAction
+                              icon={<ShoppingCart className="w-3.5 h-3.5" />}
+                              label="Open Purchase Request"
+                              tone="primary"
+                              onClick={() =>
+                                navigate(
+                                  `/apps/procurement/purchase-requests?pr=${encodeURIComponent(req.prRef!)}`,
+                                )
+                              }
+                            />
+                          </>
+                        ) : (
+                          <RowActionNote>
+                            Raising the purchase request…
+                          </RowActionNote>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1453,19 +1251,8 @@ export function MaterialRequestsPage() {
           }}
         />
       )}
-      {raisePRFor && (
-        <RaisePRModal
-          req={raisePRFor}
-          onClose={() => setRaisePRFor(null)}
-          onDone={(prId) => {
-            void persistStatus(raisePRFor, "in_procurement");
-            setPrToast(prId);
-            setTimeout(() => setPrToast(null), 5000);
-          }}
-        />
-      )}
       {prToast && (
-        <PRCreatedToast prId={prToast} onClose={() => setPrToast(null)} />
+        <PRRaisedToast prId={prToast} onClose={() => setPrToast(null)} />
       )}
     </div>
   );

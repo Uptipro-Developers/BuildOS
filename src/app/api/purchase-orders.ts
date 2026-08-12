@@ -9,21 +9,30 @@ function fmt(date: string | null) {
 export function mapPO(p: any) {
     return {
         id: p.id,
+        // The order's own reference. Every screen used to show `p.id` — a cuid —
+        // under a heading that said "PO ID", because nothing stored the
+        // reference the award screen allocated.
+        poRef: p.poRef ?? p.id,
         prRef: p.prRef ?? '',
         mrRef: p.mrRef ?? '',
         quoteRef: p.quoteRef ?? '',
         supplierId: p.supplierId ?? p.supplier?.id ?? '',
         supplier: p.supplier?.name ?? '',
+        supplierEmail: p.supplier?.email ?? '',
         supplierContact: p.supplier?.contactPerson
             ? `${p.supplier.contactPerson}${p.supplier.phone ? ' — ' + p.supplier.phone : ''}`
             : '',
         status: p.status,
-        paymentStatus: p.paymentStatus,
         sentToFinance: p.sentToFinance ?? false,
-        financeRef: p.financeRef,
+        financeRef: p.financeRef ?? '',
+        declineReason: p.declineReason ?? '',
         createdBy: p.createdBy ?? '',
         createdDate: fmt(p.createdDate ?? p.createdAt),
         expectedDate: fmt(p.expectedDate),
+        sentToFinanceAt: fmt(p.sentToFinanceAt),
+        financeDecidedAt: fmt(p.financeDecidedAt),
+        paidAt: fmt(p.paidAt),
+        confirmedAt: fmt(p.confirmedAt),
         totalItems: p.items?.length ?? 0,
         totalValue: p.totalValue ?? 0,
         receivedValue: p.receivedValue ?? 0,
@@ -36,6 +45,8 @@ export function mapPO(p: any) {
         })),
     };
 }
+
+export type MappedPurchaseOrder = ReturnType<typeof mapPO>;
 
 export async function fetchPurchaseOrders(params?: { status?: string; supplierId?: string }) {
     const qs = new URLSearchParams();
@@ -54,11 +65,41 @@ export function updatePurchaseOrder(id: string, data: any) {
     return apiFetch(`/purchase-orders/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }
 
-export function approvePO(id: string) {
-    return apiFetch(`/purchase-orders/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'confirmed' }),
-    });
+/**
+ * The workflow transitions.
+ *
+ * These were `setState` calls on the Purchase Orders page: the order advanced in
+ * the browser, nothing was written, a refresh undid it, and Finance never heard
+ * about any of it. Each is now the endpoint that actually performs the step, and
+ * the server refuses one taken out of order.
+ */
+export function sendPOToFinance(id: string, actor?: string) {
+    return apiFetch<any>(`/purchase-orders/${id}/send-to-finance`, {
+        method: 'POST',
+        body: JSON.stringify({ actor }),
+    }).then(mapPO);
+}
+
+export function requestPaymentConfirmation(id: string) {
+    return apiFetch<any>(`/purchase-orders/${id}/request-payment-confirmation`, {
+        method: 'POST',
+    }).then(mapPO);
+}
+
+export function confirmPOPayment(id: string) {
+    return apiFetch<any>(`/purchase-orders/${id}/confirm-payment`, { method: 'POST' }).then(mapPO);
+}
+
+/**
+ * Cancels the order. Deleting one takes the quote it was awarded from, the
+ * invoice Finance raised against it and the payment with it, which is why there
+ * is no delete action on this page any more.
+ */
+export function cancelPurchaseOrder(id: string, reason?: string) {
+    return apiFetch<any>(`/purchase-orders/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+    }).then(mapPO);
 }
 
 export function deletePurchaseOrder(id: string) {

@@ -137,6 +137,10 @@ const PROCESSES_BY_APP: Record<string, string[]> = {
     "Goods Received Note",
   ],
   HR: [
+    // The process the Payroll Overview posts through. It was missing, so the
+    // one thing payroll needed mapped could not be mapped at all — the run
+    // reached "approved to post" and had nowhere to post to.
+    "Payroll Disbursement",
     "Payroll",
     "Allowances",
     "Salary Advance",

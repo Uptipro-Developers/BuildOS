@@ -1,7 +1,6 @@
 import { Outlet } from "react-router";
 import { AppHeader } from "../../components/AppHeader";
 import { CollapsibleSidebar } from "../../components/CollapsibleSidebar";
-import { FinanceProvider } from "../../stores/financeStore";
 import {
   LayoutDashboard, BookOpen, Receipt, TrendingDown, TrendingUp,
   CreditCard, Users2, FileText, CheckSquare, List, BarChart3, Settings2, ListTodo, PenLine, User,
@@ -48,7 +47,7 @@ const sidebarSections = [
   {
     label: "Payroll & Claims",
     items: [
-      { label: "Payroll Integration", href: "/apps/finance/payroll", icon: <Users2   className="w-4 h-4" />, end: true },
+      { label: "Payroll Overview", href: "/apps/finance/payroll", icon: <Users2   className="w-4 h-4" />, end: true },
       { label: "Claims Management",   href: "/apps/finance/claims",  icon: <FileText className="w-4 h-4" />, end: true },
     ],
   },
@@ -68,6 +67,7 @@ const sidebarSections = [
   {
     label: "Ledger & Reports",
     items: [
+      { label: "General Ledger",       href: "/apps/finance/general-ledger",   icon: <BookOpen className="w-4 h-4" />, end: true },
       { label: "Transactions Ledger",  href: "/apps/finance/ledger",           icon: <List     className="w-4 h-4" />, end: true },
       { label: "Reports",              href: "/apps/finance/reports",           icon: <BarChart3  className="w-4 h-4" />, end: true },
     ],
@@ -75,7 +75,7 @@ const sidebarSections = [
   {
     label: "Settings",
     items: [
-      { label: "Finance Settings",      href: "/apps/finance/config",          icon: <Settings2    className="w-4 h-4" />, end: true },
+      { label: "Settings",              href: "/apps/finance/config",          icon: <Settings2    className="w-4 h-4" />, end: true },
       { label: "Process Mapping",       href: "/apps/finance/process-mapping", icon: <GitBranch    className="w-4 h-4" />, end: true },
     ],
   },
@@ -83,7 +83,6 @@ const sidebarSections = [
 
 export function FinanceLayout() {
   return (
-    <FinanceProvider>
       <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
         <AppHeader currentApp="finance" appColor="bg-emerald-600" />
         <div className="flex flex-1 overflow-hidden">
@@ -99,7 +98,6 @@ export function FinanceLayout() {
           </main>
         </div>
       </div>
-    </FinanceProvider>
   );
 }
 
