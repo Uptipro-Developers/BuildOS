@@ -704,8 +704,8 @@ export class AdminExtrasService {
         const known = ['view', 'create', 'edit', 'approve', 'delete'];
         const actions = Array.isArray(input?.actions)
             ? (input.actions as unknown[])
-                  .map((a) => String(a).trim().toLowerCase())
-                  .filter((a) => known.includes(a))
+                .map((a) => String(a).trim().toLowerCase())
+                .filter((a) => known.includes(a))
             : known;
         if (actions.length === 0) {
             throw new BadRequestException('A process must support at least one permission');
@@ -893,66 +893,66 @@ export class AdminExtrasService {
     }
 
     private async sendInviteEmail(email: string, name: string, activationLink: string): Promise<void> {
-                const companyProfile = await this.prisma.companyProfile.findUnique({ where: { id: 'singleton' } }).catch(() => null);
-                const companyName = String(companyProfile?.name ?? '').trim() || 'BuildOS';
+        const companyProfile = await this.prisma.companyProfile.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+        const companyName = String(companyProfile?.name ?? '').trim() || 'BuildOS';
 
-                // Admin-configured template ("New User Created") takes
-                // precedence over the built-in invite email.
-                try {
-                    const userRecord = await this.prisma.user
-                        .findUnique({ where: { email } })
-                        .catch(() => null);
-                    const vars = {
-                        ...this.toTemplateVars(userRecord as any),
-                        name,
-                        user_name: name,
-                        email,
-                        user_email: email,
-                        activation_link: activationLink,
-                        company_name: companyName,
-                    };
-                    const templated = await this.composeTemplatedEmail('New User Created', vars);
-                    if (templated) {
-                        // The Activate Account button used to be appended
-                        // unconditionally, so an admin could neither reposition it
-                        // nor relabel it, and a template with its own button got a
-                        // second one underneath. It is now only added when the
-                        // template does not provide a link of its own — write
-                        // `[[Activate Account]]({{activation_link}})` in the body
-                        // to control it.
-                        const fallbackButton = templated.hasLink
-                            ? ''
-                            : `<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;">` +
-                              `<a href="${this.escapeHtml(activationLink)}" style="display:inline-block;` +
-                              `background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;` +
-                              `font-weight:600;padding:12px 20px;border-radius:10px;">Activate Account</a></p>`;
-                        await this.mailQueue.enqueueEmail({
-                            to: email,
-                            subject: templated.subject || `Activate your ${companyName} account`,
-                            text: templated.hasLink
-                                ? templated.text
-                                : `${templated.text}\n\nActivate your account: ${activationLink}`,
-                            html: `${templated.html}${fallbackButton}`,
-                            ...(templated.cc.length > 0 ? { cc: templated.cc } : {}),
-                        });
-                        return;
-                    }
-                } catch (error) {
-                    this.logger.warn(
-                        `Falling back to default invite email; template failed: ${(error as Error).message}`,
-                    );
-                }
-
-                const logo = this.resolveInviteLogo(companyProfile?.logoUrl);
-                const escapedName = this.escapeHtml(name);
-                const escapedCompanyName = this.escapeHtml(companyName);
-                const escapedActivationLink = this.escapeHtml(activationLink);
-
-                const payload: EmailPayload = {
+        // Admin-configured template ("New User Created") takes
+        // precedence over the built-in invite email.
+        try {
+            const userRecord = await this.prisma.user
+                .findUnique({ where: { email } })
+                .catch(() => null);
+            const vars = {
+                ...this.toTemplateVars(userRecord as any),
+                name,
+                user_name: name,
+                email,
+                user_email: email,
+                activation_link: activationLink,
+                company_name: companyName,
+            };
+            const templated = await this.composeTemplatedEmail('New User Created', vars);
+            if (templated) {
+                // The Activate Account button used to be appended
+                // unconditionally, so an admin could neither reposition it
+                // nor relabel it, and a template with its own button got a
+                // second one underneath. It is now only added when the
+                // template does not provide a link of its own — write
+                // `[[Activate Account]]({{activation_link}})` in the body
+                // to control it.
+                const fallbackButton = templated.hasLink
+                    ? ''
+                    : `<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;">` +
+                    `<a href="${this.escapeHtml(activationLink)}" style="display:inline-block;` +
+                    `background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;` +
+                    `font-weight:600;padding:12px 20px;border-radius:10px;">Activate Account</a></p>`;
+                await this.mailQueue.enqueueEmail({
                     to: email,
-                    subject: `Activate your ${companyName} account`,
-                    text: `Hi ${name},\n\nYou have been invited to ${companyName}. Activate your account here: ${activationLink}\n\nThis link expires in 7 days.`,
-                    html: `
+                    subject: templated.subject || `Activate your ${companyName} account`,
+                    text: templated.hasLink
+                        ? templated.text
+                        : `${templated.text}\n\nActivate your account: ${activationLink}`,
+                    html: `${templated.html}${fallbackButton}`,
+                    ...(templated.cc.length > 0 ? { cc: templated.cc } : {}),
+                });
+                return;
+            }
+        } catch (error) {
+            this.logger.warn(
+                `Falling back to default invite email; template failed: ${(error as Error).message}`,
+            );
+        }
+
+        const logo = this.resolveInviteLogo(companyProfile?.logoUrl);
+        const escapedName = this.escapeHtml(name);
+        const escapedCompanyName = this.escapeHtml(companyName);
+        const escapedActivationLink = this.escapeHtml(activationLink);
+
+        const payload: EmailPayload = {
+            to: email,
+            subject: `Activate your ${companyName} account`,
+            text: `Hi ${name},\n\nYou have been invited to ${companyName}. Activate your account here: ${activationLink}\n\nThis link expires in 7 days.`,
+            html: `
 <!doctype html>
 <html lang="en">
     <body style="margin:0;padding:0;background:#f3f8ff;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
@@ -1072,18 +1072,18 @@ export class AdminExtrasService {
         return fallbackUrl;
     }
 
-        private buildActivationLink(token: string): string {
-                return `${this.getFrontendBaseUrl()}/auth/activate?token=${encodeURIComponent(token)}`;
-        }
+    private buildActivationLink(token: string): string {
+        return `${this.getFrontendBaseUrl()}/auth/activate?token=${encodeURIComponent(token)}`;
+    }
 
-        private escapeHtml(value: string): string {
-                return String(value)
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;')
-                        .replace(/"/g, '&quot;')
-                        .replace(/'/g, '&#39;');
-        }
+    private escapeHtml(value: string): string {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
     private normalizeApprovalStatus(status: string) {
         const s = String(status || '').toLowerCase();
@@ -1095,7 +1095,7 @@ export class AdminExtrasService {
     private normalizeAssignedApps(input: unknown, role?: string): string[] {
         const normalizedRole = String(role ?? '').trim().toLowerCase();
         const defaultApps = ['ess'];
-        
+
         // For admin role, only return all apps if no specific apps were provided
         if (normalizedRole.includes('admin')) {
             const hasSpecificApps = Array.isArray(input) && input.length > 0;
@@ -1928,16 +1928,23 @@ export class AdminExtrasService {
         return { message: 'Account activated. You can now log in.' };
     }
 
-    async findAllUsers(search?: string) {
+    async findAllUsers(search?: string, department?: string, role?: string) {
         const users = await this.prisma.user.findMany({
-            where: search
-                ? {
-                    OR: [
-                        { name: { contains: search, mode: 'insensitive' } },
-                        { email: { contains: search, mode: 'insensitive' } },
-                    ],
-                }
-                : {},
+            where: {
+                ...(search
+                    ? {
+                        OR: [
+                            { name: { contains: search, mode: 'insensitive' as const } },
+                            { email: { contains: search, mode: 'insensitive' as const } },
+                        ],
+                    }
+                    : {}),
+                // Exact match: this is how Procurement Settings › Signatories narrows
+                // the Name list to people whose own department/role columns match
+                // what was picked, rather than fetching every user in the company.
+                ...(department ? { department } : {}),
+                ...(role ? { role } : {}),
+            },
             select: {
                 id: true, userId: true, name: true, email: true, role: true,
                 department: true, phone: true, status: true, lastLogin: true,
@@ -2151,7 +2158,7 @@ export class AdminExtrasService {
     async updateRole(id: string, data: any) {
         const current = await this.prisma.appRole.findUnique({ where: { id } });
         if (!current) throw new BadRequestException('Role not found');
-        
+
         const isCurrentAdminRole = String(current.name ?? '').trim().toLowerCase() === 'admin';
         const requestedName =
             typeof data?.name === 'string' ? data.name.trim() : String(current.name ?? '').trim();
@@ -2235,10 +2242,10 @@ export class AdminExtrasService {
         const settings = await this.readAdminSettings();
         const name = String(data?.name ?? '').trim();
         if (!name) throw new BadRequestException('Issue type name is required');
-        
+
         const exists = settings.issueTypes.some((t: any) => t.name.toLowerCase() === name.toLowerCase());
         if (exists) throw new ConflictException(`Issue type '${name}' already exists`);
-        
+
         const next = {
             id: crypto.randomUUID(),
             name,
@@ -2283,10 +2290,10 @@ export class AdminExtrasService {
         const settings = await this.readAdminSettings();
         const name = String(data?.name ?? '').trim();
         if (!name) throw new BadRequestException('Category name is required');
-        
+
         const exists = settings.changeCategories.some((c: any) => c.name.toLowerCase() === name.toLowerCase());
         if (exists) throw new ConflictException(`Category '${name}' already exists`);
-        
+
         const next = {
             id: crypto.randomUUID(),
             name,

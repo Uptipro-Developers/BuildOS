@@ -76,6 +76,7 @@ import { EquipmentResourcesModule } from './equipment-resources/equipment-resour
 import { ContractorsModule } from './contractors/contractors.module';
 import { VendorsModule } from './vendors/vendors.module';
 import { OrgUnitsModule } from './org-units/org-units.module';
+import { SignatoriesModule } from './signatories/signatories.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 
 @Module({
@@ -101,6 +102,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         DepartmentsModule,
         HealthModule,
         SuppliersModule,
+        SignatoriesModule,
         PurchaseOrdersModule,
         GoodsReceiptsModule,
         LeaveTypesModule,
@@ -161,14 +163,14 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
                 // falls back to the default in-memory throttler storage.
                 storage: isRedisEnabled()
                     ? new ThrottlerStorageRedisService(
-                          new IORedis(
-                              getRedisConnectionOptions({
-                                  maxRetriesPerRequest: null,
-                                  retryStrategy: (times: number) =>
-                                      times > 10 ? null : Math.min(times * 200, 2000),
-                              }),
-                          ),
-                      )
+                        new IORedis(
+                            getRedisConnectionOptions({
+                                maxRetriesPerRequest: null,
+                                retryStrategy: (times: number) =>
+                                    times > 10 ? null : Math.min(times * 200, 2000),
+                            }),
+                        ),
+                    )
                     : undefined,
             }),
         }),

@@ -1,6 +1,6 @@
 import { clearAuthSession, ensureValidAccessToken } from '../utils/authSession';
 
-const BASE_URL = (import.meta.env.VITE_API_URL || 'https://buildos-production-e328.up.railway.app/api').replace(/\/$/, '');
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001/api').replace(/\/$/, '');
 
 export async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
     const token = await ensureValidAccessToken();

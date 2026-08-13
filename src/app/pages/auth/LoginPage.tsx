@@ -43,7 +43,7 @@ export function LoginPage() {
     setLoading(true);
     try {
       const baseUrl = (
-        import.meta.env.VITE_API_URL || "https://buildos-production-e328.up.railway.app/api"
+        import.meta.env.VITE_API_URL || "http://localhost:3001/api"
       ).replace(/\/$/, "");
       const response = await fetch(`${baseUrl}/auth/login`, {
         method: "POST",
