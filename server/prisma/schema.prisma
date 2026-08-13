@@ -2003,11 +2003,26 @@ model NumberingConfig {
 }
 
 model Signatory {
-  id         String @id @default(cuid())
+  id         String   @id @default(cuid())
   department String
   role       String
-  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId     String @unique
+  userId     String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PaymentTerm {
+  id            String  @id @default(cuid())
+  name          String
+  description   String  @default("")
+  /// "pre_delivery" | "post_delivery"
+  deliverySplit String
+  tranches      Json    @default("[]")
+  /// Exactly one row may carry this at a time — enforced in the service, not
+  /// the schema, the same way it isn't a DB constraint anywhere else in this
+  /// codebase either.
+  isDefault     Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

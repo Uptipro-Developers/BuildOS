@@ -9,6 +9,7 @@ import {
 } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
 import { getSignatories } from "../../api/signatories";
+import { getPaymentTerms, type DeliverySplit } from "../../api/payment-terms";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   csvAmountHeader,
@@ -101,12 +102,11 @@ interface POItem {
 }
 
 // ── Payment terms (Step 2 of PO creation) ──────────────────────────────────
-// Picked per order from a set of presets, each split into tranches. A
-// tranche due "on_po_approval" is what lets the order go straight to Finance
-// on creation (see handleCreate) rather than waiting for Goods Receipt. There
-// is no backend model for this yet — the choice drives the document preview
-// and the create-time routing below, but isn't persisted on the PurchaseOrder
-// record itself.
+// Picked per order from the list configured in Procurement Settings ›
+// Payment Terms (server/src/payment-terms), each split into tranches.
+// `deliverySplit` is what lets the order go straight to Finance on creation
+// (see handleModalSave) rather than waiting for Goods Receipt — it's set
+// explicitly on the term in Settings, not derived from the tranches.
 
 type PaymentTiming = "on_po_approval" | "on_delivery" | "net_30" | "net_60";
 
@@ -120,60 +120,17 @@ interface PaymentTermPreset {
   id: string;
   name: string;
   description: string;
+  deliverySplit: DeliverySplit;
   tranches: PaymentTranche[];
 }
-
-const PAYMENT_TERM_PRESETS: PaymentTermPreset[] = [
-  {
-    id: "full-delivery",
-    name: "Full payment on delivery",
-    description: "100% after goods received — Finance pays after GRN / invoice.",
-    tranches: [{ title: "On delivery", percent: 100, timing: "on_delivery" }],
-  },
-  {
-    id: "50-50",
-    name: "50% deposit + 50% on delivery",
-    description: "Half at PO approval, half after delivery.",
-    tranches: [
-      { title: "Deposit", percent: 50, timing: "on_po_approval" },
-      { title: "Balance on delivery", percent: 50, timing: "on_delivery" },
-    ],
-  },
-  {
-    id: "30-70",
-    name: "30% deposit + 70% on delivery",
-    description: "30% at PO approval, balance after delivery.",
-    tranches: [
-      { title: "Deposit", percent: 30, timing: "on_po_approval" },
-      { title: "Balance on delivery", percent: 70, timing: "on_delivery" },
-    ],
-  },
-  {
-    id: "net-30",
-    name: "Net 30",
-    description: "Full amount payable 30 days after delivery.",
-    tranches: [{ title: "Net 30 days", percent: 100, timing: "net_30" }],
-  },
-  {
-    id: "net-30-50",
-    name: "50% on delivery + 50% Net 30",
-    description: "Half at delivery, the remainder within 30 days.",
-    tranches: [
-      { title: "On delivery", percent: 50, timing: "on_delivery" },
-      { title: "Balance Net 30", percent: 50, timing: "net_30" },
-    ],
-  },
-];
-
-const DEFAULT_PAYMENT_TERM_ID = "full-delivery";
 
 function tranchesLabel(tranches: PaymentTranche[]): string {
   return tranches.map((t) => `${t.percent}% ${t.title}`).join(" + ");
 }
 
-/** A tranche due before delivery is what lets Finance act at PO approval. */
-function hasPreDeliveryTranche(term: PaymentTermPreset): boolean {
-  return term.tranches.some((t) => t.timing === "on_po_approval");
+/** Whether Finance can act at PO approval, per how this term is filed in Settings. */
+function isPreDeliveryTerm(term: PaymentTermPreset): boolean {
+  return term.deliverySplit === "pre_delivery";
 }
 
 interface Signatory {
@@ -529,8 +486,8 @@ function NewPOModal({
   const previewExpectedDate = initial?.expectedDate || addDays(parseInt(deliveryDays) || 7);
 
   // ── Step 2 — payment terms & signatories ──
-  const [timingCat, setTimingCat] = useState<"before" | "after" | "both" | "any">("any");
-  const [paymentTermId, setPaymentTermId] = useState(DEFAULT_PAYMENT_TERM_ID);
+  const [timingCat, setTimingCat] = useState<"before" | "after" | "any">("any");
+  const [paymentTermId, setPaymentTermId] = useState("");
   const [customMode, setCustomMode] = useState(false);
   // Terms defined inline this session — not persisted anywhere once the modal closes.
   const [customTerms, setCustomTerms] = useState<PaymentTermPreset[]>([]);
@@ -543,6 +500,12 @@ function NewPOModal({
     description: "",
     tranches: [{ title: "", percent: "100", timing: "on_delivery" }],
   });
+  // The real list configured in Procurement Settings › Payment Terms, not
+  // the hardcoded 5 presets every PO used to pick from before Settings had
+  // a real place to manage them.
+  const [termOptions, setTermOptions] = useState<PaymentTermPreset[]>([]);
+  const [termsLoading, setTermsLoading] = useState(true);
+  const [termsError, setTermsError] = useState(false);
   // The real list configured in Procurement Settings › Signatories, not a
   // fixed set every PO used to pick from regardless of who's actually on
   // file.
@@ -550,6 +513,24 @@ function NewPOModal({
   const [signatoriesLoading, setSignatoriesLoading] = useState(true);
   const [signatoriesError, setSignatoriesError] = useState(false);
   const [selectedSignatories, setSelectedSignatories] = useState<string[]>([]);
+
+  useEffect(() => {
+    getPaymentTerms()
+      .then((rows) => {
+        setTermOptions(
+          rows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            deliverySplit: r.deliverySplit,
+            tranches: r.tranches,
+          })),
+        );
+        setPaymentTermId((prev) => prev || (rows.find((r) => r.isDefault) ?? rows[0])?.id || "");
+      })
+      .catch(() => setTermsError(true))
+      .finally(() => setTermsLoading(false));
+  }, []);
 
   useEffect(() => {
     getSignatories()
@@ -572,29 +553,24 @@ function NewPOModal({
       .finally(() => setSignatoriesLoading(false));
   }, []);
 
-  const allTerms = [...PAYMENT_TERM_PRESETS, ...customTerms];
-  const hasBefore = (t: PaymentTermPreset) => t.tranches.some((tr) => tr.timing === "on_po_approval");
-  const hasAfter = (t: PaymentTermPreset) => t.tranches.some((tr) => tr.timing !== "on_po_approval");
+  const allTerms = [...termOptions, ...customTerms];
   const filteredTerms = allTerms.filter((t) => {
-    if (timingCat === "before") return hasBefore(t) && !hasAfter(t);
-    if (timingCat === "after") return hasAfter(t) && !hasBefore(t);
-    if (timingCat === "both") return hasBefore(t) && hasAfter(t);
+    if (timingCat === "before") return t.deliverySplit === "pre_delivery";
+    if (timingCat === "after") return t.deliverySplit === "post_delivery";
     return true;
   });
-  const term = allTerms.find((t) => t.id === paymentTermId) ?? allTerms[0];
+  // Falls back to an empty placeholder only while the real list is still
+  // loading (or failed) — canPreview keeps the wizard from reaching step 3
+  // in that state, so this is never actually shown to the buyer.
+  const term = allTerms.find((t) => t.id === paymentTermId) ??
+    allTerms[0] ?? { id: "", name: "", description: "", deliverySplit: "post_delivery" as DeliverySplit, tranches: [] };
 
   // When the timing bucket changes, keep the selected term valid for it —
   // otherwise the detail card below would show a term the filter just hid.
-  function pickTermForCat(cat: "before" | "after" | "both" | "any") {
-    const matches = (t: PaymentTermPreset) => {
-      const b = hasBefore(t);
-      const a = hasAfter(t);
-      if (cat === "before") return b && !a;
-      if (cat === "after") return a && !b;
-      if (cat === "both") return b && a;
-      return true;
-    };
-    return matches(term) ? term.id : (allTerms.find(matches)?.id ?? DEFAULT_PAYMENT_TERM_ID);
+  function pickTermForCat(cat: "before" | "after" | "any") {
+    const matches = (t: PaymentTermPreset) =>
+      cat === "any" ? true : t.deliverySplit === (cat === "before" ? "pre_delivery" : "post_delivery");
+    return matches(term) ? term.id : (allTerms.find(matches)?.id ?? term.id);
   }
 
   const customTotal = customForm.tranches.reduce((s, t) => s + (parseFloat(t.percent) || 0), 0);
@@ -603,7 +579,9 @@ function NewPOModal({
     customForm.tranches.length > 0 &&
     customForm.tranches.every((t) => t.title.trim() && parseFloat(t.percent) > 0) &&
     Math.round(customTotal) === 100;
-  const canPreview = customMode ? customValid : filteredTerms.length > 0;
+  const canPreview = customMode
+    ? customValid
+    : !termsLoading && !termsError && filteredTerms.length > 0;
 
   const toggleSignatory = (name: string) =>
     setSelectedSignatories((prev) =>
@@ -613,12 +591,21 @@ function NewPOModal({
   function continueToPreview() {
     if (customMode) {
       const id = `custom-${Date.now()}`;
+      // No manual Delivery Split field for an ad-hoc custom term (that's a
+      // Settings-page concept) — derived instead from whether any tranche is
+      // due before delivery.
+      const deliverySplit: DeliverySplit = customForm.tranches.some(
+        (t) => t.timing === "on_po_approval",
+      )
+        ? "pre_delivery"
+        : "post_delivery";
       setCustomTerms((prev) => [
         ...prev,
         {
           id,
           name: customForm.name.trim(),
           description: customForm.description.trim(),
+          deliverySplit,
           tranches: customForm.tranches.map((t) => ({
             title: t.title.trim(),
             percent: parseFloat(t.percent) || 0,
@@ -641,9 +628,8 @@ function NewPOModal({
   const poRefPreview = initial?.poRef || peekNextId("PurchaseOrder");
   const createdDatePreview = initial?.createdDate || fmtDate(today);
   const previewSignatories = signatoryOptions.filter((s) => selectedSignatories.includes(s.name));
-  // A tranche due before delivery is what lets this order go straight to
-  // Finance once created, rather than waiting on Goods Receipt.
-  const sendToFinanceNow = hasPreDeliveryTranche(term);
+  // Whether Finance can act at PO approval, per this term's Delivery Split.
+  const sendToFinanceNow = isPreDeliveryTerm(term);
 
   function previewItems(): POPreviewItem[] {
     return items.map((it) => ({
@@ -893,12 +879,11 @@ function NewPOModal({
               <label className="block text-xs font-medium text-gray-600 mb-2">
                 Payment Timing <span className="text-red-500">*</span>
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {(
                   [
                     { key: "before", label: "Before Delivery", desc: "Due at PO approval" },
                     { key: "after", label: "After Delivery", desc: "Due after goods received" },
-                    { key: "both", label: "Before & After", desc: "Split across both" },
                   ] as const
                 ).map((c) => (
                   <button
@@ -1056,15 +1041,20 @@ function NewPOModal({
                 </div>
               ) : (
                 <>
-                  {filteredTerms.length === 0 ? (
+                  {termsLoading ? (
+                    <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-400">
+                      Loading payment terms…
+                    </div>
+                  ) : termsError ? (
+                    <div className="rounded-lg bg-red-50 border border-red-100 p-3 text-xs text-red-500">
+                      Could not load payment terms from Procurement Settings.
+                    </div>
+                  ) : filteredTerms.length === 0 ? (
                     <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-500">
-                      No preset terms payable entirely{" "}
-                      {timingCat === "before"
-                        ? "before delivery"
-                        : timingCat === "after"
-                          ? "after delivery"
-                          : "this way"}{" "}
-                      — tick "Create custom terms" to define one.
+                      No payment terms filed as{" "}
+                      {timingCat === "before" ? "pre-delivery payment" : "paid after delivery"} —
+                      add one in Procurement Settings › Payment Terms, or tick "Create custom
+                      terms" to define one here.
                     </div>
                   ) : (
                     <select
@@ -1079,7 +1069,7 @@ function NewPOModal({
                       ))}
                     </select>
                   )}
-                  {term && (
+                  {!termsLoading && !termsError && filteredTerms.length > 0 && (
                     <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 mt-2">
                       <p className="text-xs font-medium text-gray-700">{term.name}</p>
                       <div className="flex flex-wrap gap-1.5 mt-1.5">
