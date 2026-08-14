@@ -16,10 +16,16 @@ import { GoodsReceiptsService } from '../goods-receipts/goods-receipts.service';
  * makes the status meaningful rather than decorative.
  */
 const PO_TRANSITIONS: Record<string, string[]> = {
-    draft: ['sent_to_finance', 'cancelled'],
+    // `draft` is a quote-accepted order the wizard hasn't touched yet.
+    // `po_created` is what "Save and Preview PO" produces — term,
+    // signatories and delivery timing saved, goods receipt already open,
+    // regardless of payment timing. See `createPO`.
+    draft: ['po_created', 'cancelled'],
+    po_created: ['sent_to_finance', 'cancelled'],
     sent_to_finance: ['finance_accepted', 'finance_declined', 'cancelled'],
-    // A declined order goes back to the buyer, who fixes it and resubmits.
-    finance_declined: ['sent_to_finance', 'draft', 'cancelled'],
+    // A declined order goes back to the buyer, who fixes it and resubmits —
+    // back to po_created, not draft: the wizard has already run once.
+    finance_declined: ['sent_to_finance', 'po_created', 'cancelled'],
     finance_accepted: ['paid', 'cancelled'],
     paid: ['confirmation_requested', 'cancelled'],
     confirmation_requested: ['confirmed', 'cancelled'],
@@ -155,7 +161,7 @@ export class PurchaseOrdersService {
      * order, `poRef` on the invoice) so a payment recorded in Finance can show up
      * back in Procurement.
      */
-    async sendToFinance(id: string, actor?: string) {
+    async sendToFinance(id: string, actor?: string, paymentTermId?: string, deliverySplit?: string) {
         const po = await this.prisma.purchaseOrder.findUnique({
             where: { id },
             include: { supplier: true, items: true },
@@ -199,6 +205,8 @@ export class PurchaseOrdersService {
                 sentToFinanceAt: new Date(),
                 financeRef: invoiceNo,
                 declineReason: null,
+                ...(paymentTermId ? { paymentTermId } : {}),
+                ...(deliverySplit ? { deliverySplit } : {}),
             },
             include: { supplier: true, items: true },
         });
@@ -212,6 +220,47 @@ export class PurchaseOrdersService {
             vars: { reference: updated.poRef ?? updated.id, invoiceNo },
         });
 
+        return updated;
+    }
+
+    /**
+     * "Save and Preview PO" in the wizard — what actually makes a draft into
+     * a real purchase order, regardless of payment timing.
+     *
+     * The goods receipt used to only open once a pre-delivery order reached
+     * `confirmed` (Finance approved, supplier confirmed the payment landed),
+     * which meant a post-delivery order needed its own separate skip-finance
+     * path just to become receivable. Opening the receipt here instead, the
+     * moment the order is created, means receiving staff can see what's
+     * expected regardless of where the order sits in the finance chain —
+     * and both payment-timing paths go through exactly one action to get here.
+     */
+    async createPO(
+        id: string,
+        data: {
+            paymentTermId?: string;
+            deliverySplit?: string;
+            signatories?: unknown;
+            paymentTermSnapshot?: unknown;
+        },
+    ) {
+        const po = await this.prisma.purchaseOrder.findUnique({ where: { id } });
+        if (!po) throw new NotFoundException('Purchase order not found');
+        this.assertTransition(po.status, 'po_created');
+        const updated = await this.prisma.purchaseOrder.update({
+            where: { id },
+            data: {
+                status: 'po_created',
+                ...(data.paymentTermId ? { paymentTermId: data.paymentTermId } : {}),
+                ...(data.deliverySplit ? { deliverySplit: data.deliverySplit } : {}),
+                ...(data.signatories !== undefined ? { signatories: data.signatories as any } : {}),
+                ...(data.paymentTermSnapshot !== undefined
+                    ? { paymentTermSnapshot: data.paymentTermSnapshot as any }
+                    : {}),
+            },
+            include: { supplier: true, items: true },
+        });
+        await this.goodsReceipts.openForOrder(id).catch(() => undefined);
         return updated;
     }
 

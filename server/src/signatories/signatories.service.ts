@@ -3,7 +3,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSignatoryDto, UpdateSignatoryDto } from './signatories.dto';
 
-const USER_SELECT = { id: true, name: true, email: true, department: true, role: true };
+// `signature` is what lets a PO preview render the signatory's actual
+// signature image instead of a blank line — see PurchaseOrderPaper.
+const USER_SELECT = { id: true, name: true, email: true, department: true, role: true, signature: true };
 
 @Injectable()
 export class SignatoriesService {

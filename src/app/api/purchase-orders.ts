@@ -26,6 +26,18 @@ export function mapPO(p: any) {
         sentToFinance: p.sentToFinance ?? false,
         financeRef: p.financeRef ?? '',
         declineReason: p.declineReason ?? '',
+        paymentTermId: p.paymentTermId ?? '',
+        deliverySplit: p.deliverySplit ?? '',
+        signatories: (p.signatories ?? []) as { id: string; name: string; role: string; signature?: string | null }[],
+        // What the file-icon "Preview PO" re-render shows — set once, at
+        // creation, so it doesn't drift if the real term is later edited or
+        // deleted in Settings (and works at all for a custom, unsaved term).
+        paymentTermSnapshot: (p.paymentTermSnapshot ?? {}) as {
+            name?: string;
+            description?: string;
+            deliverySplit?: string;
+            tranches?: { title: string; percent: number; timing: string }[];
+        },
         createdBy: p.createdBy ?? '',
         createdDate: fmt(p.createdDate ?? p.createdAt),
         expectedDate: fmt(p.expectedDate),
@@ -73,10 +85,40 @@ export function updatePurchaseOrder(id: string, data: any) {
  * about any of it. Each is now the endpoint that actually performs the step, and
  * the server refuses one taken out of order.
  */
-export function sendPOToFinance(id: string, actor?: string) {
+export function sendPOToFinance(
+    id: string,
+    actor?: string,
+    paymentTermId?: string,
+    deliverySplit?: string,
+) {
     return apiFetch<any>(`/purchase-orders/${id}/send-to-finance`, {
         method: 'POST',
-        body: JSON.stringify({ actor }),
+        body: JSON.stringify({ actor, paymentTermId, deliverySplit }),
+    }).then(mapPO);
+}
+
+/**
+ * "Save and Preview PO" in the wizard — what actually turns a draft into a
+ * real purchase order: saves the term/signatories, moves it to `po_created`,
+ * and opens its goods receipt immediately, regardless of payment timing.
+ */
+export function createPO(
+    id: string,
+    data: {
+        paymentTermId?: string;
+        deliverySplit?: string;
+        signatories?: { id: string; name: string; role: string; signature?: string | null }[];
+        paymentTermSnapshot?: {
+            name: string;
+            description: string;
+            deliverySplit: string;
+            tranches: { title: string; percent: number; timing: string }[];
+        };
+    },
+) {
+    return apiFetch<any>(`/purchase-orders/${id}/create-po`, {
+        method: 'POST',
+        body: JSON.stringify(data),
     }).then(mapPO);
 }
 

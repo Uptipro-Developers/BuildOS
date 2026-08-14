@@ -5,7 +5,14 @@ export interface Signatory {
     department: string;
     role: string;
     userId: string;
-    user?: { id: string; name: string; email: string; department?: string; role?: string };
+    user?: {
+        id: string;
+        name: string;
+        email: string;
+        department?: string;
+        role?: string;
+        signature?: string | null;
+    };
     createdAt: string;
     updatedAt: string;
 }

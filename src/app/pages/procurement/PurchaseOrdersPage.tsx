@@ -2,14 +2,15 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   fetchPurchaseOrders,
-  mapPO,
   sendPOToFinance,
+  createPO,
   cancelPurchaseOrder,
   type MappedPurchaseOrder,
 } from "../../api/purchase-orders";
 import { getReferenceData } from "../../api/reference-data";
 import { getSignatories } from "../../api/signatories";
 import { getPaymentTerms, type DeliverySplit } from "../../api/payment-terms";
+import { getCompanyProfile, type CompanyProfile } from "../../api/admin-extras";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   csvAmountHeader,
@@ -26,7 +27,8 @@ import {
   DownloadCloud,
   ChevronRight,
   CheckCircle,
-  Building2,
+  FileText,
+  Send,
 } from "lucide-react";
 import { DataTable, type Column } from "../../components/DataTable";
 import { useChangelog } from "../../stores/changelogStore";
@@ -57,6 +59,7 @@ type PurchaseOrder = MappedPurchaseOrder;
 const tabs: { key: POStatus | "all"; label: string }[] = [
   { key: "all", label: "All POs" },
   { key: "draft", label: "Draft" },
+  { key: "po_created", label: "Created" },
   { key: "sent_to_finance", label: "With Finance" },
   { key: "finance_accepted", label: "Accepted" },
   { key: "paid", label: "Paid" },
@@ -128,15 +131,47 @@ function tranchesLabel(tranches: PaymentTranche[]): string {
   return tranches.map((t) => `${t.percent}% ${t.title}`).join(" + ");
 }
 
+/**
+ * The "Before Delivery" bucket, by definition, is 100% due before goods
+ * ship — there's really only one shape that fits, so rather than depending
+ * on Settings having filed a matching preset, this is always available and
+ * always selected the moment that bucket is picked.
+ */
+const FULL_PREDELIVERY_TERM: PaymentTermPreset = {
+  id: "full-predelivery",
+  name: "100% before delivery",
+  description: "Full payment due at PO approval, before goods are shipped.",
+  deliverySplit: "pre_delivery",
+  tranches: [{ title: "Full payment", percent: 100, timing: "on_po_approval" }],
+};
+
 /** Whether Finance can act at PO approval, per how this term is filed in Settings. */
 function isPreDeliveryTerm(term: PaymentTermPreset): boolean {
   return term.deliverySplit === "pre_delivery";
+}
+
+type TimingBucket = "before" | "after" | "both";
+
+/**
+ * Which of the 3 Payment Timing buckets a term falls into, from its actual
+ * tranches — not `deliverySplit`, which only distinguishes "has any
+ * before-delivery portion" from "none" and can't tell "100% before" apart
+ * from a mixed deposit-plus-balance term.
+ */
+function timingBucketFor(term: { tranches: PaymentTranche[] }): TimingBucket {
+  const total = term.tranches.length;
+  if (total === 0) return "after";
+  const beforeCount = term.tranches.filter((t) => t.timing === "on_po_approval").length;
+  if (beforeCount === 0) return "after";
+  if (beforeCount === total) return "before";
+  return "both";
 }
 
 interface Signatory {
   id: string;
   name: string;
   role: string;
+  signature?: string | null;
 }
 
 interface POPreviewItem {
@@ -146,12 +181,41 @@ interface POPreviewItem {
   unitCost: number;
 }
 
+/** Used only while the real profile is still loading (or failed to load). */
+const BLANK_COMPANY_PROFILE: CompanyProfile = {
+  id: "",
+  name: "Your Company",
+  email: "",
+  phone: "",
+  address: "",
+  city: "",
+  state: "",
+  zipCode: "",
+  country: "",
+};
+
+/** "Address · City, State, Country · Phone", skipping whatever's blank. */
+function companyLetterheadLine(company: CompanyProfile): string {
+  const locality = [company.city, company.state].filter(Boolean).join(", ");
+  const parts = [
+    [company.address, locality, company.country].filter(Boolean).join(" · "),
+    company.phone,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+/** "City, Country" for the delivery block — falls back to the company name alone. */
+function companyLocalityLine(company: CompanyProfile): string {
+  return [company.city, company.country].filter(Boolean).join(", ");
+}
+
 /**
  * The formal PO document — letterhead, supplier/delivery details, line
  * items, payment terms and a signature block. Shared between the create-flow
  * preview (step 3) and the printable copy `printPurchaseOrder` opens.
  */
 function PurchaseOrderPaper({
+  company,
   poRef,
   createdDate,
   supplier,
@@ -162,6 +226,7 @@ function PurchaseOrderPaper({
   term,
   signatories,
 }: {
+  company: CompanyProfile;
   poRef: string;
   createdDate: string;
   supplier: string;
@@ -176,11 +241,14 @@ function PurchaseOrderPaper({
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
       <div className="px-6 py-5 border-b-4 border-double border-blue-800 flex items-start justify-between">
         <div>
-          <p className="text-xl font-bold text-blue-900">BUILDOS CONSTRUCTION</p>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Block A, Industrial Estate · Lagos · +234 1 234 5678
-          </p>
-          <p className="text-xs text-gray-400">VAT 051-2345-6789 · RCN 2019/0456789</p>
+          {company.logoUrl && (
+            <img src={company.logoUrl} alt={company.name} className="h-8 mb-1 object-contain" />
+          )}
+          <p className="text-xl font-bold text-blue-900">{company.name}</p>
+          {companyLetterheadLine(company) && (
+            <p className="text-xs text-gray-500 mt-0.5">{companyLetterheadLine(company)}</p>
+          )}
+          {company.email && <p className="text-xs text-gray-400">{company.email}</p>}
         </div>
         <div className="text-right">
           <p className="text-sm font-bold text-gray-900">PURCHASE ORDER</p>
@@ -206,8 +274,8 @@ function PurchaseOrderPaper({
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200 pb-1 mb-2">
             Ship To
           </p>
-          <p className="text-sm text-gray-900">Site Stores — Main Yard</p>
-          <p className="text-xs text-gray-600">Lagos, Nigeria</p>
+          <p className="text-sm text-gray-900">{company.name}</p>
+          <p className="text-xs text-gray-600">{companyLocalityLine(company) || "—"}</p>
           <p className="text-xs text-gray-500 mt-1">Expected delivery: {expectedDate}</p>
         </div>
       </div>
@@ -270,16 +338,26 @@ function PurchaseOrderPaper({
           <div className="space-y-3">
             {(signatories.length
               ? signatories
-              : [{ id: "fallback", name: "Procurement Manager", role: "" }]
+              : [{ id: "fallback", name: "Procurement Manager", role: "", signature: null }]
             ).map((s) => (
               <div key={s.id}>
-                <div className="h-9 border-b border-gray-900" />
+                <div className="h-9 border-b border-gray-900 flex items-end pb-0.5">
+                  {s.signature ? (
+                    <img
+                      src={s.signature}
+                      alt={`${s.name}'s signature`}
+                      className="h-8 max-w-[160px] object-contain"
+                    />
+                  ) : (
+                    <span className="text-[11px] italic text-gray-400">No signature on file</span>
+                  )}
+                </div>
                 <p className="text-xs font-semibold text-gray-900 mt-1">{s.name}</p>
                 {s.role && <p className="text-[11px] text-gray-500">{s.role}</p>}
               </div>
             ))}
           </div>
-          <p className="text-xs text-gray-700 mt-3 font-medium">Authorised for BUILDOS</p>
+          <p className="text-xs text-gray-700 mt-3 font-medium">Authorised for {company.name}</p>
         </div>
         <div>
           <div className="h-10 border-b border-gray-900" />
@@ -293,6 +371,7 @@ function PurchaseOrderPaper({
 
 /** Opens a print-ready copy of the formal PO (Download PDF). */
 function printPurchaseOrder(props: {
+  company: CompanyProfile;
   poRef: string;
   createdDate: string;
   supplier: string;
@@ -303,7 +382,9 @@ function printPurchaseOrder(props: {
   term: PaymentTermPreset;
   signatories: Signatory[];
 }) {
-  const { poRef, createdDate, supplier, supplierContact, expectedDate, items, totalValue, term, signatories } = props;
+  const { company, poRef, createdDate, supplier, supplierContact, expectedDate, items, totalValue, term, signatories } = props;
+  const letterhead = companyLetterheadLine(company);
+  const locality = companyLocalityLine(company) || "—";
   const rows = items
     .map(
       (it) =>
@@ -314,19 +395,29 @@ function printPurchaseOrder(props: {
     )
     .join("");
   const tranches = term.tranches.map((t) => `${t.percent}% ${t.title}`).join(" + ");
-  const sigHtml = (signatories.length ? signatories : [{ id: "fallback", name: "Procurement Manager", role: "" }])
-    .map(
-      (s) =>
-        `<div style="margin-bottom:10px"><div style="border-top:1px solid #000;padding-top:4px">${s.name}<br/><span style="color:#555;font-size:11px">${s.role}</span></div></div>`,
-    )
+  const sigHtml = (
+    signatories.length ? signatories : [{ id: "fallback", name: "Procurement Manager", role: "", signature: null }]
+  )
+    .map((s) => {
+      const sigBox = s.signature
+        ? `<img src="${s.signature}" alt="${s.name}'s signature" style="height:32px;max-width:160px;object-fit:contain" />`
+        : `<span style="font-size:11px;font-style:italic;color:#999">No signature on file</span>`;
+      return (
+        `<div style="margin-bottom:10px">` +
+        `<div style="border-bottom:1px solid #000;padding-bottom:4px;min-height:32px;display:flex;align-items:flex-end">${sigBox}</div>` +
+        `<div style="margin-top:4px">${s.name}<br/><span style="color:#555;font-size:11px">${s.role}</span></div>` +
+        `</div>`
+      );
+    })
     .join("");
   const w = window.open("", "_blank");
   if (!w) return;
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${poRef}</title></head>
     <body style="font-family:Georgia,serif;color:#111;max-width:720px;margin:32px auto;line-height:1.5">
       <div style="border-bottom:3px double #1e3a8a;padding-bottom:12px;display:flex;justify-content:space-between;align-items:flex-end">
-        <div><div style="font-size:22px;font-weight:bold;color:#1e3a8a">BUILDOS CONSTRUCTION</div>
-        <div style="font-size:11px;color:#555">Block A, Industrial Estate · Lagos · +234 1 234 5678</div></div>
+        <div><div style="font-size:22px;font-weight:bold;color:#1e3a8a">${company.name}</div>
+        ${letterhead ? `<div style="font-size:11px;color:#555">${letterhead}</div>` : ""}
+        ${company.email ? `<div style="font-size:11px;color:#888">${company.email}</div>` : ""}</div>
         <div style="text-align:right"><div style="font-size:16px;font-weight:bold">PURCHASE ORDER</div>
         <div style="font-size:11px">No: <b>${poRef}</b></div><div style="font-size:11px">Date: ${createdDate}</div></div>
       </div>
@@ -335,7 +426,7 @@ function printPurchaseOrder(props: {
           <td style="vertical-align:top"><div style="font-weight:bold;border-bottom:1px solid #999;margin-bottom:6px;padding-bottom:2px">Supplier</div>
             <div>${supplier}</div><div style="color:#555;font-size:12px">${supplierContact}</div></td>
           <td style="vertical-align:top"><div style="font-weight:bold;border-bottom:1px solid #999;margin-bottom:6px;padding-bottom:2px">Deliver To</div>
-            <div>Site Stores — Main Yard</div><div style="color:#555;font-size:12px">Lagos, Nigeria</div>
+            <div>${company.name}</div><div style="color:#555;font-size:12px">${locality}</div>
             <div style="color:#555;font-size:12px">Expected: ${expectedDate}</div></td>
         </tr>
       </table>
@@ -352,7 +443,7 @@ function printPurchaseOrder(props: {
       <div style="font-size:12px">${term.name} — ${tranches}</div>
       <div style="font-size:11px;color:#555;margin-top:2px">${term.description}</div>
       <div style="margin-top:24px;display:flex;justify-content:space-between;gap:24px;font-size:12px">
-        <div style="flex:1">${sigHtml}<div style="margin-top:4px;font-weight:bold">Authorised for BUILDOS</div></div>
+        <div style="flex:1">${sigHtml}<div style="margin-top:4px;font-weight:bold">Authorised for ${company.name}</div></div>
         <div style="flex:1"><div style="border-top:1px solid #000;padding-top:4px">Supplier Acknowledgement<br/>Name &amp; Signature</div></div>
       </div>
     </body></html>`);
@@ -374,6 +465,7 @@ function NewPOModal({
   initial,
   onClose,
   onSave,
+  onSendToFinance,
 }: {
   /**
    * An existing draft order to carry forward rather than build from scratch —
@@ -383,16 +475,28 @@ function NewPOModal({
    */
   initial?: PurchaseOrder;
   onClose: () => void;
+  /**
+   * Called from "Save and Preview PO" — the PO is actually saved (and Goods
+   * Receipt opened) before the preview shows, not after. Resolves `true` to
+   * advance to the preview, `false` to stay on step 2 (the caller has
+   * already shown the error toast).
+   */
   onSave: (
     payload: NewPOPayload,
     meta: {
       paymentTerm: PaymentTermPreset;
       signatories: Signatory[];
-      sendToFinanceNow: boolean;
       /** Set when carrying an existing order forward — skips creating a new one. */
       existingId?: string;
     },
-  ) => void;
+  ) => Promise<boolean>;
+  /**
+   * Called from the step-3 button when the term needs Finance's approval up
+   * front (Before / Before-and-After delivery) — resolves `true` on success,
+   * in which case the modal closes; `false` leaves it open (the caller has
+   * already shown the error toast).
+   */
+  onSendToFinance: (po: PurchaseOrder) => Promise<boolean>;
 }) {
   const isInherited = !!initial;
   const today = new Date();
@@ -486,7 +590,7 @@ function NewPOModal({
   const previewExpectedDate = initial?.expectedDate || addDays(parseInt(deliveryDays) || 7);
 
   // ── Step 2 — payment terms & signatories ──
-  const [timingCat, setTimingCat] = useState<"before" | "after" | "any">("any");
+  const [timingCat, setTimingCat] = useState<TimingBucket>("before");
   const [paymentTermId, setPaymentTermId] = useState("");
   const [customMode, setCustomMode] = useState(false);
   // Terms defined inline this session — not persisted anywhere once the modal closes.
@@ -539,6 +643,7 @@ function NewPOModal({
           id: r.id,
           name: r.user?.name ?? "Unknown",
           role: r.role,
+          signature: r.user?.signature ?? null,
         }));
         setSignatoryOptions(options);
         // Default to whoever's on file as Procurement Manager, same starting
@@ -553,12 +658,17 @@ function NewPOModal({
       .finally(() => setSignatoriesLoading(false));
   }, []);
 
-  const allTerms = [...termOptions, ...customTerms];
-  const filteredTerms = allTerms.filter((t) => {
-    if (timingCat === "before") return t.deliverySplit === "pre_delivery";
-    if (timingCat === "after") return t.deliverySplit === "post_delivery";
-    return true;
-  });
+  // Letterhead for the preview/PDF — falls back to BLANK_COMPANY_PROFILE
+  // while this is loading (or if it fails) rather than blocking the wizard.
+  const [company, setCompany] = useState<CompanyProfile>(BLANK_COMPANY_PROFILE);
+  useEffect(() => {
+    getCompanyProfile()
+      .then(setCompany)
+      .catch(() => { });
+  }, []);
+
+  const allTerms = [FULL_PREDELIVERY_TERM, ...termOptions, ...customTerms];
+  const filteredTerms = allTerms.filter((t) => timingBucketFor(t) === timingCat);
   // Falls back to an empty placeholder only while the real list is still
   // loading (or failed) — canPreview keeps the wizard from reaching step 3
   // in that state, so this is never actually shown to the buyer.
@@ -567,10 +677,12 @@ function NewPOModal({
 
   // When the timing bucket changes, keep the selected term valid for it —
   // otherwise the detail card below would show a term the filter just hid.
-  function pickTermForCat(cat: "before" | "after" | "any") {
-    const matches = (t: PaymentTermPreset) =>
-      cat === "any" ? true : t.deliverySplit === (cat === "before" ? "pre_delivery" : "post_delivery");
-    return matches(term) ? term.id : (allTerms.find(matches)?.id ?? term.id);
+  // If nothing is filed under that bucket at all, switch straight to custom
+  // mode instead of leaving "Save and Preview PO" dead with no way forward
+  // beyond noticing the empty-state hint and ticking the checkbox by hand.
+  function pickTermForCat(cat: TimingBucket): { id: string; useCustom: boolean } {
+    const matches = allTerms.filter((t) => timingBucketFor(t) === cat);
+    return { id: matches[0]?.id ?? "", useCustom: matches.length === 0 };
   }
 
   const customTotal = customForm.tranches.reduce((s, t) => s + (parseFloat(t.percent) || 0), 0);
@@ -588,7 +700,18 @@ function NewPOModal({
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
 
-  function continueToPreview() {
+  const [saving, setSaving] = useState(false);
+  const [sendingToFinance, setSendingToFinance] = useState(false);
+
+  /**
+   * "Save and Preview PO" — the order is actually saved here, before the
+   * preview shows, not after. `term` (derived from state) can't be trusted
+   * yet for a fresh custom term: the setCustomTerms/setPaymentTermId calls
+   * below only take effect on the next render, so the object built here is
+   * used directly for the save instead of relying on the stale `term`.
+   */
+  async function continueToPreview() {
+    let termToSave = term;
     if (customMode) {
       const id = `custom-${Date.now()}`;
       // No manual Delivery Split field for an ad-hoc custom term (that's a
@@ -599,23 +722,39 @@ function NewPOModal({
       )
         ? "pre_delivery"
         : "post_delivery";
-      setCustomTerms((prev) => [
-        ...prev,
-        {
-          id,
-          name: customForm.name.trim(),
-          description: customForm.description.trim(),
-          deliverySplit,
-          tranches: customForm.tranches.map((t) => ({
-            title: t.title.trim(),
-            percent: parseFloat(t.percent) || 0,
-            timing: t.timing,
-          })),
-        },
-      ]);
+      const builtTerm: PaymentTermPreset = {
+        id,
+        name: customForm.name.trim(),
+        description: customForm.description.trim(),
+        deliverySplit,
+        tranches: customForm.tranches.map((t) => ({
+          title: t.title.trim(),
+          percent: parseFloat(t.percent) || 0,
+          timing: t.timing,
+        })),
+      };
+      setCustomTerms((prev) => [...prev, builtTerm]);
       setPaymentTermId(id);
+      termToSave = builtTerm;
     }
-    setStep(3);
+    if (!initial?.id) return;
+    setSaving(true);
+    try {
+      const ok = await onSave(
+        {
+          supplierId,
+          prRef: prRef.trim() || undefined,
+          createdBy: getAuthUserName() || "Current User",
+          expectedDate: addDaysIso(parseInt(deliveryDays) || 7),
+          totalValue,
+          items: previewItems(),
+        },
+        { paymentTerm: termToSave, signatories: previewSignatories, existingId: initial.id },
+      );
+      if (ok) setStep(3);
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ── Step 3 — preview & send ──
@@ -640,27 +779,10 @@ function NewPOModal({
     }));
   }
 
-  /**
-   * Building the payload is only meaningful for a brand-new order — when
-   * carrying an existing one forward, the caller uses `meta.existingId`
-   * instead and this is never sent anywhere.
-   */
-  function handleSubmit() {
-    onSave(
-      {
-        supplierId,
-        prRef: prRef.trim() || undefined,
-        createdBy: getAuthUserName() || "Current User",
-        expectedDate: addDaysIso(parseInt(deliveryDays) || 7),
-        totalValue,
-        items: previewItems(),
-      },
-      { paymentTerm: term, signatories: previewSignatories, sendToFinanceNow, existingId: initial?.id },
-    );
-  }
 
   function handleDownload() {
     printPurchaseOrder({
+      company,
       poRef: poRefPreview,
       createdDate: createdDatePreview,
       supplier: supplierName,
@@ -879,11 +1001,12 @@ function NewPOModal({
               <label className="block text-xs font-medium text-gray-600 mb-2">
                 Payment Timing <span className="text-red-500">*</span>
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {(
                   [
-                    { key: "before", label: "Before Delivery", desc: "Due at PO approval" },
+                    { key: "before", label: "Before Delivery", desc: "100% before delivery" },
                     { key: "after", label: "After Delivery", desc: "Due after goods received" },
+                    { key: "both", label: "Before and After Delivery", desc: "Split across delivery" },
                   ] as const
                 ).map((c) => (
                   <button
@@ -891,8 +1014,9 @@ function NewPOModal({
                     type="button"
                     onClick={() => {
                       setTimingCat(c.key);
-                      setCustomMode(false);
-                      setPaymentTermId(pickTermForCat(c.key));
+                      const picked = pickTermForCat(c.key);
+                      setCustomMode(picked.useCustom);
+                      setPaymentTermId(picked.id);
                     }}
                     className={`rounded-xl border p-3 text-left transition-colors ${timingCat === c.key ? "border-blue-600 bg-blue-50 ring-1 ring-blue-600" : "border-gray-200 bg-white hover:border-gray-300"}`}
                   >
@@ -941,7 +1065,10 @@ function NewPOModal({
                     />
                   </div>
                   {customForm.tranches.map((tr, i) => (
-                    <div key={i} className="grid grid-cols-[1fr_70px_1fr_28px] gap-1.5 items-center">
+                    <div
+                      key={i}
+                      className="grid grid-cols-[minmax(0,1.4fr)_64px_minmax(0,1fr)_28px] gap-1.5 items-center"
+                    >
                       <input
                         value={tr.title}
                         onChange={(e) =>
@@ -953,9 +1080,9 @@ function NewPOModal({
                           })
                         }
                         placeholder="Tranche title"
-                        className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
-                      <div className="relative">
+                      <div className="relative min-w-0">
                         <input
                           type="number"
                           min={0}
@@ -970,7 +1097,7 @@ function NewPOModal({
                             })
                           }
                           placeholder="%"
-                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm pr-6 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm pr-5 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
                           %
@@ -988,7 +1115,7 @@ function NewPOModal({
                             ),
                           })
                         }
-                        className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="on_po_approval">Before delivery</option>
                         <option value="on_delivery">On delivery</option>
@@ -1004,7 +1131,7 @@ function NewPOModal({
                             tranches: customForm.tranches.filter((_, j) => j !== i),
                           })
                         }
-                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg disabled:opacity-30"
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg disabled:text-gray-300 disabled:hover:text-gray-300 disabled:cursor-not-allowed"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1052,8 +1179,12 @@ function NewPOModal({
                   ) : filteredTerms.length === 0 ? (
                     <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-500">
                       No payment terms filed as{" "}
-                      {timingCat === "before" ? "pre-delivery payment" : "paid after delivery"} —
-                      add one in Procurement Settings › Payment Terms, or tick "Create custom
+                      {timingCat === "before"
+                        ? "100% before delivery"
+                        : timingCat === "after"
+                          ? "paid after delivery"
+                          : "split before and after delivery"}{" "}
+                      — add one in Procurement Settings › Payment Terms, or tick "Create custom
                       terms" to define one here.
                     </div>
                   ) : (
@@ -1127,7 +1258,14 @@ function NewPOModal({
 
         {step === 3 && (
           <div className="px-6 py-6 bg-gray-50/50">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 mb-4 text-xs text-emerald-800 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              {sendToFinanceNow
+                ? "PO created — Goods Receipt is now open. Use Send to Finance on the Purchase Orders table when ready."
+                : "PO created — Goods Receipt is now open. Finance is invoiced automatically once the order is fully received."}
+            </div>
             <PurchaseOrderPaper
+              company={company}
               poRef={poRefPreview}
               createdDate={createdDatePreview}
               supplier={supplierName}
@@ -1181,19 +1319,41 @@ function NewPOModal({
             <button
               type="button"
               onClick={continueToPreview}
-              disabled={!canPreview}
+              disabled={!canPreview || saving}
               className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              Preview PO <ChevronRight className="w-4 h-4" />
+              {saving ? "Saving…" : "Save and Preview PO"} <ChevronRight className="w-4 h-4" />
             </button>
           )}
           {step === 3 && (
             <button
               type="button"
-              onClick={handleSubmit}
-              className="px-4 py-2 text-sm bg-indigo-700 text-white rounded-xl hover:bg-indigo-800 flex items-center gap-2"
+              disabled={sendingToFinance}
+              onClick={async () => {
+                if (!sendToFinanceNow) {
+                  onClose();
+                  return;
+                }
+                if (!initial) return;
+                setSendingToFinance(true);
+                try {
+                  const ok = await onSendToFinance(initial);
+                  if (ok) onClose();
+                } finally {
+                  setSendingToFinance(false);
+                }
+              }}
+              className="px-4 py-2 text-sm bg-indigo-700 text-white rounded-xl hover:bg-indigo-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              <Building2 className="w-4 h-4" /> {sendToFinanceNow ? "Send to Finance" : "Create PO"}
+              {sendToFinanceNow ? (
+                <>
+                  <Send className="w-4 h-4" /> {sendingToFinance ? "Sending…" : "Send to Finance"}
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4" /> Done
+                </>
+              )}
             </button>
           )}
         </div>
@@ -1225,6 +1385,13 @@ export function PurchaseOrdersPage() {
   const [working, setWorking] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<PurchaseOrder | null>(null);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
+  /** The order the file icon was clicked on — the read-only PurchaseOrderPaper view. */
+  const [previewPO, setPreviewPO] = useState<PurchaseOrder | null>(null);
+  const [previewCompany, setPreviewCompany] = useState<CompanyProfile>(BLANK_COMPANY_PROFILE);
+  useEffect(() => {
+    if (!previewPO) return;
+    getCompanyProfile().then(setPreviewCompany).catch(() => { });
+  }, [previewPO]);
   const navigate = useNavigate();
 
   /**
@@ -1284,13 +1451,16 @@ export function PurchaseOrdersPage() {
   }
 
   /**
-   * Shared by both `NewPOModal` instances below.
+   * Shared by both `NewPOModal` instances below — called from "Save and
+   * Preview PO", before the preview shows. `meta.existingId` set means the
+   * wizard was opened on an order that already exists (raised from an
+   * accepted quote, sitting in draft) — nothing new is created, the
+   * existing order is just carried forward.
    *
-   * `meta.existingId` set means the wizard was opened on an order that
-   * already exists (raised from an accepted quote, sitting in draft) —
-   * nothing new is created, the existing order is just carried forward. Its
-   * absence means a brand-new order, built from scratch via the header
-   * button.
+   * Returns whether the save succeeded — the modal only advances to the
+   * preview on `true`, and stays on step 2 (with the error already toasted)
+   * on `false`. Deliberately doesn't close the modal either way: the
+   * preview is the point of clicking this button, not a side effect of it.
    */
   async function handleModalSave(
     // Only reachable via createFromExisting now — nothing here builds a new
@@ -1299,42 +1469,63 @@ export function PurchaseOrdersPage() {
     meta: {
       paymentTerm: PaymentTermPreset;
       signatories: Signatory[];
-      sendToFinanceNow: boolean;
       existingId?: string;
     },
-  ) {
-    // Only ever called with an existing order now — the header's "create a
-    // blank PO from scratch" path is gone, so `meta.existingId` is always
-    // set here.
-    if (!meta.existingId) return;
+  ): Promise<boolean> {
+    if (!meta.existingId) return false;
     try {
-      if (!meta.sendToFinanceNow) {
-        // No transition exists for "wait for delivery" beyond the draft
-        // it's already sitting in — there's nothing further to do here.
-        toast.success("Payment terms recorded.", {
-          description: "This order still waits for delivery before Finance is involved.",
-        });
-        setCreateFromExisting(null);
-        return;
-      }
-      const sent = await sendPOToFinance(meta.existingId, getAuthUserName() || undefined);
-      const po = mapPO(sent);
+      // createPO already maps the response — no need to map it again.
+      const po = await createPO(meta.existingId, {
+        paymentTermId: meta.paymentTerm.id,
+        deliverySplit: meta.paymentTerm.deliverySplit,
+        signatories: meta.signatories.map((s) => ({
+          id: s.id,
+          name: s.name,
+          role: s.role,
+          signature: s.signature ?? null,
+        })),
+        paymentTermSnapshot: {
+          name: meta.paymentTerm.name,
+          description: meta.paymentTerm.description,
+          deliverySplit: meta.paymentTerm.deliverySplit,
+          tranches: meta.paymentTerm.tranches,
+        },
+      });
       setPoList((prev) => prev.map((p) => (p.id === po.id ? po : p)));
       logChange({
         module: "Procurement",
-        action: "Sent to Finance",
+        action: "PO created",
         entityType: "PurchaseOrder",
         entityId: po.id,
-        summary: `PO ${po.poRef} sent to Finance — ${meta.paymentTerm.name}`,
+        summary: `PO ${po.poRef} created — ${meta.paymentTerm.name}`,
         performedBy: "Current User",
       });
-      toast.success(`${po.poRef} sent to Finance.`);
-      setCreateFromExisting(null);
+      toast.success(`${po.poRef} created.`, {
+        description: "Goods Receipt is now open for this order.",
+      });
+      return true;
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Failed to update the purchase order.",
+        e instanceof Error ? e.message : "Failed to create the purchase order.",
       );
+      return false;
     }
+  }
+
+  /**
+   * The row action for an order that still needs Finance's approval up
+   * front — also called directly from the wizard's step-3 button, so its
+   * return value (the updated order, or undefined on failure — `step`
+   * already toasted the error) tells the caller whether to close the modal.
+   */
+  async function handleSendToFinance(po: PurchaseOrder) {
+    return step(
+      po,
+      () => sendPOToFinance(po.id, getAuthUserName() || undefined),
+      "Sent to Finance",
+      `PO ${po.poRef} sent to Finance`,
+      `${po.poRef} sent to Finance.`,
+    );
   }
 
   const filtered = poList.filter(
@@ -1445,19 +1636,46 @@ export function PurchaseOrdersPage() {
       filterable: false,
       headerClassName: "text-right",
       /**
-       * Exactly one button: "Create PO" while the order hasn't been generated
-       * yet (draft, or bounced back by Finance for rework), "Goods Receipt"
-       * from the point it has — nothing for a cancelled order. Styled as its
-       * own filled/bordered pill rather than through RowAction, which only
-       * renders a ghost-text style — these two need a solid tone each
-       * (blue / amber) to read as the primary next step on the row.
+       * "Create PO" while the order hasn't been created yet (draft, or
+       * bounced back by Finance for rework). Once created: "Send to
+       * Finance" for a Before/Before-and-After-delivery order that hasn't
+       * gone to Finance yet — the deposit portion needs approving before
+       * anything else can happen. Otherwise "Goods Receipt" — either the
+       * order is After-delivery (nothing for Finance to approve up front) or
+       * it's already been sent. Nothing for a cancelled order. The file icon
+       * is additive, shown on any order that's been created, regardless of
+       * which of the two the main button is.
        */
       render: (po) => {
         if (po.status === "cancelled") return null;
-        const generated = po.status !== "draft" && po.status !== "finance_declined";
+        const created = po.status !== "draft" && po.status !== "finance_declined";
+        const needsFinanceFirst = created && po.deliverySplit === "pre_delivery" && !po.sentToFinance;
         return (
           <div className="flex items-center justify-end gap-1 flex-wrap">
-            {generated ? (
+            {!created ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCreateFromExisting(po);
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+              >
+                <Plus className="w-3 h-3" /> Create PO
+              </button>
+            ) : needsFinanceFirst ? (
+              <button
+                type="button"
+                disabled={working === po.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleSendToFinance(po);
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send className="w-3 h-3" /> Send to Finance
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={(e) => {
@@ -1468,16 +1686,18 @@ export function PurchaseOrdersPage() {
               >
                 <Truck className="w-3 h-3" /> Goods Receipt
               </button>
-            ) : (
+            )}
+            {created && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setCreateFromExisting(po);
+                  setPreviewPO(po);
                 }}
-                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                title="Preview PO"
+                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
               >
-                <Plus className="w-3 h-3" /> Create PO
+                <FileText className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
@@ -1639,6 +1859,7 @@ export function PurchaseOrdersPage() {
           initial={createFromExisting}
           onClose={() => setCreateFromExisting(null)}
           onSave={handleModalSave}
+          onSendToFinance={async (po) => !!(await handleSendToFinance(po))}
         />
       )}
       {viewPO && (
@@ -1758,6 +1979,78 @@ export function PurchaseOrdersPage() {
           </div>
         </div>
       )}
+
+      {/* The file icon — a read-only re-view of the PO exactly as it was
+          created, from the snapshots taken at that point rather than
+          whatever's current in Settings. */}
+      {previewPO && (() => {
+        const snap = previewPO.paymentTermSnapshot;
+        const previewTerm: PaymentTermPreset = {
+          id: previewPO.paymentTermId || "snapshot",
+          name: snap?.name || "—",
+          description: snap?.description || "",
+          deliverySplit: (snap?.deliverySplit as DeliverySplit) || "post_delivery",
+          tranches: snap?.tranches || [],
+        };
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+                <h2 className="text-base font-semibold text-gray-900">{previewPO.poRef}</h2>
+                <button
+                  onClick={() => setPreviewPO(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="px-6 py-6 bg-gray-50/50">
+                <PurchaseOrderPaper
+                  company={previewCompany}
+                  poRef={previewPO.poRef}
+                  createdDate={previewPO.createdDate}
+                  supplier={previewPO.supplier}
+                  supplierContact={previewPO.supplierContact || previewPO.supplier}
+                  expectedDate={previewPO.expectedDate}
+                  items={previewPO.items}
+                  totalValue={previewPO.totalValue}
+                  term={previewTerm}
+                  signatories={previewPO.signatories}
+                />
+              </div>
+              <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() =>
+                    printPurchaseOrder({
+                      company: previewCompany,
+                      poRef: previewPO.poRef,
+                      createdDate: previewPO.createdDate,
+                      supplier: previewPO.supplier,
+                      supplierContact: previewPO.supplierContact || previewPO.supplier,
+                      expectedDate: previewPO.expectedDate,
+                      items: previewPO.items,
+                      totalValue: previewPO.totalValue,
+                      term: previewTerm,
+                      signatories: previewPO.signatories,
+                    })
+                  }
+                  title="Download PDF"
+                  className="p-2.5 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
+                >
+                  <DownloadCloud className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setPreviewPO(null)}
+                  className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Cancelled, not deleted: deleting an order takes the quote it was
           awarded from, the invoice Finance raised for it and the payment with
