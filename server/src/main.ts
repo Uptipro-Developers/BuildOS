@@ -41,6 +41,7 @@ async function bootstrap() {
         process.env.FRONTEND_URL || 'http://localhost:5173',
         'https://build-os-delta.vercel.app',
         'https://buildos-dev-suite.vercel.app',
+        'https://build-os-git-development-uptipros-projects.vercel.app/'
     ]
         .map((origin) => String(origin).trim().replace(/\/$/, ''))
         .filter(Boolean);
