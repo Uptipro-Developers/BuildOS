@@ -91,17 +91,10 @@ export class PurchaseOrdersService {
                     supplier: po.supplier?.name ?? '',
                 },
             });
-            const supplier = po.supplier;
-            if (supplier?.email) {
-                const poRefOut = po.poRef ?? po.id;
-                const portalUrl = supplierPortalLink('purchase-order', po.id, String(poRefOut));
-                this.mailQueue.enqueueEmail({
-                    to: supplier.email,
-                    subject: `New Purchase Order from BuildOS — ${poRefOut}`,
-                    text: `Dear ${supplier.contactPerson || supplier.name},\n\nA new Purchase Order (${poRefOut}) has been raised for your company on BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${poRefOut}`,
-                    html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>A new <strong>Purchase Order</strong> (<code>${poRefOut}</code>) has been raised for your company on BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${poRefOut}</p>`,
-                }).catch(() => { });
-            }
+            // No supplier email at draft stage: the order has no payment term
+            // or signatories yet — that email now goes out from `createPO`,
+            // once the wizard has actually finished and there's a real
+            // document to send instead of a bare notice.
             return po;
         });
     }
@@ -261,7 +254,76 @@ export class PurchaseOrdersService {
             include: { supplier: true, items: true },
         });
         await this.goodsReceipts.openForOrder(id).catch(() => undefined);
+        this.emailPurchaseOrderToSupplier(updated).catch(() => undefined);
         return updated;
+    }
+
+    /**
+     * Sends the finished PO to the supplier — the moment `createPO` calls
+     * this, the order has a real payment term and signatories on it, unlike
+     * the bare "a PO was raised" notice this replaced (which fired at draft
+     * stage, before the wizard had touched the order at all).
+     */
+    private async emailPurchaseOrderToSupplier(po: {
+        id: string;
+        poRef: string | null;
+        expectedDate: Date;
+        totalValue: number;
+        paymentTermSnapshot: unknown;
+        signatories: unknown;
+        supplier: { email: string | null; contactPerson: string | null; name: string } | null;
+        items: { material: string; qty: number; unit: string; unitCost: number }[];
+    }) {
+        const supplier = po.supplier;
+        if (!supplier?.email) return;
+        const poRefOut = po.poRef ?? po.id;
+        const company = await this.prisma.companyProfile.findUnique({ where: { id: 'singleton' } });
+        const companyName = company?.name || 'BuildOS';
+
+        const rows = po.items
+            .map(
+                (it) =>
+                    `<tr><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:left">${it.material}</td>` +
+                    `<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${it.qty.toLocaleString()} ${it.unit}</td>` +
+                    `<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${it.unitCost.toLocaleString()}</td>` +
+                    `<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${(it.qty * it.unitCost).toLocaleString()}</td></tr>`,
+            )
+            .join('');
+
+        const snap = (po.paymentTermSnapshot ?? {}) as {
+            name?: string;
+            tranches?: { title: string; percent: number }[];
+        };
+        const termLine = snap.name
+            ? `${snap.name}${snap.tranches?.length ? ' — ' + snap.tranches.map((t) => `${t.percent}% ${t.title}`).join(' + ') : ''}`
+            : 'As agreed';
+
+        const signatories = (po.signatories ?? []) as { name: string; role: string }[];
+        const sigLine = signatories.length
+            ? signatories.map((s) => `${s.name}${s.role ? ` (${s.role})` : ''}`).join(', ')
+            : '';
+
+        const portalUrl = supplierPortalLink('purchase-order', po.id, String(poRefOut));
+
+        await this.mailQueue.enqueueEmail({
+            to: supplier.email,
+            subject: `Purchase Order ${poRefOut} from ${companyName}`,
+            text: `Dear ${supplier.contactPerson || supplier.name},\n\nPlease find your Purchase Order ${poRefOut} from ${companyName} below.\n\nItems:\n${po.items.map((it) => `- ${it.material}: ${it.qty} ${it.unit} @ ${it.unitCost}`).join('\n')}\n\nTotal: ${po.totalValue.toLocaleString()}\nPayment terms: ${termLine}\nExpected delivery: ${po.expectedDate.toDateString()}\n${sigLine ? `Authorised by: ${sigLine}\n` : ''}\nView on the Supplier Portal: ${portalUrl}\n\nRef: ${poRefOut}`,
+            html: `<div style="font-family:Georgia,serif;color:#111;max-width:640px">
+                <p>Dear ${supplier.contactPerson || supplier.name},</p>
+                <p>Please find your Purchase Order <strong>${poRefOut}</strong> from <strong>${companyName}</strong> below.</p>
+                <table style="width:100%;font-size:13px;border-collapse:collapse;border:1px solid #ddd;margin:12px 0">
+                    <thead><tr style="background:#f5f5f5"><th style="padding:6px 8px;text-align:left">Item</th><th style="padding:6px 8px;text-align:right">Qty</th><th style="padding:6px 8px;text-align:right">Unit Price</th><th style="padding:6px 8px;text-align:right">Amount</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                    <tfoot><tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold">TOTAL</td><td style="padding:8px;text-align:right;font-weight:bold">${po.totalValue.toLocaleString()}</td></tr></tfoot>
+                </table>
+                <p style="font-size:13px"><strong>Payment terms:</strong> ${termLine}</p>
+                <p style="font-size:13px"><strong>Expected delivery:</strong> ${po.expectedDate.toDateString()}</p>
+                ${sigLine ? `<p style="font-size:13px"><strong>Authorised by:</strong> ${sigLine}</p>` : ''}
+                <p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p>
+                <p style="color:#6b7280;font-size:12px;">Ref: ${poRefOut}</p>
+            </div>`,
+        });
     }
 
     /** Procurement asks the supplier to confirm the payment landed. */
