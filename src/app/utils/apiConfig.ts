@@ -24,4 +24,6 @@ const FALLBACK_API_URL = import.meta.env.DEV
   ? "http://localhost:3001/api"
   : URL.includes('development') ? 'buildos-staging.up.railway.app' : "https://buildos-production-e328.up.railway.app/api";
 
+console.log(FALLBACK_API_URL, URL, EXPLICIT_API_URL)
 export const API_BASE_URL = (EXPLICIT_API_URL || FALLBACK_API_URL).replace(/\/$/, "");
+
