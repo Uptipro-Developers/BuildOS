@@ -19,9 +19,9 @@
  *      fallback is never actually reached there.
  */
 const EXPLICIT_API_URL = import.meta.env.VITE_API_URL;
-
+const URL = window.location.href;
 const FALLBACK_API_URL = import.meta.env.DEV
   ? "http://localhost:3001/api"
-  : "https://buildos-production-e328.up.railway.app/api";
+  : URL.includes('development') ? 'buildos-staging.up.railway.app' : "https://buildos-production-e328.up.railway.app/api";
 
 export const API_BASE_URL = (EXPLICIT_API_URL || FALLBACK_API_URL).replace(/\/$/, "");
