@@ -56,9 +56,12 @@ export class PurchaseOrdersService {
         });
     }
 
+    // Callers may pass either the cuid id or the human-readable poRef — a
+    // Purchase Invoice only ever carries the latter, so a plain id lookup
+    // left every invoice-side "preview the PO" request 404ing.
     findOne(id: string) {
-        return this.prisma.purchaseOrder.findUniqueOrThrow({
-            where: { id },
+        return this.prisma.purchaseOrder.findFirstOrThrow({
+            where: { OR: [{ id }, { poRef: id }] },
             include: { supplier: true, items: true },
         });
     }

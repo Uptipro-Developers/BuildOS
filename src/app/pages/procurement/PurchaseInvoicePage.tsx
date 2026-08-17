@@ -12,6 +12,8 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  StickyNote,
+  DownloadCloud,
   X,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
@@ -26,6 +28,14 @@ import {
   sendPurchaseInvoiceForApproval,
   PurchaseInvoice as ApiPurchaseInvoice,
 } from "../../api/procurement-requests";
+import { getPurchaseOrder, type MappedPurchaseOrder } from "../../api/purchase-orders";
+import { getCompanyProfile, type CompanyProfile } from "../../api/admin-extras";
+import {
+  PurchaseOrderPaper,
+  printPurchaseOrder,
+  BLANK_COMPANY_PROFILE,
+  type PaymentTermPreset,
+} from "../../components/PurchaseOrderPaper";
 import { StatusBadge } from "../../components/StatusBadge";
 import { RowAction, RowActionNote, RowActions } from "../../components/RowAction";
 import {
@@ -704,6 +714,10 @@ export function PurchaseInvoicePage() {
    */
   const [editingLines, setEditingLines] = useState<InvoiceLine[] | null>(null);
   const [savingLines, setSavingLines] = useState<string | null>(null);
+  /** The purchase order behind the Attachment note icon's preview modal. */
+  const [poPreview, setPoPreview] = useState<MappedPurchaseOrder | null>(null);
+  const [previewCompany, setPreviewCompany] = useState<CompanyProfile>(BLANK_COMPANY_PROFILE);
+  const [loadingPOFor, setLoadingPOFor] = useState<string | null>(null);
   const { logChange } = useChangelog();
 
   useEffect(() => {
@@ -712,6 +726,26 @@ export function PurchaseInvoicePage() {
       .catch((err) => notifyLoadFailure("purchase invoices", err))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!poPreview) return;
+    getCompanyProfile().then(setPreviewCompany).catch(() => { });
+  }, [poPreview]);
+
+  /** Opens the note icon's PO preview — the order this invoice was raised against. */
+  async function openPOPreview(inv: PurchaseInvoice) {
+    if (!inv.poRef || loadingPOFor) return;
+    setLoadingPOFor(inv.id);
+    try {
+      setPoPreview(await getPurchaseOrder(inv.poRef));
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Could not load the purchase order.",
+      );
+    } finally {
+      setLoadingPOFor(null);
+    }
+  }
 
   useEffect(() => {
     if (!expanded) {
@@ -1266,6 +1300,32 @@ export function PurchaseInvoicePage() {
         ),
     },
     {
+      key: "attachment",
+      label: "Attachment",
+      sortable: false,
+      filterable: false,
+      className: "text-center",
+      headerClassName: "text-center",
+      // Only an invoice raised against a purchase order has one to preview —
+      // a manually-keyed invoice with no poRef has nothing behind the icon.
+      render: (inv) =>
+        inv.poRef ? (
+          <button
+            type="button"
+            onClick={() => void openPOPreview(inv)}
+            disabled={loadingPOFor === inv.id}
+            title="Preview purchase order"
+            className="p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-40"
+          >
+            {/* <StickyNote className="w-4 h-4" /> */}
+            <FileText className="w-3.5 h-3.5" />
+
+          </button>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        ),
+    },
+    {
       key: "lines",
       label: "Lines",
       sortable: false,
@@ -1618,6 +1678,77 @@ export function PurchaseInvoicePage() {
           onConfirm={(override) => void confirmPay(override)}
         />
       )}
+
+      {/* The Attachment note icon — a read-only view of the purchase order
+          this invoice was raised against, exactly as it was created. */}
+      {poPreview && (() => {
+        const snap = poPreview.paymentTermSnapshot;
+        const previewTerm: PaymentTermPreset = {
+          id: poPreview.paymentTermId || "snapshot",
+          name: snap?.name || "—",
+          description: snap?.description || "",
+          deliverySplit: snap?.deliverySplit || "post_delivery",
+          tranches: snap?.tranches || [],
+        };
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+                <h2 className="text-base font-semibold text-gray-900">{poPreview.poRef}</h2>
+                <button
+                  onClick={() => setPoPreview(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="px-6 py-6 bg-gray-50/50">
+                <PurchaseOrderPaper
+                  company={previewCompany}
+                  poRef={poPreview.poRef}
+                  createdDate={poPreview.createdDate}
+                  supplier={poPreview.supplier}
+                  supplierContact={poPreview.supplierContact || poPreview.supplier}
+                  expectedDate={poPreview.expectedDate}
+                  items={poPreview.items}
+                  totalValue={poPreview.totalValue}
+                  term={previewTerm}
+                  signatories={poPreview.signatories}
+                />
+              </div>
+              <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() =>
+                    printPurchaseOrder({
+                      company: previewCompany,
+                      poRef: poPreview.poRef,
+                      createdDate: poPreview.createdDate,
+                      supplier: poPreview.supplier,
+                      supplierContact: poPreview.supplierContact || poPreview.supplier,
+                      expectedDate: poPreview.expectedDate,
+                      items: poPreview.items,
+                      totalValue: poPreview.totalValue,
+                      term: previewTerm,
+                      signatories: poPreview.signatories,
+                    })
+                  }
+                  title="Download PDF"
+                  className="p-2.5 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors"
+                >
+                  <DownloadCloud className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setPoPreview(null)}
+                  className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <ConfirmationModal
         isOpen={!!cancelTarget}

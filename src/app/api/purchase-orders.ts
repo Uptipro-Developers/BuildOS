@@ -69,6 +69,11 @@ export async function fetchPurchaseOrders(params?: { status?: string; supplierId
     return data.map(mapPO);
 }
 
+/** Accepts either the PO's id or its human-readable poRef. */
+export async function getPurchaseOrder(idOrRef: string) {
+    return mapPO(await apiFetch<any>(`/purchase-orders/${idOrRef}`));
+}
+
 export function createPurchaseOrder(data: any) {
     return apiFetch(`/purchase-orders`, { method: 'POST', body: JSON.stringify(data) });
 }
