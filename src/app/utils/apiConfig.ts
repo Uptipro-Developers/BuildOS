@@ -18,12 +18,12 @@
  *      API. Set VITE_API_URL on the Preview environment in Vercel so this
  *      fallback is never actually reached there.
  */
-const EXPLICIT_API_URL = import.meta.env.VITE_API_URL;
+// const EXPLICIT_API_URL = import.meta.env.VITE_API_URL;
 const URL = window.location.href;
 const FALLBACK_API_URL = import.meta.env.DEV
   ? "http://localhost:3001/api"
-  : URL.includes('development') ? 'buildos-staging.up.railway.app' : "https://buildos-production-e328.up.railway.app/api";
+  : URL.includes('development') ? 'https://buildos-staging.up.railway.app/api' : "https://buildos-production-e328.up.railway.app/api";
 
-console.log(FALLBACK_API_URL, URL, EXPLICIT_API_URL)
-export const API_BASE_URL = (EXPLICIT_API_URL || FALLBACK_API_URL).replace(/\/$/, "");
-
+// console.log(FALLBACK_API_URL, URL, EXPLICIT_API_URL)
+// export const API_BASE_URL = (EXPLICIT_API_URL || FALLBACK_API_URL).replace(/\/$/, "");
+export const API_BASE_URL = (FALLBACK_API_URL).replace(/\/$/, "");
