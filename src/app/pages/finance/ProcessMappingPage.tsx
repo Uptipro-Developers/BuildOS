@@ -174,40 +174,52 @@ const APP_COLORS: Record<string, string> = {
   Finance: "bg-emerald-100 text-emerald-700",
 };
 
-/** Default source field auto-selected when a process is chosen */
-const FIELD_FOR_PROCESS: Record<string, string> = {
-  "Purchase Request": "Order Amount",
-  "Purchase Order": "Order Amount",
-  "Supplier Payment": "Payment Amount",
-  "Goods Receipt": "Goods Value",
-  "Invoice Processing": "Invoice Amount",
-  "Supplier Advance": "Advance Amount",
-  "Material Transfer": "Transfer Cost",
-  "Stock Adjustment": "Adjustment Value",
-  "Material Return": "Goods Value",
-  "Issue to Site": "Transfer Cost",
-  "Goods Received Note": "Goods Value",
-  Payroll: "Net Pay",
-  Allowances: "Allowance Total",
-  "Salary Advance": "Advance Amount",
-  Deductions: "WHT Deducted",
-  "Bonus Payment": "Payment Amount",
-  "Pension Remittance": "Payment Amount",
-  "Expense Claim": "Claim Amount",
-  Reimbursement: "Reimbursement",
-  "Travel Advance": "Travel Amount",
-  "Leave Encashment": "Gross Amount",
-  "Project Expense": "Expense Amount",
-  "Resource Allocation": "Labour Cost",
-  "Contract Revenue": "Contract Value",
-  Retention: "Retention Amount",
-  "Milestone Billing": "Milestone Value",
-  "Bank Reconciliation": "Amount",
-  "Journal Entry": "Amount",
-  "Asset Depreciation": "Adjustment Value",
-  "Tax Filing": "Tax",
-  "WHT Deduction": "WHT Deducted",
+/**
+ * The amount field options for each process — what the "Amount" select in
+ * the mapping modal actually offers, not just a single auto-picked default.
+ * Keyed with the exact strings from PROCESSES_BY_APP so the two stay in
+ * lockstep; the first entry in each list is the default a process falls
+ * back to.
+ */
+const AMOUNT_FIELDS_BY_PROCESS: Record<string, string[]> = {
+  "Purchase Request": ["purchaseValue", "unitPrice (per line item)", "negotiatedTotal (per item)"],
+  "Purchase Order": ["totalValue", "receivedValue", "unitCost (per item)", "qty", "tranchePercent (payment terms, must total 100%)"],
+  "Supplier Payment": ["paymentAmount", "netPayment", "whtDeducted"],
+  "Goods Receipt": ["orderedQty", "receivedQty", "acceptedQty", "rejectedQty"],
+  "Invoice Processing": ["invoiceTotal", "debitLine (DR Accounts Payable)", "creditLine (CR Cash & Bank)", "balanceCheck (debits = credits)"],
+  "Supplier Advance": ["advanceAmount"],
+  "Material Transfer": ["transferCost", "qty"],
+  "Stock Adjustment": ["adjustmentValue"],
+  "Material Return": ["qty"],
+  "Issue to Site": ["qty", "unitCost (for value)"],
+  "Goods Received Note": ["orderedQty", "receivedQty", "acceptedQty", "rejectedQty", "unitCost (from PO for value)"],
+  "Payroll Disbursement": ["paymentAmount", "netPayment"],
+  Payroll: ["grossSalary", "payeTax", "netPay"],
+  Allowances: ["allowanceTotal"],
+  "Salary Advance": ["advanceAmount"],
+  Deductions: ["deductionAmount"],
+  "Bonus Payment": ["bonusAmount"],
+  "Pension Remittance": ["pensionAmount", "employeePercent", "employerPercent"],
+  "Expense Claim": ["claimAmount"],
+  Reimbursement: ["reimbursementAmount"],
+  "Travel Advance": ["advanceAmount"],
+  "Leave Encashment": ["encashmentAmount"],
+  "Project Expense": ["expenseAmount"],
+  "Resource Allocation": ["labourCost", "plannedCost", "actualCost"],
+  "Contract Revenue": ["invoiceAmount"],
+  Retention: ["retentionAmount", "retentionPercent"],
+  "Milestone Billing": ["milestoneValue"],
+  "Bank Reconciliation": ["statementBalance", "ledgerBalance"],
+  "Journal Entry": ["debit (per line)", "credit (per line)", "balancedTotal (debits = credits)"],
+  "Asset Depreciation": ["depreciationAmount"],
+  "Tax Filing": ["taxAmount", "taxRate"],
+  "WHT Deduction": ["whtDeducted", "whtRate"],
 };
+
+/** Options for a process, falling back to the generic flat list for any process not yet in the map above. */
+function amountFieldsFor(process: string): string[] {
+  return AMOUNT_FIELDS_BY_PROCESS[process] ?? SOURCE_FIELDS;
+}
 
 // ── Account Mapping Modal ──────────────────────────────────────────────────────
 function MappingModal({
@@ -249,7 +261,7 @@ function MappingModal({
       }));
     }
     const defProc = PROCESSES_BY_APP[APPLICATIONS[0]]?.[0] ?? "";
-    const defField = FIELD_FOR_PROCESS[defProc] ?? "Amount";
+    const defField = amountFieldsFor(defProc)[0] ?? "Amount";
     return [
       {
         process: defProc,
@@ -286,28 +298,30 @@ function MappingModal({
     setApplication(app);
     const first = PROCESSES_BY_APP[app]?.[0] ?? "";
     setProcess(first);
-    const def = FIELD_FOR_PROCESS[first] ?? "Amount";
+    const opts = amountFieldsFor(first);
+    const def = opts[0] ?? "Amount";
     setLines((prev) =>
       prev.map((l) => ({
         ...l,
         process: first,
-        amountField: FIELD_FOR_PROCESS[l.process] === l.amountField
-          ? def
-          : l.amountField,
+        // Keep a manual choice only if it's still a valid option for the
+        // new process — the option list itself changes now, not just the
+        // recommended default, so a field from the old process may no
+        // longer exist to keep.
+        amountField: opts.includes(l.amountField) ? l.amountField : def,
       })),
     );
   };
 
   const handleProcessChange = (next: string) => {
     setProcess(next);
-    const def = FIELD_FOR_PROCESS[next] ?? "Amount";
+    const opts = amountFieldsFor(next);
+    const def = opts[0] ?? "Amount";
     setLines((prev) =>
       prev.map((l) => ({
         ...l,
         process: next,
-        amountField: FIELD_FOR_PROCESS[l.process] === l.amountField
-          ? def
-          : l.amountField,
+        amountField: opts.includes(l.amountField) ? l.amountField : def,
       })),
     );
   };
@@ -319,7 +333,7 @@ function MappingModal({
         process,
         account: "",
         action: "debit",
-        amountField: FIELD_FOR_PROCESS[process] ?? "Amount",
+        amountField: amountFieldsFor(process)[0] ?? "Amount",
       },
     ]);
 
@@ -512,7 +526,14 @@ function MappingModal({
                             }
                             className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500"
                           >
-                            {SOURCE_FIELDS.map((f) => (
+                            {/* A mapping saved before this process had its own field list may have a
+                                value that isn't one of the current options — keep it selectable rather
+                                than silently losing what was actually saved. */}
+                            {line.amountField &&
+                              !amountFieldsFor(process).includes(line.amountField) && (
+                                <option value={line.amountField}>{line.amountField}</option>
+                              )}
+                            {amountFieldsFor(process).map((f) => (
                               <option key={f}>{f}</option>
                             ))}
                           </select>
