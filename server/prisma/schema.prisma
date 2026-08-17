@@ -1005,8 +1005,12 @@ model PurchaseInvoice {
   subtotal     Float     @default(0)
   vatTotal     Float     @default(0)
   total        Float     @default(0)
-  /// "pending_review" | "accepted" | "declined" | "paid" | "cancelled".
+  /// "pending_review" | "pending_approval" | "approved" | "rejected" | "paid" | "cancelled".
   status       String    @default("pending_review")
+  /// The accounting treatment (payment date/method + GL posting lines) chosen
+  /// when sending for approval. Posting reads and locks to this rather than
+  /// letting it be re-decided after approval.
+  postingDraft Json?
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt

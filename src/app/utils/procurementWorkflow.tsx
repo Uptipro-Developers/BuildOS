@@ -305,13 +305,16 @@ export const PO_STAGE_ORDER: PurchaseOrderStatus[] = [
  * The finance side of the same order.
  *
  * `pending_review` is what a purchase order becomes the moment procurement
- * sends it to finance; the rest mirror the order's own states so the two
+ * sends it to finance. From there it goes through the Purchase Invoices
+ * approval workflow (`pending_approval` → `approved`/`rejected`) before it
+ * can be posted to the ledger, mirroring the order's own states so the two
  * modules never disagree about where the money is.
  */
 export type PurchaseInvoiceStatus =
   | "pending_review"
-  | "accepted"
-  | "declined"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
   | "paid"
   | "cancelled";
 
@@ -322,13 +325,18 @@ export const PURCHASE_INVOICE_STATUS: Record<PurchaseInvoiceStatus, StatusDef> =
     badge: "bg-amber-100 text-amber-700",
     icon: <Clock className={ICON} />,
   },
-  accepted: {
-    label: "Accepted",
-    badge: "bg-blue-100 text-blue-700",
-    icon: <CheckCircle2 className={ICON} />,
+  pending_approval: {
+    label: "Pending Approval",
+    badge: "bg-purple-100 text-purple-700",
+    icon: <Send className={ICON} />,
   },
-  declined: {
-    label: "Declined",
+  approved: {
+    label: "Approved",
+    badge: "bg-blue-100 text-blue-700",
+    icon: <ThumbsUp className={ICON} />,
+  },
+  rejected: {
+    label: "Rejected",
     badge: "bg-red-100 text-red-700",
     icon: <XCircle className={ICON} />,
   },

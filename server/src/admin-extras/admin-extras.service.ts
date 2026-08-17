@@ -1092,6 +1092,16 @@ export class AdminExtrasService {
         return 'pending';
     }
 
+    /**
+     * A purchase invoice's raw status, normalised for exact comparison.
+     * Mirrors normaliseStatus in ProcurementRequestsService and the frontend's
+     * procurementWorkflow.tsx, since the same column has been written in
+     * several shapes over time ("Pending Review", "pending-review").
+     */
+    private normaliseInvoiceStatus(status: unknown): string {
+        return String(status ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    }
+
     private normalizeAssignedApps(input: unknown, role?: string): string[] {
         const normalizedRole = String(role ?? '').trim().toLowerCase();
         const defaultApps = ['ess'];
@@ -1144,6 +1154,8 @@ export class AdminExtrasService {
                 return 'p_material_requests';
             case 'Purchase Order':
                 return 'p_purchase_orders';
+            case 'Purchase Invoice':
+                return 'p_purchase_invoices';
             default:
                 return null;
         }
@@ -1444,6 +1456,32 @@ export class AdminExtrasService {
                 description: e.description,
                 approvalFlow: flowForType('Expense Claim'),
             })));
+
+            // Pending Review invoices are deliberately excluded: they have not
+            // been sent for approval yet, so there is nothing here for an
+            // approver to decide. Without this filter every invoice ever raised
+            // showed up in the approvals queue as "pending" the moment it was
+            // created, before Finance ever sent it for approval.
+            const purchaseInvoices = (
+                await this.prisma.purchaseInvoice.findMany({ orderBy: { createdAt: 'desc' } })
+            ).filter((i) => this.normaliseInvoiceStatus(i.status) !== 'pending_review');
+            rows.push(...purchaseInvoices.map((i) => ({
+                id: i.id,
+                module: 'finance',
+                type: 'Purchase Invoice',
+                title: `${i.invoiceNo} — ${i.supplierName}`,
+                project: i.poRef ?? 'Finance',
+                // Invoices have no internal raiser — a supplier's name never
+                // matches a caller's identity, so the self-approval block never
+                // fires for this type, which is the correct outcome.
+                requestedBy: i.supplierName,
+                date: i.invoiceDate,
+                amount: i.total,
+                status: this.normalizeApprovalStatus(i.status),
+                urgency: 'normal',
+                description: i.poRef ? `PO ${i.poRef}` : '',
+                approvalFlow: flowForType('Purchase Invoice'),
+            })));
         }
 
         if (target === 'all' || target === 'procurement') {
@@ -1568,7 +1606,13 @@ export class AdminExtrasService {
             };
         });
 
-        return options?.onlyMine ? stamped.filter((row: any) => mayApprove(row)) : stamped;
+        // A non-admin sees only the approvals actually assigned to them — always,
+        // regardless of what `onlyMine` says, so this cannot be widened by a
+        // client-passed flag. Admins are never blocked by this: their "see all" is
+        // a visibility feature (Admin ▸ Approvals, `scope: "all"`), not an
+        // authority override, so their own `onlyMine` toggle is respected as-is.
+        const restrictToMine = isSuperUser ? Boolean(options?.onlyMine) : true;
+        return restrictToMine ? stamped.filter((row: any) => mayApprove(row)) : stamped;
     }
 
     async referenceData() {
@@ -1802,6 +1846,49 @@ export class AdminExtrasService {
                     status: status === 'approved' ? 'confirmed' : status === 'rejected' ? 'cancelled' : undefined,
                 },
             });
+        }
+
+        // Try to find and update in purchase invoices. Mirrors the decision onto
+        // the linked purchase order (see ProcurementRequestsService.updateInvoice)
+        // so Procurement and Finance cannot disagree about where the money is.
+        // Posting to the ledger only unlocks once this lands on "approved".
+        const purchaseInvoice = await this.prisma.purchaseInvoice.findUnique({ where: { id } }).catch(() => null);
+        if (purchaseInvoice) {
+            await guard('p_purchase_invoices');
+            const invoiceStatus =
+                status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'pending_approval';
+            const updated = await this.prisma.purchaseInvoice.update({
+                where: { id },
+                data: {
+                    status: invoiceStatus,
+                    notes: data?.reason
+                        ? `${purchaseInvoice.notes ?? ''}\n${data.reason}`.trim()
+                        : purchaseInvoice.notes,
+                },
+            });
+            if (purchaseInvoice.poRef) {
+                const poStatus =
+                    invoiceStatus === 'approved'
+                        ? 'finance_accepted'
+                        : invoiceStatus === 'rejected'
+                            ? 'finance_declined'
+                            : null;
+                if (poStatus) {
+                    await this.prisma.purchaseOrder
+                        .updateMany({
+                            where: { OR: [{ poRef: purchaseInvoice.poRef }, { id: purchaseInvoice.poRef }] },
+                            data: {
+                                status: poStatus as any,
+                                financeDecidedAt: new Date(),
+                                ...(invoiceStatus === 'rejected'
+                                    ? { declineReason: data?.reason ?? 'Declined by Finance.' }
+                                    : {}),
+                            },
+                        })
+                        .catch(() => undefined);
+                }
+            }
+            return updated;
         }
 
         throw new BadRequestException(`Approval with ID ${id} not found`);

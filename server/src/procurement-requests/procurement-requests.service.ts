@@ -46,7 +46,7 @@ export class ProcurementRequestsService {
         private mailQueue: MailQueueService,
         private numbering: NumberingService,
         private notifications: NotificationDispatchService,
-    ) {}
+    ) { }
 
     // ── Purchase Requests ──
     findAllPRs(status?: string) {
@@ -81,7 +81,7 @@ export class ProcurementRequestsService {
             suppliers: Array.isArray(data.suppliers) ? data.suppliers : [],
         };
         return this.prisma.purchaseRequest.create({ data: prData }).then(async (pr) => {
-            this.webhookService.triggerWebhook('purchase-request.created', pr).catch(() => {});
+            this.webhookService.triggerWebhook('purchase-request.created', pr).catch(() => { });
             // Whoever the Admin › Notifications rules name for this event.
             void this.notifications.dispatch('purchase-request.created', {
                 title: 'Purchase request raised',
@@ -130,6 +130,42 @@ export class ProcurementRequestsService {
     }
 
     /**
+     * Moves the invoice into the Purchase Invoices approval workflow, with the
+     * accounting treatment already decided.
+     *
+     * The posting date/method/GL lines are chosen here, not when the invoice is
+     * later posted — the approver is approving the actual journal entry this
+     * will become, not just the invoice. `updateInvoice` (which moves it to
+     * `approved`) does not touch this; posting reads it back unchanged.
+     */
+    async sendInvoiceForApproval(id: string, postingDraft: any) {
+        const invoice = await this.prisma.purchaseInvoice.findUnique({ where: { id } });
+        if (!invoice) throw new NotFoundException('Purchase invoice not found');
+        if (normaliseStatus(invoice.status) !== 'pending_review') {
+            throw new BadRequestException(
+                'Only an invoice pending review can be sent for approval.',
+            );
+        }
+        const lines = Array.isArray(postingDraft?.lines) ? postingDraft.lines : [];
+        if (lines.length === 0) {
+            throw new BadRequestException(
+                'Posting lines are required before sending for approval.',
+            );
+        }
+        const debit = lines.reduce((s: number, l: any) => s + Number(l?.debit || 0), 0);
+        const credit = lines.reduce((s: number, l: any) => s + Number(l?.credit || 0), 0);
+        if (Math.abs(debit - credit) > 0.01) {
+            throw new BadRequestException(
+                'Posting lines must balance (debits must equal credits) before sending for approval.',
+            );
+        }
+        return this.prisma.purchaseInvoice.update({
+            where: { id },
+            data: { status: 'pending_approval', postingDraft },
+        });
+    }
+
+    /**
      * Records Finance's decision, and mirrors it onto the purchase order.
      *
      * Procurement and Finance were two lists that happened to mention the same
@@ -144,13 +180,13 @@ export class ProcurementRequestsService {
         const status = normaliseStatus(data?.status);
 
         const poStatus =
-            status === 'accepted'
+            status === 'approved'
                 ? 'finance_accepted'
-                : status === 'declined'
-                  ? 'finance_declined'
-                  : status === 'paid'
-                    ? 'paid'
-                    : null;
+                : status === 'rejected'
+                    ? 'finance_declined'
+                    : status === 'paid'
+                        ? 'paid'
+                        : null;
 
         if (poStatus && invoice.poRef) {
             const now = new Date();
@@ -162,7 +198,7 @@ export class ProcurementRequestsService {
                         ...(status === 'paid'
                             ? { paidAt: now }
                             : { financeDecidedAt: now }),
-                        ...(status === 'declined'
+                        ...(status === 'rejected'
                             ? { declineReason: data?.notes ?? 'Declined by Finance.' }
                             : {}),
                     },
@@ -262,7 +298,7 @@ export class ProcurementRequestsService {
             expiryDate: parseFlexDate(data.expiryDate) ?? null,
         };
         return this.prisma.sentRFQ.create({ data: rfqData }).then(async (rfq) => {
-            this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => {});
+            this.webhookService.triggerWebhook('rfq.sent', rfq).catch(() => { });
             void this.notifications.dispatch('rfq.sent', {
                 title: 'RFQ sent',
                 message: `${rfq.rfqRef} sent to ${rfq.supplierName}`,
@@ -289,7 +325,7 @@ export class ProcurementRequestsService {
                     subject: `New RFQ from BuildOS — ${rfqRef}`,
                     text: `Dear ${greetingName},\n\nYou have received a new Request for Quotation (${rfqRef}) from BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${rfqRef}`,
                     html: `<p>Dear ${greetingName},</p><p>You have received a new <strong>Request for Quotation</strong> (<code>${rfqRef}</code>) from BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${rfqRef}</p>`,
-                }).catch(() => {});
+                }).catch(() => { });
             }
             return rfq;
         });
@@ -352,8 +388,8 @@ export class ProcurementRequestsService {
         // action sends items carrying negotiation rounds; status-only updates don't.
         const rounds = Array.isArray(data.items)
             ? data.items.flatMap((it: any) =>
-                  Array.isArray(it?.negotiations) ? it.negotiations : [],
-              )
+                Array.isArray(it?.negotiations) ? it.negotiations : [],
+            )
             : [];
         if (rounds.length) {
             const latest = rounds[rounds.length - 1];
@@ -366,7 +402,7 @@ export class ProcurementRequestsService {
                     comment: latest?.comment ?? null,
                     round: latest?.round ?? rounds.length,
                 })
-                .catch(() => {});
+                .catch(() => { });
         }
         return quote;
     }
@@ -475,7 +511,7 @@ export class ProcurementRequestsService {
                 .catch(() => undefined);
         }
 
-        this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => {});
+        this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => { });
         void this.notifications.dispatch('purchase-order.created', {
             title: 'Purchase order raised from approved quote',
             message: `${poRef} — ${po.supplier?.name ?? quote.supplierName}`,
