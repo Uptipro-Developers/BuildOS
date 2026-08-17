@@ -25,6 +25,7 @@ import {
   type UserRequestEntry,
 } from "../../api/admin-extras";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
+import { API_BASE_URL } from "../../utils/apiConfig";
 import {
   Search,
   Plus,
@@ -2062,10 +2063,7 @@ export function UsersPage() {
   };
 
   const requestPasswordReset = async (email: string) => {
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || "http://localhost:3001/api"
-    ).replace(/\/$/, "");
-    const response = await fetch(`${baseUrl}/auth/forgot-password`, {
+    const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),

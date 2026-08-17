@@ -1,6 +1,5 @@
 import { clearAuthSession, ensureValidAccessToken } from '../utils/authSession';
-
-const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001/api').replace(/\/$/, '');
+import { API_BASE_URL as BASE_URL } from '../utils/apiConfig';
 
 export async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
     const token = await ensureValidAccessToken();
