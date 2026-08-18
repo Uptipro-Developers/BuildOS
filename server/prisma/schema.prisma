@@ -102,6 +102,11 @@ enum NotificationStatus {
 /// turn it was; it is one chain now.
 enum POStatus {
   draft
+  /// The wizard has been completed — term, signatories and delivery timing
+  /// are saved, and the goods receipt is already open. Distinct from `draft`
+  /// (a quote-accepted order the wizard hasn't touched yet) and reachable
+  /// regardless of payment timing, unlike the old finance-only chain.
+  po_created
   sent_to_finance
   finance_accepted
   finance_declined
@@ -453,6 +458,27 @@ model PurchaseOrder {
   status        POStatus @default(draft)
   sentToFinance Boolean  @default(false)
 
+  /// Snapshot of the payment term picked in the wizard — not a live FK, since
+  /// Settings can edit or delete a term later and this order should keep what
+  /// was true when it was raised. `deliverySplit` is what a post-delivery
+  /// order's goods receipt checks to decide whether it should raise Finance's
+  /// invoice itself once fully received (see GoodsReceiptsService.receive).
+  paymentTermId String?
+  deliverySplit String?
+
+  /// Snapshot of the signatories picked in the wizard — `[{id, name, role}]`.
+  /// A Signatory record can be edited or removed later; the PO's own printed
+  /// document (and the file-icon re-preview) should keep showing who actually
+  /// signed it at creation time, not whoever is on file now.
+  signatories Json @default("[]")
+
+  /// Full snapshot of the term picked in the wizard — `{name, description,
+  /// deliverySplit, tranches}`. `paymentTermId`/`deliverySplit` above cover
+  /// workflow gating; this is what the file-icon re-preview renders, since a
+  /// custom term (built ad hoc in the wizard) has no real row to look back
+  /// up, and a saved one could be edited or deleted after the fact.
+  paymentTermSnapshot Json @default("{}")
+
   /// Invoice number of the PurchaseInvoice raised in Finance when this order was
   /// sent there. The link is what lets a payment recorded in Finance show up on
   /// the order in Procurement.
@@ -675,6 +701,7 @@ model User {
   auditLogs       AuditLog[]
   passwordHistory UserPasswordHistory[]
   employee        Employee?
+  signatories     Signatory[]
 
   /// The Active Sessions metric counts by this on every dashboard load.
   @@index([lastSeenAt])
@@ -720,6 +747,47 @@ model AppRole {
 
   permissions Permission[]
   users       UserRole[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A person authorised to sign a Purchase Order, configured in Procurement
+/// Settings › Signatories. Department and role are captured at the time they
+/// are added rather than read live off the User record, so a later change to
+/// someone's own department or role doesn't silently rewrite a signatory list
+/// that was deliberately set up a certain way.
+model Signatory {
+  id         String @id @default(cuid())
+  department String
+  role       String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// One record per person: re-adding an existing signatory is an edit (their
+  /// department/role snapshot changes), not a second row that makes the same
+  /// person appear twice in a PO's signature block.
+  userId     String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A payment term a Purchase Order's Create-PO wizard can pick from,
+/// configured in Procurement Settings › Payment Terms. `tranches` is a JSON
+/// array (`{ title, percent, timing }[]`) rather than a child table — like
+/// PurchaseRequest.items and SentRFQ.items elsewhere in this schema, it is
+/// only ever read back together with the row it belongs to. `deliverySplit`
+/// is chosen independently in the modal, not derived from the tranches.
+model PaymentTerm {
+  id            String  @id @default(cuid())
+  name          String
+  description   String  @default("")
+  /// "pre_delivery" | "post_delivery"
+  deliverySplit String
+  tranches      Json    @default("[]")
+  /// Exactly one row may carry this at a time — enforced in the service, not
+  /// the schema, the same way it isn't a DB constraint anywhere else in this
+  /// codebase either.
+  isDefault     Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -937,8 +1005,12 @@ model PurchaseInvoice {
   subtotal     Float     @default(0)
   vatTotal     Float     @default(0)
   total        Float     @default(0)
-  /// "pending_review" | "accepted" | "declined" | "paid" | "cancelled".
+  /// "pending_review" | "pending_approval" | "approved" | "rejected" | "paid" | "cancelled".
   status       String    @default("pending_review")
+  /// The accounting treatment (payment date/method + GL posting lines) chosen
+  /// when sending for approval. Posting reads and locks to this rather than
+  /// letting it be re-decided after approval.
+  postingDraft Json?
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -2342,7 +2414,7 @@ model NumberingConfig {
   /// Step between successive numbers.
   incrementBy    Int @default(1)
 
-  /// The last number actually issued, and when — shown in Settings so an admin
+  /// The last number actually issued, and when — shown ixn Settings so an admin
   /// can see where a sequence has reached without inferring it from `nextNumber`.
   lastUsedNumber Int       @default(0)
   lastUsedDate   DateTime?

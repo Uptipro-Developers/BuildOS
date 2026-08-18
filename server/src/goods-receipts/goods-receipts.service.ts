@@ -118,7 +118,7 @@ export class GoodsReceiptsService {
     ) {
         const grn = await this.prisma.goodsReceipt.findUnique({
             where: { id },
-            include: { items: true, purchaseOrder: true },
+            include: { items: true, purchaseOrder: { include: { supplier: true } } },
         });
         if (!grn) throw new NotFoundException('Goods receipt not found');
         if (grn.stockPostedAt) {
@@ -178,7 +178,21 @@ export class GoodsReceiptsService {
         const projectName = store?.projectName ?? null;
         const projectId = store?.projectId ?? null;
 
-        return this.prisma.$transaction(async (tx) => {
+        /**
+         * Post-delivery terms send nothing to Finance at PO approval — there's
+         * nothing to invoice until the goods actually arrive. A pre-delivery
+         * order already raised its invoice back in the wizard (`sendToFinance`),
+         * so this only fires once, on the receipt that completes the order.
+         */
+        const fullyReceived = lines.every((l) => l.received >= l.ordered);
+        const po = grn.purchaseOrder;
+        const shouldRaiseInvoice =
+            fullyReceived && po?.deliverySplit === 'post_delivery' && !po?.sentToFinance;
+        const invoiceNo = shouldRaiseInvoice
+            ? (await this.numbering.allocate('PurchaseInvoice')).reference
+            : null;
+
+        const result = await this.prisma.$transaction(async (tx) => {
             for (const line of lines) {
                 await tx.goodsReceiptItem.update({
                     where: { id: line.id },
@@ -245,14 +259,47 @@ export class GoodsReceiptsService {
                 });
             }
 
-            const fullyReceived = lines.every((l) => l.received >= l.ordered);
             const receivedValue = await this.receivedValue(tx, grn.purchaseOrderId);
+
+            if (shouldRaiseInvoice && invoiceNo) {
+                const invoiceLines = await tx.pOItem.findMany({ where: { purchaseOrderId: grn.purchaseOrderId } });
+                await tx.purchaseInvoice.create({
+                    data: {
+                        invoiceNo,
+                        poRef: po!.poRef ?? po!.id,
+                        supplierName: po!.supplier?.name ?? 'Unknown supplier',
+                        supplierId: po!.supplierId,
+                        invoiceDate: now,
+                        dueDate: po!.expectedDate,
+                        lines: invoiceLines.map((it) => ({
+                            description: it.material,
+                            qty: it.qty,
+                            unit: it.unit,
+                            unitPrice: it.unitCost,
+                        })),
+                        subtotal: po!.totalValue,
+                        vatTotal: 0,
+                        total: po!.totalValue,
+                        status: 'pending_review',
+                        notes: `Raised from purchase order ${po!.poRef ?? po!.id} on full goods receipt (${grn.reference}).`,
+                    },
+                });
+            }
 
             await tx.purchaseOrder.update({
                 where: { id: grn.purchaseOrderId },
                 data: {
                     receivedValue,
-                    ...(fullyReceived ? { status: 'goods_received' as const } : {}),
+                    ...(shouldRaiseInvoice
+                        ? {
+                            status: 'sent_to_finance' as const,
+                            sentToFinance: true,
+                            sentToFinanceAt: now,
+                            financeRef: invoiceNo,
+                        }
+                        : fullyReceived
+                            ? { status: 'goods_received' as const }
+                            : {}),
                 },
             });
             // Line-level receipts on the order, so a second delivery knows what
@@ -265,7 +312,6 @@ export class GoodsReceiptsService {
             }
 
             // The material request that started all this is now satisfied.
-            const po = grn.purchaseOrder;
             if (fullyReceived && po?.mrRef) {
                 await tx.materialRequest
                     .updateMany({
@@ -295,6 +341,18 @@ export class GoodsReceiptsService {
                 include: { items: true },
             });
         });
+
+        if (shouldRaiseInvoice && invoiceNo) {
+            void this.notifications.dispatch('purchase-order.sent-to-finance', {
+                title: 'Purchase order sent to Finance',
+                message: `${po!.poRef ?? po!.id} — ${po!.supplier?.name ?? ''} (${invoiceNo})`,
+                actionUrl: '/apps/finance/purchase-invoice',
+                relatedId: po!.id,
+                relatedType: 'PurchaseOrder',
+                vars: { reference: po!.poRef ?? po!.id, invoiceNo },
+            });
+        }
+        return result;
     }
 
     /** The price the order agreed for this material, so stock is valued at cost. */

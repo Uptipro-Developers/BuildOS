@@ -16,10 +16,16 @@ import { GoodsReceiptsService } from '../goods-receipts/goods-receipts.service';
  * makes the status meaningful rather than decorative.
  */
 const PO_TRANSITIONS: Record<string, string[]> = {
-    draft: ['sent_to_finance', 'cancelled'],
+    // `draft` is a quote-accepted order the wizard hasn't touched yet.
+    // `po_created` is what "Save and Preview PO" produces — term,
+    // signatories and delivery timing saved, goods receipt already open,
+    // regardless of payment timing. See `createPO`.
+    draft: ['po_created', 'cancelled'],
+    po_created: ['sent_to_finance', 'cancelled'],
     sent_to_finance: ['finance_accepted', 'finance_declined', 'cancelled'],
-    // A declined order goes back to the buyer, who fixes it and resubmits.
-    finance_declined: ['sent_to_finance', 'draft', 'cancelled'],
+    // A declined order goes back to the buyer, who fixes it and resubmits —
+    // back to po_created, not draft: the wizard has already run once.
+    finance_declined: ['sent_to_finance', 'po_created', 'cancelled'],
     finance_accepted: ['paid', 'cancelled'],
     paid: ['confirmation_requested', 'cancelled'],
     confirmation_requested: ['confirmed', 'cancelled'],
@@ -50,9 +56,12 @@ export class PurchaseOrdersService {
         });
     }
 
+    // Callers may pass either the cuid id or the human-readable poRef — a
+    // Purchase Invoice only ever carries the latter, so a plain id lookup
+    // left every invoice-side "preview the PO" request 404ing.
     findOne(id: string) {
-        return this.prisma.purchaseOrder.findUniqueOrThrow({
-            where: { id },
+        return this.prisma.purchaseOrder.findFirstOrThrow({
+            where: { OR: [{ id }, { poRef: id }] },
             include: { supplier: true, items: true },
         });
     }
@@ -85,17 +94,10 @@ export class PurchaseOrdersService {
                     supplier: po.supplier?.name ?? '',
                 },
             });
-            const supplier = po.supplier;
-            if (supplier?.email) {
-                const poRefOut = po.poRef ?? po.id;
-                const portalUrl = supplierPortalLink('purchase-order', po.id, String(poRefOut));
-                this.mailQueue.enqueueEmail({
-                    to: supplier.email,
-                    subject: `New Purchase Order from BuildOS — ${poRefOut}`,
-                    text: `Dear ${supplier.contactPerson || supplier.name},\n\nA new Purchase Order (${poRefOut}) has been raised for your company on BuildOS.\n\nReview it here: ${portalUrl}\n\nRef: ${poRefOut}`,
-                    html: `<p>Dear ${supplier.contactPerson || supplier.name},</p><p>A new <strong>Purchase Order</strong> (<code>${poRefOut}</code>) has been raised for your company on BuildOS.</p><p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p><p style="color:#6b7280;font-size:12px;">Ref: ${poRefOut}</p>`,
-                }).catch(() => { });
-            }
+            // No supplier email at draft stage: the order has no payment term
+            // or signatories yet — that email now goes out from `createPO`,
+            // once the wizard has actually finished and there's a real
+            // document to send instead of a bare notice.
             return po;
         });
     }
@@ -155,7 +157,7 @@ export class PurchaseOrdersService {
      * order, `poRef` on the invoice) so a payment recorded in Finance can show up
      * back in Procurement.
      */
-    async sendToFinance(id: string, actor?: string) {
+    async sendToFinance(id: string, actor?: string, paymentTermId?: string, deliverySplit?: string) {
         const po = await this.prisma.purchaseOrder.findUnique({
             where: { id },
             include: { supplier: true, items: true },
@@ -199,6 +201,8 @@ export class PurchaseOrdersService {
                 sentToFinanceAt: new Date(),
                 financeRef: invoiceNo,
                 declineReason: null,
+                ...(paymentTermId ? { paymentTermId } : {}),
+                ...(deliverySplit ? { deliverySplit } : {}),
             },
             include: { supplier: true, items: true },
         });
@@ -213,6 +217,116 @@ export class PurchaseOrdersService {
         });
 
         return updated;
+    }
+
+    /**
+     * "Save and Preview PO" in the wizard — what actually makes a draft into
+     * a real purchase order, regardless of payment timing.
+     *
+     * The goods receipt used to only open once a pre-delivery order reached
+     * `confirmed` (Finance approved, supplier confirmed the payment landed),
+     * which meant a post-delivery order needed its own separate skip-finance
+     * path just to become receivable. Opening the receipt here instead, the
+     * moment the order is created, means receiving staff can see what's
+     * expected regardless of where the order sits in the finance chain —
+     * and both payment-timing paths go through exactly one action to get here.
+     */
+    async createPO(
+        id: string,
+        data: {
+            paymentTermId?: string;
+            deliverySplit?: string;
+            signatories?: unknown;
+            paymentTermSnapshot?: unknown;
+        },
+    ) {
+        const po = await this.prisma.purchaseOrder.findUnique({ where: { id } });
+        if (!po) throw new NotFoundException('Purchase order not found');
+        this.assertTransition(po.status, 'po_created');
+        const updated = await this.prisma.purchaseOrder.update({
+            where: { id },
+            data: {
+                status: 'po_created',
+                ...(data.paymentTermId ? { paymentTermId: data.paymentTermId } : {}),
+                ...(data.deliverySplit ? { deliverySplit: data.deliverySplit } : {}),
+                ...(data.signatories !== undefined ? { signatories: data.signatories as any } : {}),
+                ...(data.paymentTermSnapshot !== undefined
+                    ? { paymentTermSnapshot: data.paymentTermSnapshot as any }
+                    : {}),
+            },
+            include: { supplier: true, items: true },
+        });
+        await this.goodsReceipts.openForOrder(id).catch(() => undefined);
+        this.emailPurchaseOrderToSupplier(updated).catch(() => undefined);
+        return updated;
+    }
+
+    /**
+     * Sends the finished PO to the supplier — the moment `createPO` calls
+     * this, the order has a real payment term and signatories on it, unlike
+     * the bare "a PO was raised" notice this replaced (which fired at draft
+     * stage, before the wizard had touched the order at all).
+     */
+    private async emailPurchaseOrderToSupplier(po: {
+        id: string;
+        poRef: string | null;
+        expectedDate: Date;
+        totalValue: number;
+        paymentTermSnapshot: unknown;
+        signatories: unknown;
+        supplier: { email: string | null; contactPerson: string | null; name: string } | null;
+        items: { material: string; qty: number; unit: string; unitCost: number }[];
+    }) {
+        const supplier = po.supplier;
+        if (!supplier?.email) return;
+        const poRefOut = po.poRef ?? po.id;
+        const company = await this.prisma.companyProfile.findUnique({ where: { id: 'singleton' } });
+        const companyName = company?.name || 'BuildOS';
+
+        const rows = po.items
+            .map(
+                (it) =>
+                    `<tr><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:left">${it.material}</td>` +
+                    `<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${it.qty.toLocaleString()} ${it.unit}</td>` +
+                    `<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${it.unitCost.toLocaleString()}</td>` +
+                    `<td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${(it.qty * it.unitCost).toLocaleString()}</td></tr>`,
+            )
+            .join('');
+
+        const snap = (po.paymentTermSnapshot ?? {}) as {
+            name?: string;
+            tranches?: { title: string; percent: number }[];
+        };
+        const termLine = snap.name
+            ? `${snap.name}${snap.tranches?.length ? ' — ' + snap.tranches.map((t) => `${t.percent}% ${t.title}`).join(' + ') : ''}`
+            : 'As agreed';
+
+        const signatories = (po.signatories ?? []) as { name: string; role: string }[];
+        const sigLine = signatories.length
+            ? signatories.map((s) => `${s.name}${s.role ? ` (${s.role})` : ''}`).join(', ')
+            : '';
+
+        const portalUrl = supplierPortalLink('purchase-order', po.id, String(poRefOut));
+
+        await this.mailQueue.enqueueEmail({
+            to: supplier.email,
+            subject: `Purchase Order ${poRefOut} from ${companyName}`,
+            text: `Dear ${supplier.contactPerson || supplier.name},\n\nPlease find your Purchase Order ${poRefOut} from ${companyName} below.\n\nItems:\n${po.items.map((it) => `- ${it.material}: ${it.qty} ${it.unit} @ ${it.unitCost}`).join('\n')}\n\nTotal: ${po.totalValue.toLocaleString()}\nPayment terms: ${termLine}\nExpected delivery: ${po.expectedDate.toDateString()}\n${sigLine ? `Authorised by: ${sigLine}\n` : ''}\nView on the Supplier Portal: ${portalUrl}\n\nRef: ${poRefOut}`,
+            html: `<div style="font-family:Georgia,serif;color:#111;max-width:640px">
+                <p>Dear ${supplier.contactPerson || supplier.name},</p>
+                <p>Please find your Purchase Order <strong>${poRefOut}</strong> from <strong>${companyName}</strong> below.</p>
+                <table style="width:100%;font-size:13px;border-collapse:collapse;border:1px solid #ddd;margin:12px 0">
+                    <thead><tr style="background:#f5f5f5"><th style="padding:6px 8px;text-align:left">Item</th><th style="padding:6px 8px;text-align:right">Qty</th><th style="padding:6px 8px;text-align:right">Unit Price</th><th style="padding:6px 8px;text-align:right">Amount</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                    <tfoot><tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold">TOTAL</td><td style="padding:8px;text-align:right;font-weight:bold">${po.totalValue.toLocaleString()}</td></tr></tfoot>
+                </table>
+                <p style="font-size:13px"><strong>Payment terms:</strong> ${termLine}</p>
+                <p style="font-size:13px"><strong>Expected delivery:</strong> ${po.expectedDate.toDateString()}</p>
+                ${sigLine ? `<p style="font-size:13px"><strong>Authorised by:</strong> ${sigLine}</p>` : ''}
+                <p><a href="${portalUrl}" style="display:inline-block;background:#10b981;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">View on Supplier Portal</a></p>
+                <p style="color:#6b7280;font-size:12px;">Ref: ${poRefOut}</p>
+            </div>`,
+        });
     }
 
     /** Procurement asks the supplier to confirm the payment landed. */
