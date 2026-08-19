@@ -9,10 +9,13 @@ import {
   FileText,
   Landmark,
   MailOpen,
+  Package,
   PackageCheck,
   Send,
   ShoppingCart,
   ThumbsUp,
+  TrendingDown,
+  TrendingUp,
   XCircle,
 } from "lucide-react";
 
@@ -354,16 +357,50 @@ export const PURCHASE_INVOICE_STATUS: Record<PurchaseInvoiceStatus, StatusDef> =
 
 // ── Goods Receipts ───────────────────────────────────────────────────────────
 
-export type GoodsReceiptStatus = "pending" | "received" | "rejected";
+/**
+ * `pending` — nothing recorded yet. `pending_approval` ("Pending Inspection")
+ * — a delivery has been keyed in and is awaiting the configured approver's
+ * decision; nothing has touched stock. The rest are what accepting one
+ * settles into: rejection outranks quantity (`partial_delivery`), then it's a
+ * straight comparison of received to ordered.
+ */
+export type GoodsReceiptStatus =
+  | "pending"
+  | "pending_approval"
+  | "partial_delivery"
+  | "over_supply"
+  | "under_supply"
+  | "fully_received"
+  | "rejected";
 
 export const GOODS_RECEIPT_STATUS: Record<GoodsReceiptStatus, StatusDef> = {
   pending: {
-    label: "Awaiting Receipt",
-    badge: "bg-amber-100 text-amber-700",
+    label: "Awaiting Delivery",
+    badge: "bg-gray-100 text-gray-600",
     icon: <Clock className={ICON} />,
   },
-  received: {
-    label: "Received",
+  pending_approval: {
+    label: "Pending Inspection",
+    badge: "bg-amber-100 text-amber-700",
+    icon: <MailOpen className={ICON} />,
+  },
+  partial_delivery: {
+    label: "Partial Delivery",
+    badge: "bg-blue-100 text-blue-700",
+    icon: <Package className={ICON} />,
+  },
+  over_supply: {
+    label: "Over Supply",
+    badge: "bg-purple-100 text-purple-700",
+    icon: <TrendingUp className={ICON} />,
+  },
+  under_supply: {
+    label: "Under Supply",
+    badge: "bg-orange-100 text-orange-700",
+    icon: <TrendingDown className={ICON} />,
+  },
+  fully_received: {
+    label: "Fully Received",
     badge: "bg-emerald-100 text-emerald-700",
     icon: <PackageCheck className={ICON} />,
   },
