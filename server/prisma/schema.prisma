@@ -839,16 +839,29 @@ model Director {
 
 // ─────────────── MATERIALS / INVENTORY ───────────────
 
+/// Category → Material → Type. A Material (e.g. "Cement (50kg bag)") is the
+/// catalog-facing row and also where actual stock has always lived.
+/// Material's totalQty/availableQty/reservedQty/unitCost are a rollup summed
+/// (unitCost: quantity-weighted average) across its Types whenever a Type
+/// is added/edited from the catalog.
 model Material {
   id               String   @id @default(cuid())
   name             String
   category         String
-  unit             String
+  /// Denormalised from MaterialCategory.name when created via the catalog —
+  /// legacy rows created directly by Goods Receipt predate categoryId and
+  /// have none.
+  categoryId       String?
+  materialCategory MaterialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  /// Optional — legacy Goods-Receipt-created rows always set this; catalog-
+  /// created rows don't collect a unit.
+  unit             String?
   totalQty         Float    @default(0)
   availableQty     Float    @default(0)
   reservedQty      Float    @default(0)
   unitCost         Float    @default(0)
   reorderLevel     Float    @default(0)
+  /// "Consumable" | "Reusable"
   materialType     String   @default("Consumable")
   allocationStatus String   @default("Available")
   allocatedTo      String?
@@ -856,6 +869,40 @@ model Material {
   condition        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  types MaterialType[]
+
+  @@index([categoryId])
+}
+
+model MaterialCategory {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  color       String   @default("teal")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  materials Material[]
+}
+
+model MaterialType {
+  id           String   @id @default(cuid())
+  materialId   String
+  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  name         String
+  sku          String?
+  totalQty     Float    @default(0)
+  availableQty Float    @default(0)
+  reservedQty  Float    @default(0)
+  unitCost     Float    @default(0)
+  /// Array of { kind, value, unit } — kind is one of Weight | Length | Width |
+  /// Breadth | Thickness | Area | Volume | Custom.
+  dimensions   Json     @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([materialId])
 }
 
 model Store {
