@@ -87,6 +87,7 @@ const typeColors: Record<string, string> = {
   "Material Request": "bg-blue-50 text-blue-700",
   "Purchase Request": "bg-purple-50 text-purple-700",
   "Purchase Order": "bg-orange-50 text-orange-700",
+  "Goods Receipt": "bg-emerald-50 text-emerald-700",
   "Supplier Onboarding": "bg-teal-50 text-teal-700",
 };
 

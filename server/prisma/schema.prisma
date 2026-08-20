@@ -1,3 +1,4 @@
+
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -547,11 +548,14 @@ model GoodsReceipt {
   deliveryNote String?
   receivedBy   String
   receivedDate DateTime @default(now())
+  /// "pending" | "pending_approval" | "partial_delivery" | "over_supply" |
+  /// "under_supply" | "fully_received" | "rejected".
   status       String   @default("pending")
   notes        String?
 
-  /// Set when the receipt is accepted and stock has been posted. Guards the
-  /// posting so a double-click cannot add the same delivery to stock twice.
+  /// Set the first time the receipt is accepted and stock has been posted —
+  /// and updated again on each further accepted pass ("Record Remaining
+  /// Delivery"). Guards each pass so a double-click cannot post it twice.
   stockPostedAt DateTime?
 
   items GoodsReceiptItem[]
@@ -567,10 +571,23 @@ model GoodsReceiptItem {
   material String
   unit     String
   ordered  Float  @default(0)
+  /// Cumulative totals across every *accepted* pass — only "Accept & Update
+  /// Stock" moves these. A delivery still awaiting a decision lives in the
+  /// pending* fields below instead, so editing or rejecting it cannot corrupt
+  /// figures already posted to stock.
   received Float  @default(0)
   accepted Float  @default(0)
   rejected Float  @default(0)
   reason   String?
+
+  /// This pass's not-yet-decided quantities, keyed in by Update Record /
+  /// Record Remaining Delivery and overwritten by Edit Record. Folded into
+  /// the cumulative totals above (and cleared) the moment the record is
+  /// accepted.
+  pendingReceived Float?
+  pendingAccepted Float?
+  pendingRejected Float?
+  pendingReason   String?
 
   goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
   goodsReceiptId String

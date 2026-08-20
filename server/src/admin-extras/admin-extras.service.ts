@@ -17,6 +17,7 @@ import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 import { PermissionsService } from '../permissions/permissions.service';
 import { EmailTemplateService, type ComposedEmail } from '../email/email-template.service';
 import { WebhookService } from '../integrations/webhook.service';
+import { GoodsReceiptsService } from '../goods-receipts/goods-receipts.service';
 import {
     NOTIFICATION_EVENTS,
     NOTIFICATION_EVENT_KEYS,
@@ -103,6 +104,7 @@ export class AdminExtrasService {
         private permissions: PermissionsService,
         private emailTemplates: EmailTemplateService,
         private webhooks: WebhookService,
+        private goodsReceipts: GoodsReceiptsService,
     ) { }
 
     private settingsFilePath = path.join(process.cwd(), 'data', 'admin-settings.json');
@@ -1156,6 +1158,8 @@ export class AdminExtrasService {
                 return 'p_purchase_orders';
             case 'Purchase Invoice':
                 return 'p_purchase_invoices';
+            case 'Goods Receipt':
+                return 'p_goods_receipt';
             default:
                 return null;
         }
@@ -1533,6 +1537,30 @@ export class AdminExtrasService {
                 description: `Expected ${o.expectedDate.toISOString().slice(0, 10)}`,
                 approvalFlow: flowForType('Purchase Order'),
             })));
+
+            // A GRN still at "pending" has not been recorded yet — nothing for an
+            // approver to decide, same reasoning as excluding Pending Review
+            // invoices above.
+            const goodsReceipts = await this.prisma.goodsReceipt.findMany({
+                where: { NOT: { status: 'pending' } },
+                orderBy: { receivedDate: 'desc' },
+            });
+            rows.push(...goodsReceipts.map((g) => ({
+                id: g.id,
+                module: 'procurement',
+                type: 'Goods Receipt',
+                title: `${g.reference} — ${g.supplierName}`,
+                project: g.poRef ?? 'Procurement',
+                requestedBy: g.receivedBy,
+                date: g.receivedDate,
+                // Its terminal states (partial_delivery, over_supply, ...) don't
+                // contain "approve"/"paid"/"complete", so normalizeApprovalStatus
+                // would misread every one of them as still pending.
+                status: g.status === 'rejected' ? 'rejected' : g.status === 'pending_approval' ? 'pending' : 'approved',
+                urgency: 'normal',
+                description: g.mrRef ? `PO ${g.poRef ?? ''} · MR ${g.mrRef}` : `PO ${g.poRef ?? ''}`,
+                approvalFlow: flowForType('Goods Receipt'),
+            })));
         }
 
         // Pending-invite users are deliberately NOT surfaced here.
@@ -1889,6 +1917,16 @@ export class AdminExtrasService {
                 }
             }
             return updated;
+        }
+
+        // Try to find and update in goods receipts. The guard and the stock
+        // posting both live in GoodsReceiptsService.accept — called from here
+        // or from the page's own Accept button, it is the same gate.
+        const goodsReceipt = await this.prisma.goodsReceipt.findUnique({ where: { id } }).catch(() => null);
+        if (goodsReceipt) {
+            if (status === 'approved') return this.goodsReceipts.accept(id, forUser);
+            if (status === 'rejected') return this.goodsReceipts.raiseRejectionNote(id, data?.reason ?? '', forUser);
+            throw new BadRequestException('A goods receipt can only be approved or rejected here.');
         }
 
         throw new BadRequestException(`Approval with ID ${id} not found`);
