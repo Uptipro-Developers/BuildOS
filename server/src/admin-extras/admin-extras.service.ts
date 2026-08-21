@@ -2910,6 +2910,10 @@ export class AdminExtrasService {
             ? types.reduce((s: number, t: any) => s + t.totalQty * t.unitCost, 0) / totalQty
             : 0;
         await tx.material.update({ where: { id: materialId }, data: { totalQty, availableQty, reservedQty, unitCost } });
+        this.logger.log(
+            `[MaterialCategory:rollup] materialId=${materialId} found ${types.length} type row(s) — ` +
+            `totalQty=${totalQty} availableQty=${availableQty} reservedQty=${reservedQty} unitCost=${unitCost}`,
+        );
     }
 
     private async createMaterialWithTypes(
@@ -2918,6 +2922,10 @@ export class AdminExtrasService {
         categoryName: string,
         m: { name: string; classification: string; types: { name: string; sku: string | null; dimensions: any[] }[] },
     ) {
+        this.logger.log(
+            `[MaterialCategory:material] creating "${m.name}" under categoryId=${categoryId} with ${m.types.length} type(s): ` +
+            m.types.map((t) => t.name).join(', '),
+        );
         const created = await tx.material.create({
             data: {
                 categoryId,
@@ -2929,43 +2937,77 @@ export class AdminExtrasService {
                 },
             },
         });
+        this.logger.log(`[MaterialCategory:material] material.create returned id=${created.id}`);
         await this.recalcMaterialTotals(tx, created.id);
         return created;
     }
 
     async findMaterialCategories() {
-        return this.prisma.materialCategory.findMany({
+        const rows = await this.prisma.materialCategory.findMany({
             orderBy: { createdAt: 'asc' },
             include: this.materialCatalogInclude,
         });
+        this.logger.log(
+            `[MaterialCategory:list] returning ${rows.length} categories — ` +
+            rows.map((c: any) => `${c.name}(${c.materials?.length ?? 0}m)`).join(', '),
+        );
+        return rows;
     }
 
     async createMaterialCategory(data: any) {
+        this.logger.log(
+            `[MaterialCategory:create] payload received — name="${data?.name}", ` +
+            `materials=${Array.isArray(data?.materials) ? data.materials.length : 'none'}`,
+        );
         const name = String(data?.name ?? '').trim();
         if (!name) throw new BadRequestException('Category name is required');
         const materials = this.buildMaterialCreateInput(data?.materials);
+        this.logger.log(
+            `[MaterialCategory:create] after filtering blanks: ${materials.length} material(s) — ` +
+            materials.map((m) => `${m.name}(${m.types.length}t)`).join(', '),
+        );
 
-        return this.prisma.$transaction(async (tx) => {
-            const category = await tx.materialCategory.create({
-                data: {
-                    name,
-                    description: String(data?.description ?? '').trim() || null,
-                    color: String(data?.color ?? 'teal').trim() || 'teal',
-                },
+        try {
+            const result = await this.prisma.$transaction(async (tx) => {
+                const category = await tx.materialCategory.create({
+                    data: {
+                        name,
+                        description: String(data?.description ?? '').trim() || null,
+                        color: String(data?.color ?? 'teal').trim() || 'teal',
+                    },
+                });
+                this.logger.log(`[MaterialCategory:create] category row committed id=${category.id}`);
+                for (const m of materials) {
+                    const created = await this.createMaterialWithTypes(tx, category.id, name, m);
+                    this.logger.log(
+                        `[MaterialCategory:create] material row committed id=${created.id} name="${m.name}" types=${m.types.length}`,
+                    );
+                }
+                return tx.materialCategory.findUniqueOrThrow({
+                    where: { id: category.id },
+                    include: this.materialCatalogInclude,
+                });
             });
-            for (const m of materials) {
-                await this.createMaterialWithTypes(tx, category.id, name, m);
-            }
-            return tx.materialCategory.findUniqueOrThrow({
-                where: { id: category.id },
-                include: this.materialCatalogInclude,
-            });
-        });
+            this.logger.log(
+                `[MaterialCategory:create] transaction committed — returning id=${result.id} materials=${result.materials?.length ?? 0}`,
+            );
+            return result;
+        } catch (err: any) {
+            this.logger.error(`[MaterialCategory:create] FAILED — ${err?.message}`, err?.stack);
+            throw err;
+        }
     }
 
     async updateMaterialCategory(id: string, data: any) {
+        this.logger.log(
+            `[MaterialCategory:update] payload received for id=${id} — ` +
+            `materials=${data?.materials !== undefined ? `${(data.materials ?? []).length} submitted` : 'omitted (untouched)'}`,
+        );
         const existing = await this.prisma.materialCategory.findUnique({ where: { id } });
-        if (!existing) throw new NotFoundException('Material category not found');
+        if (!existing) {
+            this.logger.warn(`[MaterialCategory:update] no category found for id=${id}`);
+            throw new NotFoundException('Material category not found');
+        }
 
         const patch: Prisma.MaterialCategoryUpdateInput = {};
         if (data?.name !== undefined) {
@@ -2986,29 +3028,52 @@ export class AdminExtrasService {
         // starts writing actual stock onto these Types.
         const replacingMaterials = data?.materials !== undefined;
         const materials = replacingMaterials ? this.buildMaterialCreateInput(data.materials) : [];
+        if (replacingMaterials) {
+            this.logger.log(
+                `[MaterialCategory:update] after filtering blanks: ${materials.length} material(s) — ` +
+                materials.map((m) => `${m.name}(${m.types.length}t)`).join(', '),
+            );
+        }
 
-        await this.prisma.$transaction(async (tx) => {
-            if (Object.keys(patch).length) {
-                await tx.materialCategory.update({ where: { id }, data: patch });
-            }
-            if (replacingMaterials) {
-                await tx.material.deleteMany({ where: { categoryId: id } });
-                for (const m of materials) {
-                    await this.createMaterialWithTypes(tx, id, categoryName, m);
+        try {
+            await this.prisma.$transaction(async (tx) => {
+                if (Object.keys(patch).length) {
+                    await tx.materialCategory.update({ where: { id }, data: patch });
+                    this.logger.log(`[MaterialCategory:update] category row patched id=${id}`);
                 }
-            }
-        });
+                if (replacingMaterials) {
+                    const removed = await tx.material.deleteMany({ where: { categoryId: id } });
+                    this.logger.log(`[MaterialCategory:update] cleared ${removed.count} existing material row(s) for id=${id}`);
+                    for (const m of materials) {
+                        const created = await this.createMaterialWithTypes(tx, id, categoryName, m);
+                        this.logger.log(
+                            `[MaterialCategory:update] material row committed id=${created.id} name="${m.name}" types=${m.types.length}`,
+                        );
+                    }
+                }
+            });
+        } catch (err: any) {
+            this.logger.error(`[MaterialCategory:update] FAILED for id=${id} — ${err?.message}`, err?.stack);
+            throw err;
+        }
 
-        return this.prisma.materialCategory.findUnique({ where: { id }, include: this.materialCatalogInclude });
+        const result = await this.prisma.materialCategory.findUnique({ where: { id }, include: this.materialCatalogInclude });
+        this.logger.log(
+            `[MaterialCategory:update] transaction committed — returning id=${id} materials=${result?.materials?.length ?? 0}`,
+        );
+        return result;
     }
 
     /** Deleting a category orphans its materials (categoryId → null) rather than deleting them — they may carry real stock. */
     async deleteMaterialCategory(id: string) {
+        this.logger.log(`[MaterialCategory:delete] request for id=${id}`);
         try {
             await this.prisma.materialCategory.delete({ where: { id } });
-        } catch {
+        } catch (err: any) {
+            this.logger.warn(`[MaterialCategory:delete] failed for id=${id} — ${err?.message}`);
             throw new NotFoundException('Material category not found');
         }
+        this.logger.log(`[MaterialCategory:delete] committed for id=${id}`);
         return { id, deleted: true };
     }
 

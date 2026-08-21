@@ -1661,10 +1661,14 @@ function MaterialCategoriesPanel() {
 
   useEffect(() => {
     getMaterialCategories()
-      .then((data) => setCategories((data ?? []).map(normalizeCategoryRecord)))
-      .catch((err) =>
-        toast.error(err?.message || "Failed to load categories"),
-      );
+      .then((data) => {
+        console.log("[MaterialCategory:load] server returned", data);
+        setCategories((data ?? []).map(normalizeCategoryRecord));
+      })
+      .catch((err) => {
+        console.error("[MaterialCategory:load] failed", err);
+        toast.error(err?.message || "Failed to load categories");
+      });
   }, []);
 
   function openAdd() {
@@ -1845,17 +1849,24 @@ function MaterialCategoriesPanel() {
               })),
           })),
       };
+      console.log(
+        `[MaterialCategory:save] submitting ${editing ? "update" : "create"} payload`,
+        payload,
+      );
       if (editing) {
         const updated = normalizeCategoryRecord(await updateMaterialCategory(editing.id, payload));
+        console.log("[MaterialCategory:save] server responded (update)", updated);
         setCategories((prev) => prev.map((c) => (c.id === editing.id ? updated : c)));
         toast.success("Category updated");
       } else {
         const created = normalizeCategoryRecord(await createMaterialCategory(payload));
+        console.log("[MaterialCategory:save] server responded (create)", created);
         setCategories((prev) => [...prev, created]);
         toast.success("Category added");
       }
       setShowModal(false);
     } catch (err: any) {
+      console.error("[MaterialCategory:save] failed", err);
       toast.error(err?.message || "Failed to save category");
     } finally {
       setSaving(false);
@@ -1863,13 +1874,16 @@ function MaterialCategoriesPanel() {
   }
   async function confirmDelete() {
     if (!deleteTarget) return;
+    console.log("[MaterialCategory:delete] requesting delete for", deleteTarget.id, deleteTarget.name);
     setDeleting(true);
     try {
       await deleteMaterialCategory(deleteTarget.id);
+      console.log("[MaterialCategory:delete] server confirmed delete for", deleteTarget.id);
       setCategories((prev) => prev.filter((c) => c.id !== deleteTarget.id));
       toast.success("Category deleted");
       setDeleteTarget(null);
     } catch (err: any) {
+      console.error("[MaterialCategory:delete] failed", err);
       toast.error(err?.message || "Failed to delete category");
     } finally {
       setDeleting(false);
