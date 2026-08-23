@@ -325,16 +325,18 @@ export function JournalEntryPage() {
     { key: "total", label: csvAmountHeader("Total"), render: e => <span className="text-sm font-medium text-gray-900">{fmt(e.lines.reduce((s, l) => s + l.debit, 0))}</span>, sortable: true, filterable: false, className: "text-right", headerClassName: "text-right" },
     { key: "status", label: "Status", render: e => <span className={`px-2 py-0.5 text-xs rounded font-semibold ${STATUS_STYLES[e.status]}`}>{e.status}</span>, sortable: true, filterable: true },
     { key: "createdBy", label: "Created By", render: e => <span className="text-sm text-gray-500">{e.createdBy}</span>, sortable: true, filterable: true },
-    { key: "actions", label: "Actions", render: e => (
-      <div className="flex items-center justify-end gap-1">
-        <button onClick={() => setViewEntry(e)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"><Eye className="w-3.5 h-3.5" /></button>
-        {e.status === "Draft" && <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-emerald-50 rounded-lg text-gray-400 hover:text-emerald-600"><Edit className="w-3.5 h-3.5" /></button>}
-        {/* Only a posted entry can be reversed: a draft is edited or deleted,
+    {
+      key: "actions", label: "Actions", render: e => (
+        <div className="flex items-center justify-end gap-1">
+          <button onClick={() => setViewEntry(e)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700"><Eye className="w-3.5 h-3.5" /></button>
+          {e.status === "Draft" && <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-emerald-50 rounded-lg text-gray-400 hover:text-emerald-600"><Edit className="w-3.5 h-3.5" /></button>}
+          {/* Only a posted entry can be reversed: a draft is edited or deleted,
             and an already-reversed one has its contra on the ledger. */}
-        {e.status === "Posted" && <button title="Reverse entry" onClick={() => setReverseTarget(e)} className="p-1.5 hover:bg-amber-50 rounded-lg text-gray-400 hover:text-amber-600"><Undo2 className="w-3.5 h-3.5" /></button>}
-        {e.status === "Draft" && <button onClick={() => setDeleteTarget(e)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>}
-      </div>
-    ), sortable: false, filterable: false, className: "text-right", headerClassName: "text-right" },
+          {e.status === "Posted" && <button title="Reverse entry" onClick={() => setReverseTarget(e)} className="p-1.5 hover:bg-amber-50 rounded-lg text-gray-400 hover:text-amber-600"><Undo2 className="w-3.5 h-3.5" /></button>}
+          {e.status === "Draft" && <button onClick={() => setDeleteTarget(e)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>}
+        </div>
+      ), sortable: false, filterable: false, className: "text-right", headerClassName: "text-right"
+    },
   ];
 
   return (

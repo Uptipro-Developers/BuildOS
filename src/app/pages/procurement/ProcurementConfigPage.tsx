@@ -1,7 +1,20 @@
 import { useEffect, useState } from "react";
-import { Settings as SettingsIcon, Save, ShieldCheck, Package } from "lucide-react";
+import {
+  Settings as SettingsIcon,
+  Save,
+  ShieldCheck,
+  Package,
+  Users as UsersIcon,
+  CreditCard,
+  Plus,
+  Pencil,
+  Trash2,
+  Star,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getProcessCatalog,
   getProcessWorkflows,
@@ -10,20 +23,836 @@ import {
   getStoreThresholds,
   updateStoreThresholds,
   getUsers,
+  getUsersByDeptRole,
+  getAppRoles,
   type ProcessCatalogItem,
   type ProcessWorkflow,
   type StoreThresholdRecord,
+  type AppUser,
+  type AppRole,
 } from "../../api/admin-extras";
+import { getReferenceData } from "../../api/reference-data";
+import {
+  getSignatories,
+  createSignatory,
+  updateSignatory,
+  deleteSignatory,
+  type Signatory,
+} from "../../api/signatories";
+import {
+  getPaymentTerms,
+  createPaymentTerm,
+  updatePaymentTerm,
+  deletePaymentTerm,
+  setDefaultPaymentTerm,
+  type PaymentTerm,
+  type PaymentTermTranche,
+  type DeliverySplit,
+  type TrancheTiming,
+} from "../../api/payment-terms";
 
-// Order follows the design: Numbering, Approvals, Thresholds.
-const TABS = ["numbering", "approvals", "thresholds"] as const;
+// Order follows the design: Numbering, Payment Terms, Signatories, Approvals, Thresholds.
+const TABS = ["numbering", "paymentTerms", "signatories", "approvals", "thresholds"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {
   numbering: "Numbering",
+  paymentTerms: "Payment Terms",
+  signatories: "Signatories",
   thresholds: "Thresholds",
   approvals: "Approvals",
 };
+
+const DELIVERY_SPLIT_LABELS: Record<DeliverySplit, string> = {
+  pre_delivery: "Pre-delivery payment",
+  post_delivery: "Paid after delivery",
+};
+
+const TRANCHE_TIMING_LABELS: Record<TrancheTiming, string> = {
+  on_po_approval: "Before delivery (PO approval)",
+  on_delivery: "On delivery / GRN",
+  net_30: "Net 30 days after delivery",
+  net_60: "Net 60 days after delivery",
+};
+
+interface TrancheFormRow {
+  title: string;
+  percent: string;
+  timing: TrancheTiming;
+}
+
+/**
+ * Add/edit a payment term.
+ *
+ * Delivery Split is picked independently of the tranches below, not derived
+ * from them — a term can be filed as "pre-delivery" even if every tranche
+ * happens to be timed on/after delivery. The tranches still have to total
+ * 100% among themselves regardless.
+ */
+function PaymentTermModal({
+  initial,
+  onClose,
+  onSave,
+}: {
+  initial?: PaymentTerm;
+  onClose: () => void;
+  onSave: (data: {
+    name: string;
+    description: string;
+    deliverySplit: DeliverySplit;
+    tranches: PaymentTermTranche[];
+  }) => Promise<void>;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [deliverySplit, setDeliverySplit] = useState<DeliverySplit>(
+    initial?.deliverySplit ?? "post_delivery",
+  );
+  const [tranches, setTranches] = useState<TrancheFormRow[]>(
+    initial?.tranches.length
+      ? initial.tranches.map((t) => ({ title: t.title, percent: String(t.percent), timing: t.timing }))
+      : [{ title: "", percent: "100", timing: "on_delivery" }],
+  );
+  const [saving, setSaving] = useState(false);
+
+  const addTranche = () =>
+    setTranches((prev) => [...prev, { title: "", percent: "", timing: "on_delivery" }]);
+  const removeTranche = (i: number) => setTranches((prev) => prev.filter((_, j) => j !== i));
+  const updateTranche = (i: number, patch: Partial<TrancheFormRow>) =>
+    setTranches((prev) => prev.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+
+  const total = tranches.reduce((s, t) => s + (parseFloat(t.percent) || 0), 0);
+  const valid =
+    !!name.trim() &&
+    tranches.length > 0 &&
+    tranches.every((t) => t.title.trim() && parseFloat(t.percent) > 0) &&
+    Math.round(total) === 100;
+
+  async function handleSave() {
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        name: name.trim(),
+        description: description.trim(),
+        deliverySplit,
+        tranches: tranches.map((t) => ({
+          title: t.title.trim(),
+          percent: parseFloat(t.percent) || 0,
+          timing: t.timing,
+        })),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-900">
+            {initial ? "Edit Payment Term" : "New Payment Term"}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Term Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. 30% deposit + 70% Net 60"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Explain the payment structure"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Delivery Split <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={deliverySplit}
+              onChange={(e) => setDeliverySplit(e.target.value as DeliverySplit)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {(Object.keys(DELIVERY_SPLIT_LABELS) as DeliverySplit[]).map((key) => (
+                <option key={key} value={key}>
+                  {DELIVERY_SPLIT_LABELS[key]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Tranches
+                </label>
+                <button
+                  type="button"
+                  onClick={addTranche}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-purple-700 text-white rounded-lg hover:bg-purple-800"
+                >
+                  <Plus className="w-3 h-3" /> Add Tranche
+                </button>
+              </div>
+              <div className="p-3 space-y-2">
+                {tranches.map((tr, i) => (
+                  <div
+                    key={i}
+                    className="grid grid-cols-[minmax(0,1.4fr)_64px_minmax(0,1fr)_28px] gap-1.5 items-center"
+                  >
+                    <input
+                      value={tr.title}
+                      onChange={(e) => updateTranche(i, { title: e.target.value })}
+                      placeholder="Tranche title e.g. Deposit"
+                      className="w-full min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <div className="relative min-w-0">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={tr.percent}
+                        onChange={(e) => updateTranche(i, { percent: e.target.value })}
+                        placeholder="%"
+                        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm pr-5 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
+                        %
+                      </span>
+                    </div>
+                    <select
+                      value={tr.timing}
+                      onChange={(e) => updateTranche(i, { timing: e.target.value as TrancheTiming })}
+                      className="w-full min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      {(Object.keys(TRANCHE_TIMING_LABELS) as TrancheTiming[]).map((key) => (
+                        <option key={key} value={key}>
+                          {TRANCHE_TIMING_LABELS[key]}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={tranches.length <= 1}
+                      onClick={() => removeTranche(i)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg disabled:text-gray-300 disabled:hover:text-gray-300 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Total:{" "}
+              <span
+                className={`font-semibold ${Math.round(total) === 100 ? "text-emerald-600" : "text-amber-600"}`}
+              >
+                {Math.round(total)}%
+              </span>
+              {Math.round(total) !== 100 && (
+                <span className="text-amber-600"> — must total 100%</span>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!valid || saving}
+            className="px-4 py-2 text-sm bg-purple-700 text-white rounded-xl hover:bg-purple-800 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving…" : "Save Payment Term"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * PO payment terms: the terms a Purchase Order can be raised under, each
+ * split into tranches. The Create-PO wizard reads this same list, filtered
+ * by the payment-timing bucket picked there.
+ */
+function PaymentTermsPanel() {
+  const [rows, setRows] = useState<PaymentTerm[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<PaymentTerm | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PaymentTerm | null>(null);
+
+  useEffect(() => {
+    getPaymentTerms()
+      .then(setRows)
+      .catch(() => toast.error("Could not load payment terms."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleSave(data: {
+    name: string;
+    description: string;
+    deliverySplit: DeliverySplit;
+    tranches: PaymentTermTranche[];
+  }) {
+    try {
+      if (editing) {
+        const updated = await updatePaymentTerm(editing.id, data);
+        setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+        toast.success("Payment term updated.");
+      } else {
+        const created = await createPaymentTerm(data);
+        setRows((prev) => [...prev, created]);
+        toast.success("Payment term added.");
+      }
+      setShowModal(false);
+      setEditing(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save the payment term.");
+    }
+  }
+
+  async function handleDelete() {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    try {
+      await deletePaymentTerm(target.id);
+      setRows((prev) => prev.filter((r) => r.id !== target.id));
+      toast.success("Payment term removed.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove the payment term.");
+    }
+  }
+
+  async function handleSetDefault(term: PaymentTerm) {
+    try {
+      const updated = await setDefaultPaymentTerm(term.id);
+      setRows((prev) => prev.map((r) => ({ ...r, isDefault: r.id === updated.id })));
+      toast.success(`${updated.name} is now the default payment term.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to set the default payment term.",
+      );
+    }
+  }
+
+  if (loading) return <div className="p-8 text-center text-gray-400">Loading…</div>;
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-blue-600" />
+            <h2 className="text-sm font-semibold text-gray-900">Payment Terms</h2>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            The terms a Purchase Order can be raised under.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setEditing(null);
+            setShowModal(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-purple-700 text-white rounded-xl hover:bg-purple-800"
+        >
+          <Plus className="w-4 h-4" /> Add Payment Term
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-5 py-8 text-sm text-gray-400 text-center">
+          No payment terms configured yet.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+            <tr>
+              <th className="text-left px-5 py-2.5 font-medium">Term</th>
+              <th className="text-left px-5 py-2.5 font-medium">Description</th>
+              <th className="text-left px-5 py-2.5 font-medium">Payment Structure</th>
+              <th className="text-left px-5 py-2.5 font-medium">Delivery Split</th>
+              <th className="text-right px-5 py-2.5 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900">{r.name}</span>
+                    {r.isDefault && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                        Default
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-5 py-3 text-gray-500 max-w-xs">{r.description}</td>
+                <td className="px-5 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {r.tranches.map((t, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700"
+                      >
+                        {t.percent}% {t.title}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-5 py-3">
+                  <span
+                    className={`inline-flex items-center text-[11px] px-2 py-0.5 rounded-full font-medium ${r.deliverySplit === "pre_delivery" ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}
+                  >
+                    {DELIVERY_SPLIT_LABELS[r.deliverySplit]}
+                  </span>
+                </td>
+                <td className="px-5 py-3 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    {!r.isDefault && (
+                      <button
+                        onClick={() => handleSetDefault(r)}
+                        className="p-1.5 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-md transition-colors"
+                        title="Set as default"
+                      >
+                        <Star className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setEditing(r);
+                        setShowModal(true);
+                      }}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                      title="Edit"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteTarget(r)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                      title="Remove"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {showModal && (
+        <PaymentTermModal
+          initial={editing ?? undefined}
+          onClose={() => {
+            setShowModal(false);
+            setEditing(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title="Remove payment term"
+        description={
+          deleteTarget
+            ? `Remove "${deleteTarget.name}"? This can't be undone.`
+            : ""
+        }
+        confirmLabel="Remove"
+        isDangerous
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Add/edit a PO signatory.
+ *
+ * Department and Role are picked first because the Name list depends on
+ * them: a user only appears once their own `department` and `role` columns
+ * match both selections. Changing either after a name is chosen clears it,
+ * rather than silently keeping a name that no longer matches the filter.
+ */
+function SignatoryModal({
+  initial,
+  departments,
+  roles,
+  onClose,
+  onSave,
+}: {
+  initial?: Signatory;
+  departments: { id: string; name: string }[];
+  roles: AppRole[];
+  onClose: () => void;
+  onSave: (data: { department: string; role: string; userId: string }) => Promise<void>;
+}) {
+  const [department, setDepartment] = useState(initial?.department ?? "");
+  const [role, setRole] = useState(initial?.role ?? "");
+  const [userId, setUserId] = useState(initial?.userId ?? "");
+  const [saving, setSaving] = useState(false);
+
+  // The Name list only exists once both picks are made — fetched then, and
+  // only then, scoped server-side to that exact department + role rather
+  // than pulling every user in the company on open.
+  const [matchingUsers, setMatchingUsers] = useState<AppUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState(false);
+
+  useEffect(() => {
+    if (!department || !role) {
+      setMatchingUsers([]);
+      return;
+    }
+    let cancelled = false;
+    setUsersLoading(true);
+    setUsersError(false);
+    getUsersByDeptRole(department, role)
+      .then((list) => {
+        if (!cancelled) setMatchingUsers(list);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUsersError(true);
+          setMatchingUsers([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setUsersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [department, role]);
+
+  function pickDepartment(next: string) {
+    setDepartment(next);
+    setUserId("");
+  }
+
+  function pickRole(next: string) {
+    setRole(next);
+    setUserId("");
+  }
+
+  const valid = !!department && !!role && !!userId;
+
+  async function handleSave() {
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      await onSave({ department, role, userId });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-900">
+            {initial ? "Edit Signatory" : "New Signatory"}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Department <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={department}
+              onChange={(e) => pickDepartment(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select a department…</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.name}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Role <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={role}
+              onChange={(e) => pickRole(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select a role…</option>
+              {roles.map((r) => (
+                <option key={r.id} value={r.name}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Name <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              disabled={!department || !role || usersLoading}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+            >
+              <option value="">
+                {!department || !role
+                  ? "Pick a department and role first…"
+                  : usersLoading
+                    ? "Loading people…"
+                    : usersError
+                      ? "Could not load people for this department and role"
+                      : matchingUsers.length === 0
+                        ? "No user matches this department and role"
+                        : "Select a person…"}
+              </option>
+              {matchingUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!valid || saving}
+            className="px-4 py-2 text-sm bg-purple-700 text-white rounded-xl hover:bg-purple-800 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving…" : "Save Signatory"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * PO signatories: who is authorised to sign a Purchase Order.
+ *
+ * Kept as its own table (department/role captured at add-time, a real
+ * `userId` FK) rather than the free-text name list the create-PO wizard
+ * ships with today — Settings is where that list should actually be
+ * managed.
+ *
+ * `getAppRoles`/`getUsersByDeptRole` are Admin-only endpoints
+ * (`@Roles('admin')`), so the Role and Name selects in Add Signatory need an
+ * admin account even though this page sits under Procurement; Department
+ * (`getReferenceData`) does not. Each list loads independently rather than
+ * through one `Promise.all` — a non-admin's Roles 403 must not also blank
+ * out the signatories table and department list that loaded fine on their
+ * own.
+ */
+function SignatoriesPanel() {
+  const [rows, setRows] = useState<Signatory[]>([]);
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [roles, setRoles] = useState<AppRole[]>([]);
+  const [rolesError, setRolesError] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<Signatory | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Signatory | null>(null);
+
+  // Independent, not Promise.all: Roles is Admin-only (@Roles('admin')) and
+  // can 403 for a non-admin signed-in user, but that must not also blank out
+  // the signatories table and the (unguarded) department list that loaded
+  // fine on their own.
+  useEffect(() => {
+    getSignatories()
+      .then(setRows)
+      .catch(() => toast.error("Could not load signatories."))
+      .finally(() => setLoading(false));
+    getReferenceData()
+      .then((ref) => setDepartments(ref.departments))
+      .catch(() => toast.error("Could not load departments."));
+    getAppRoles()
+      .then(setRoles)
+      .catch(() => setRolesError(true));
+  }, []);
+
+  async function handleSave(data: { department: string; role: string; userId: string }) {
+    try {
+      if (editing) {
+        const updated = await updateSignatory(editing.id, data);
+        setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+        toast.success("Signatory updated.");
+      } else {
+        const created = await createSignatory(data);
+        setRows((prev) => [...prev, created]);
+        toast.success("Signatory added.");
+      }
+      setShowModal(false);
+      setEditing(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save the signatory.");
+    }
+  }
+
+  async function handleDelete() {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleteTarget(null);
+    try {
+      await deleteSignatory(target.id);
+      setRows((prev) => prev.filter((r) => r.id !== target.id));
+      toast.success("Signatory removed.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove the signatory.");
+    }
+  }
+
+  if (loading) return <div className="p-8 text-center text-gray-400">Loading…</div>;
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <UsersIcon className="w-4 h-4 text-blue-600" />
+            <h2 className="text-sm font-semibold text-gray-900">PO Signatories</h2>
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            People authorised to sign a Purchase Order.
+          </p>
+          {rolesError && (
+            <p className="text-xs text-amber-600 mt-1">
+              Roles could not be loaded — Add Signatory needs an admin account.
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => {
+            setEditing(null);
+            setShowModal(true);
+          }}
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-purple-700 text-white rounded-xl hover:bg-purple-800"
+        >
+          <Plus className="w-4 h-4" /> Add Signatory
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-5 py-8 text-sm text-gray-400 text-center">
+          No signatories configured yet.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+            <tr>
+              <th className="text-left px-5 py-2.5 font-medium">ID</th>
+              <th className="text-left px-5 py-2.5 font-medium">Department</th>
+              <th className="text-left px-5 py-2.5 font-medium">Role</th>
+              <th className="text-left px-5 py-2.5 font-medium">User</th>
+              <th className="text-right px-5 py-2.5 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <td className="px-5 py-3 font-mono text-xs text-gray-400">{r.id}</td>
+                <td className="px-5 py-3 text-gray-700">{r.department}</td>
+                <td className="px-5 py-3 text-gray-700">{r.role}</td>
+                <td className="px-5 py-3">
+                  <p className="font-medium text-gray-900">{r.user?.name ?? "—"}</p>
+                  {r.user?.email && <p className="text-xs text-gray-400">{r.user.email}</p>}
+                </td>
+                <td className="px-5 py-3 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      onClick={() => {
+                        setEditing(r);
+                        setShowModal(true);
+                      }}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                      title="Edit"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteTarget(r)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                      title="Remove"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {showModal && (
+        <SignatoryModal
+          initial={editing ?? undefined}
+          departments={departments}
+          roles={roles}
+          onClose={() => {
+            setShowModal(false);
+            setEditing(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+      <ConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title="Remove signatory"
+        description={
+          deleteTarget
+            ? `Remove ${deleteTarget.user?.name ?? "this person"} as a PO signatory?`
+            : ""
+        }
+        confirmLabel="Remove"
+        isDangerous
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </div>
+  );
+}
 
 /**
  * Approver configuration for the Procurement processes.
@@ -316,6 +1145,8 @@ export function ProcurementConfigPage() {
       {tab === "numbering" && (
         <NumberingConfigPanel app="procurement" accent="blue" />
       )}
+      {tab === "paymentTerms" && <PaymentTermsPanel />}
+      {tab === "signatories" && <SignatoriesPanel />}
       {tab === "thresholds" && <ThresholdsPanel />}
       {tab === "approvals" && <ApprovalsPanel />}
     </div>

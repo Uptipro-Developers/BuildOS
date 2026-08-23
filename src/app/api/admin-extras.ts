@@ -186,6 +186,16 @@ export const resendInvite = (id: string) =>
 // Users
 export const getUsers = (search?: string) =>
     apiFetch<AppUser[]>(search ? `/admin/users?search=${encodeURIComponent(search)}` : '/admin/users');
+/**
+ * Users whose own `department`/`role` columns match both filters exactly.
+ * For Procurement Settings › Signatories' Name select — narrows the list
+ * server-side instead of pulling every user in the company into the browser
+ * to filter client-side.
+ */
+export const getUsersByDeptRole = (department: string, role: string) =>
+    apiFetch<AppUser[]>(
+        `/admin/users?department=${encodeURIComponent(department)}&role=${encodeURIComponent(role)}`,
+    );
 export const getUser = (id: string) => apiFetch<AppUser>(`/admin/users/${id}`);
 export const createUser = (data: Partial<AppUser> & { password?: string }) =>
     apiFetch<AppUser>('/admin/users', { method: 'POST', body: JSON.stringify(data) });

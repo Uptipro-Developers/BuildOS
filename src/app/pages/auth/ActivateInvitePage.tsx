@@ -1,10 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Building2, CheckCircle2, Eye, EyeOff } from "lucide-react";
-
-const API_BASE_URL = (
-  import.meta.env.VITE_API_URL || "https://buildos-production-e328.up.railway.app/api"
-).replace(/\/$/, "");
+import { API_BASE_URL } from "../../utils/apiConfig";
 
 function parseErrorMessage(raw: string): string {
   try {

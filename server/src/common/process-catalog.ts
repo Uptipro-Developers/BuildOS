@@ -98,7 +98,9 @@ export const DEFAULT_PROCESS_CATALOG: ProcessCatalogItem[] = [
     define('p_goods_receipt', 'Goods Receipt', 'procurement',
         'Recording deliveries and confirming goods against the purchase order',
         // A receipt is evidence of delivery: corrected if wrong, never deleted.
-        ['view', 'create', 'edit'], 'goods-receipts', '/apps/procurement/goods-receipt'),
+        // Accepting one — which posts to stock — is a decision the configured
+        // approver makes, not whoever recorded the delivery.
+        ['view', 'create', 'edit', 'approve'], 'goods-receipts', '/apps/procurement/goods-receipt'),
     define('p_suppliers', 'Suppliers', 'procurement',
         'Supplier records and the materials they supply',
         MANAGED, 'suppliers', '/apps/procurement/suppliers'),

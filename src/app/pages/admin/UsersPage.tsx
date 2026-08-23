@@ -25,6 +25,7 @@ import {
   type UserRequestEntry,
 } from "../../api/admin-extras";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
+import { API_BASE_URL } from "../../utils/apiConfig";
 import {
   Search,
   Plus,
@@ -476,10 +477,10 @@ function UserProcessPermissions({
                             disabled={effective?.isSuper}
                             onClick={() => cycle(proc.id, action)}
                             className={`w-6 h-6 inline-flex items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed ${state === "allow"
-                                ? "bg-indigo-100 border-indigo-400"
-                                : state === "deny"
-                                  ? "bg-red-100 border-red-400"
-                                  : "border-transparent hover:bg-gray-100"
+                              ? "bg-indigo-100 border-indigo-400"
+                              : state === "deny"
+                                ? "bg-red-100 border-red-400"
+                                : "border-transparent hover:bg-gray-100"
                               }`}
                           >
                             {allowed ? (
@@ -745,8 +746,8 @@ function UserDetailPanel({
               key={t.key}
               onClick={() => setTab(t.key)}
               className={`py-2.5 px-3 text-xs font-medium transition-colors border-b-2 -mb-px ${tab === t.key
-                  ? "border-indigo-500 text-indigo-700"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-indigo-500 text-indigo-700"
+                : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
             >
               {t.label}
@@ -934,8 +935,8 @@ function UserDetailPanel({
                 >
                   <div
                     className={`mt-[5px] w-1.5 h-1.5 rounded-full shrink-0 ${ALL_APPS.find((ap) => ap.key === a.app)
-                        ?.color.replace("text-", "bg-")
-                        .split(" ")[0]
+                      ?.color.replace("text-", "bg-")
+                      .split(" ")[0]
                       }`}
                   />
                   <div className="flex-1 min-w-0">
@@ -2062,10 +2063,7 @@ export function UsersPage() {
   };
 
   const requestPasswordReset = async (email: string) => {
-    const baseUrl = (
-      import.meta.env.VITE_API_URL || "https://buildos-production-e328.up.railway.app/api"
-    ).replace(/\/$/, "");
-    const response = await fetch(`${baseUrl}/auth/forgot-password`, {
+    const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -2715,8 +2713,8 @@ export function UsersPage() {
                   key={page}
                   onClick={() => setCurrentPage(page)}
                   className={`min-w-8 px-2 py-1.5 text-sm rounded-lg border transition-colors ${currentPage === page
-                      ? "border-indigo-600 bg-indigo-600 text-white"
-                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
+                    ? "border-indigo-600 bg-indigo-600 text-white"
+                    : "border-gray-300 text-gray-700 hover:bg-gray-50"
                     }`}
                 >
                   {page}
