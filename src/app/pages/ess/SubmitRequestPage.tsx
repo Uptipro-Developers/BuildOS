@@ -23,7 +23,7 @@ import {
   Wrench,
   Edit2,
 } from "lucide-react";
-import { getMaterials } from "../../api/materials";
+import { searchMaterialTypes, MaterialTypeSearchResult } from "../../api/materials";
 import { getUnits } from "../../api/admin-extras";
 import { IssueForm } from "../../components/IssueForm";
 import { ChangeRequestForm } from "../../components/ChangeRequestForm";
@@ -47,13 +47,6 @@ import { logActivity } from "../../utils/activityLog";
 // Shared material catalogue with stock status — mirrors Storefront inventory
 type StockLevel = "in_stock" | "low_stock" | "out_of_stock";
 
-interface CatalogueEntry {
-  name: string;
-  stock: StockLevel;
-  /** The unit this material is stocked in, from Storefront. */
-  unit: string;
-}
-
 /** Stock level derived from the material's own quantities, not a fixed label. */
 function stockLevelOf(m: { availableQty?: number; reorderLevel?: number }): StockLevel {
   const available = Number(m.availableQty ?? 0);
@@ -72,32 +65,33 @@ const STOCK_BADGE: Record<StockLevel, string> = {
   out_of_stock: "bg-red-100 text-red-700",
 };
 
+/** Stock level for a MaterialType hit, using its parent Material's reorder level. */
+function stockLevelOfType(hit: MaterialTypeSearchResult): StockLevel {
+  return stockLevelOf({
+    availableQty: hit.availableQty,
+    reorderLevel: hit.material.reorderLevel,
+  });
+}
+
 function MaterialCombobox({
   value,
   onChange,
   onStockChange,
   onUnitChange,
-  catalogue,
   error,
 }: {
   value: string;
   onChange: (v: string) => void;
   onStockChange: (s: StockLevel | null) => void;
-  /** Adopts the material's configured unit, so the requester never guesses. */
+  /** Adopts the material type's stocking unit, so the requester never guesses. */
   onUnitChange?: (unit: string) => void;
-  catalogue: CatalogueEntry[];
   error?: string;
 }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
+  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  const matches =
-    query.length > 0
-      ? catalogue.filter((m) =>
-          m.name.toLowerCase().includes(query.toLowerCase()),
-        )
-      : catalogue;
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -108,11 +102,31 @@ function MaterialCombobox({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  function select(m: CatalogueEntry) {
-    setQuery(m.name);
-    onChange(m.name);
-    onStockChange(m.stock);
-    if (m.unit) onUnitChange?.(m.unit);
+  // Searches the MaterialType catalogue as the requester types — mirrors the
+  // Material Request and Project Setup pickers, which search the specific
+  // stock type rather than the coarser Material name.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(() => {
+      searchMaterialTypes(q)
+        .then(setResults)
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [query]);
+
+  function select(hit: MaterialTypeSearchResult) {
+    setQuery(hit.name);
+    onChange(hit.name);
+    onStockChange(stockLevelOfType(hit));
+    if (hit.unit) onUnitChange?.(hit.unit);
     setOpen(false);
   }
 
@@ -153,25 +167,39 @@ function MaterialCombobox({
       {open && (
         <div className="absolute z-50 top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
           <div className="max-h-52 overflow-y-auto">
-            {matches.length > 0 ? (
-              matches.map((m) => (
-                <button
-                  key={m.name}
-                  type="button"
-                  onMouseDown={() => select(m)}
-                  className={`w-full text-left px-4 py-2.5 text-sm hover:bg-teal-50 transition-colors flex items-center justify-between ${value === m.name ? "bg-teal-50 text-teal-700 font-medium" : "text-gray-700"}`}
-                >
-                  <span>{m.name}</span>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${STOCK_BADGE[m.stock]}`}
+            {searching ? (
+              <div className="px-4 py-3 text-sm text-gray-400">Searching…</div>
+            ) : results.length > 0 ? (
+              results.map((hit) => {
+                const stock = stockLevelOfType(hit);
+                return (
+                  <button
+                    key={hit.id}
+                    type="button"
+                    onMouseDown={() => select(hit)}
+                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-teal-50 transition-colors flex items-center justify-between ${value === hit.name ? "bg-teal-50 text-teal-700 font-medium" : "text-gray-700"}`}
                   >
-                    {STOCK_LABEL[m.stock]}
-                  </span>
-                </button>
-              ))
-            ) : (
+                    <span>
+                      {hit.name}
+                      <span className="block text-xs text-gray-400 font-normal">
+                        {hit.material.name} · {hit.material.category}
+                      </span>
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ml-2 ${STOCK_BADGE[stock]}`}
+                    >
+                      {STOCK_LABEL[stock]}
+                    </span>
+                  </button>
+                );
+              })
+            ) : query.trim() ? (
               <div className="px-4 py-3 text-sm text-gray-500">
                 No materials found for "{query}"
+              </div>
+            ) : (
+              <div className="px-4 py-3 text-sm text-gray-400">
+                Start typing to search the material catalogue…
               </div>
             )}
           </div>
@@ -477,28 +505,12 @@ function MaterialForm({
   );
   const [selectedStock, setSelectedStock] = useState<StockLevel | null>(null);
   /**
-   * The material catalogue and units, both from Storefront. These were hardcoded
-   * lists in this file, so the picker offered materials that may not exist and
-   * units that were never configured.
+   * Units of Measurement configured in Storefront. This was a hardcoded list,
+   * so the picker offered units that were never actually configured.
    */
-  const [catalogue, setCatalogue] = useState<CatalogueEntry[]>([]);
   const [unitOptions, setUnitOptions] = useState<string[]>([]);
 
   useEffect(() => {
-    getMaterials()
-      .then((rows) =>
-        setCatalogue(
-          rows
-            .filter((m) => m.name)
-            .map((m) => ({
-              name: m.name,
-              stock: stockLevelOf(m),
-              unit: m.unit ?? "",
-            })),
-        ),
-      )
-      .catch(() => toast.error("Could not load the material catalogue."));
-
     getUnits()
       .then((rows) =>
         setUnitOptions(
@@ -659,11 +671,10 @@ function MaterialForm({
               setSelectedStock(null);
               field("material", "");
             }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
-              requestKind === "material"
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${requestKind === "material"
                 ? "bg-white text-teal-700 shadow-sm border border-gray-200"
                 : "text-gray-500 hover:text-gray-700"
-            }`}
+              }`}
           >
             <Package className="w-4 h-4" />
             Material Request
@@ -675,11 +686,10 @@ function MaterialForm({
               setShowCreationForm(false);
               setSelectedStock(null);
             }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
-              requestKind === "service"
+            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${requestKind === "service"
                 ? "bg-white text-teal-700 shadow-sm border border-gray-200"
                 : "text-gray-500 hover:text-gray-700"
-            }`}
+              }`}
           >
             <Wrench className="w-4 h-4" />
             Service Request
@@ -738,7 +748,6 @@ function MaterialForm({
                 onChange={(v) => field("material", v)}
                 onStockChange={(s) => setSelectedStock(s)}
                 onUnitChange={(u) => field("unit", u)}
-                catalogue={catalogue}
                 error={errors.material}
               />
               {errors.material && (
@@ -1530,11 +1539,11 @@ export function SubmitRequestPage() {
       .then((data) => {
         const names = Array.isArray(data)
           ? data
-              .map((p) => p?.name)
-              .filter(
-                (name): name is string =>
-                  typeof name === "string" && name.trim().length > 0,
-              )
+            .map((p) => p?.name)
+            .filter(
+              (name): name is string =>
+                typeof name === "string" && name.trim().length > 0,
+            )
           : [];
         setProjectOptions(names);
       })
@@ -1595,51 +1604,46 @@ export function SubmitRequestPage() {
           <div className="grid grid-cols-5 border-b border-gray-200">
             <button
               onClick={() => setTab("material")}
-              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${
-                tab === "material"
+              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "material"
                   ? "border-teal-600 text-teal-700 bg-teal-50/50"
                   : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+                }`}
             >
               <Package className="w-4 h-4" /> Material
             </button>
             <button
               onClick={() => setTab("finance")}
-              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${
-                tab === "finance"
+              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "finance"
                   ? "border-teal-600 text-teal-700 bg-teal-50/50"
                   : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+                }`}
             >
               <DollarSign className="w-4 h-4" /> Finance
             </button>
             <button
               onClick={() => setTab("leave")}
-              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${
-                tab === "leave"
+              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "leave"
                   ? "border-teal-600 text-teal-700 bg-teal-50/50"
                   : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+                }`}
             >
               <FileText className="w-4 h-4" /> Leave
             </button>
             <button
               onClick={() => setTab("issue")}
-              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${
-                tab === "issue"
+              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "issue"
                   ? "border-teal-600 text-teal-700 bg-teal-50/50"
                   : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+                }`}
             >
               <AlertTriangle className="w-4 h-4" /> Issues
             </button>
             <button
               onClick={() => setTab("change")}
-              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${
-                tab === "change"
+              className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "change"
                   ? "border-teal-600 text-teal-700 bg-teal-50/50"
                   : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
+                }`}
             >
               <Edit2 className="w-4 h-4" /> Changes
             </button>

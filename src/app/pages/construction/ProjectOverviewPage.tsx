@@ -13,11 +13,11 @@ import { ProcessGuidance } from "../../components/ProcessGuidance";
 const RAG_HEX: Record<string, { dot: string; bg: string; text: string }> = {
   "bg-green-500": { dot: "#27AE60", bg: "#E8F8EF", text: "#1B7A43" },
   "bg-amber-500": { dot: "#F4A623", bg: "#FEF6E6", text: "#B0780F" },
-  "bg-red-500":   { dot: "#E74C3C", bg: "#FDE8E6", text: "#B33A2E" },
+  "bg-red-500": { dot: "#E74C3C", bg: "#FDE8E6", text: "#B33A2E" },
 };
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  draft:     { bg: "#F1F5F9", text: "#475569" },
+  draft: { bg: "#F1F5F9", text: "#475569" },
   submitted: { bg: "#E8F8EF", text: "#1B7A43" },
 };
 
@@ -36,22 +36,22 @@ export function ProjectOverviewPage() {
       .then((d) => {
         if (active) setProjectTasks(d);
       })
-      .catch(() => {});
+      .catch(() => { });
     listVendors(id)
       .then((d) => {
         if (active) setProjectVendors(d);
       })
-      .catch(() => {});
+      .catch(() => { });
     listDailyReports(id)
       .then((d) => {
         if (active) setProjectReports(d);
       })
-      .catch(() => {});
+      .catch(() => { });
     listIssues(id)
       .then((d) => {
         if (active) setProjectIssues(d);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       active = false;
     };
