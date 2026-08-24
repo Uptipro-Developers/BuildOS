@@ -74,8 +74,6 @@ const COA: readonly { code: string; name: string; type: string }[] = [
   { code: "5400", name: "Overhead", type: "Expenses" },
 ] as const;
 
-type AccountOption = { code: string; name: string; type: string };
-
 // ── Source Fields ─────────────────────────────────────────────────────────────
 const SOURCE_FIELDS = [
   "Amount",
@@ -224,14 +222,27 @@ function amountFieldsFor(process: string): string[] {
 // ── Account Mapping Modal ──────────────────────────────────────────────────────
 function MappingModal({
   initial,
+  existingMappings,
   onClose,
   onSave,
 }: {
   initial?: ProcessMapping;
+  existingMappings: ProcessMapping[];
   onClose: () => void;
   onSave: (m: ProcessMapping) => void;
 }) {
   const today = formatDateByGeneralSettings(new Date());
+  // A process may only ever have one mapping. These are the processes
+  // already claimed by some other row — excluded from selection here so a
+  // second mapping can't be created for the same process (the row being
+  // edited, if any, keeps its own process available).
+  const takenProcesses = new Set(
+    existingMappings
+      .filter((m) => m.id !== initial?.id)
+      .map((m) => m.process),
+  );
+  const availableProcessesFor = (app: string) =>
+    (PROCESSES_BY_APP[app] ?? []).filter((p) => !takenProcesses.has(p));
   const accountOptions = COA.map((a) => `${a.code} ${a.name}`);
   const typeByAccount = Object.fromEntries(
     COA.map((a) => [`${a.code} ${a.name}`, a.type]),
@@ -249,7 +260,7 @@ function MappingModal({
     initial?.application ?? APPLICATIONS[0],
   );
   const [process, setProcess] = useState(
-    initial?.process ?? PROCESSES_BY_APP[APPLICATIONS[0]]?.[0] ?? "",
+    initial?.process ?? availableProcessesFor(APPLICATIONS[0])[0] ?? "",
   );
   const [lines, setLines] = useState<MappingLineForm[]>(() => {
     if (initial?.lines?.length) {
@@ -260,7 +271,7 @@ function MappingModal({
         amountField: l.field,
       }));
     }
-    const defProc = PROCESSES_BY_APP[APPLICATIONS[0]]?.[0] ?? "";
+    const defProc = availableProcessesFor(APPLICATIONS[0])[0] ?? "";
     const defField = amountFieldsFor(defProc)[0] ?? "Amount";
     return [
       {
@@ -278,7 +289,7 @@ function MappingModal({
     ];
   });
 
-  const availableProcesses = PROCESSES_BY_APP[application] ?? [];
+  const availableProcesses = availableProcessesFor(application);
   const debitCount = lines.filter((l) => l.action === "debit").length;
   const creditCount = lines.filter((l) => l.action === "credit").length;
   const allFilled =
@@ -287,7 +298,9 @@ function MappingModal({
       (l) => l.process.trim() && l.account.trim() && l.amountField.trim(),
     );
   const bothSides = debitCount > 0 && creditCount > 0;
-  const canSubmit = application && process.trim() && allFilled && bothSides;
+  const processAlreadyMapped = takenProcesses.has(process);
+  const canSubmit =
+    application && process.trim() && !processAlreadyMapped && allFilled && bothSides;
 
   const updateLine = (idx: number, patch: Partial<MappingLineForm>) =>
     setLines((prev) =>
@@ -296,7 +309,7 @@ function MappingModal({
 
   const updateApplication = (app: string) => {
     setApplication(app);
-    const first = PROCESSES_BY_APP[app]?.[0] ?? "";
+    const first = availableProcessesFor(app)[0] ?? "";
     setProcess(first);
     const opts = amountFieldsFor(first);
     const def = opts[0] ?? "Amount";
@@ -414,6 +427,11 @@ function MappingModal({
                 </select>
                 <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
               </div>
+              {availableProcesses.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Every process for {application} already has a mapping — edit the existing one instead.
+                </p>
+              )}
             </div>
           </div>
 
@@ -610,9 +628,6 @@ export function ProcessMappingPage() {
   const { logChange } = useChangelog();
   const [mappings, setMappings] = useState<ProcessMapping[]>([]);
   const [appFilter, setAppFilter] = useState<string>("All");
-  const [statusFilter, setStatusFilter] = useState<MappingStatus | "All">(
-    "All",
-  );
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<ProcessMapping | undefined>();
   const [deleteTarget, setDeleteTarget] = useState<ProcessMapping | null>(null);
@@ -623,11 +638,9 @@ export function ProcessMappingPage() {
       .catch(() => { });
   }, []);
 
-  const filtered = mappings.filter((m) => {
-    const matchApp = appFilter === "All" || m.application === appFilter;
-    const matchStatus = statusFilter === "All" || m.status === statusFilter;
-    return matchApp && matchStatus;
-  });
+  const filtered = mappings.filter(
+    (m) => appFilter === "All" || m.application === appFilter,
+  );
 
   const unmappedCount = mappings.filter((m) => m.status === "unmapped").length;
 
@@ -871,20 +884,6 @@ export function ProcessMappingPage() {
             </button>
           ))}
         </div>
-        <div className="flex gap-1 bg-white border border-gray-200 rounded-lg p-1">
-          {(["All", "mapped", "unmapped"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${statusFilter === s
-                ? "bg-emerald-600 text-white"
-                : "text-gray-600 hover:bg-gray-100"
-                }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* DataTable */}
@@ -911,6 +910,7 @@ export function ProcessMappingPage() {
       {showModal && (
         <MappingModal
           initial={editItem}
+          existingMappings={mappings}
           onClose={() => setShowModal(false)}
           onSave={save}
         />

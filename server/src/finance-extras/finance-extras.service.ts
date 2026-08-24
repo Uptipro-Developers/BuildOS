@@ -550,6 +550,20 @@ export class FinanceExtrasService {
     }
     async saveProcessMappings(mappings: any[]) {
         const list = Array.isArray(mappings) ? mappings : [];
+        // A process may only ever have one mapping — the frontend already
+        // gates this in the modal, but the whole list is replaced wholesale
+        // here, so it's enforced again server-side rather than trusted.
+        const seen = new Set<string>();
+        for (const m of list) {
+            const process = String(m?.process ?? '').trim();
+            if (!process) continue;
+            if (seen.has(process)) {
+                throw new BadRequestException(
+                    `"${process}" already has a mapping — a process can only be mapped once.`,
+                );
+            }
+            seen.add(process);
+        }
         await this.writeSetting(PROCESS_MAPPINGS_KEY, list);
         return list;
     }

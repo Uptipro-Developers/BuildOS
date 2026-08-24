@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { FinanceExtrasService } from './finance-extras.service';
 import { PostingEngineService } from './posting-engine.service';
 
@@ -101,5 +102,38 @@ describe('process categories', () => {
         const stored = await service.getProcessCategories();
         expect(stored).toHaveLength(1);
         expect(stored[0].id).toBe('cat-2');
+    });
+});
+
+describe('process mappings', () => {
+    it('refuses a list with two mappings for the same process', async () => {
+        // The frontend already gates this in the modal, but the whole list is
+        // replaced wholesale here, so a duplicate must be rejected server-side
+        // too rather than trusted.
+        const { service } = makeService();
+        await expect(
+            service.saveProcessMappings([
+                { id: 'pm-1', process: 'Payroll Disbursement' },
+                { id: 'pm-2', process: 'Payroll Disbursement' },
+            ]),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('allows distinct processes in the same save', async () => {
+        const { service } = makeService();
+        const saved = await service.saveProcessMappings([
+            { id: 'pm-1', process: 'Payroll Disbursement' },
+            { id: 'pm-2', process: 'Expense Claim' },
+        ]);
+        expect(saved).toHaveLength(2);
+    });
+
+    it('does not reject rows with a blank process', async () => {
+        const { service } = makeService();
+        const saved = await service.saveProcessMappings([
+            { id: 'pm-1', process: '' },
+            { id: 'pm-2', process: '' },
+        ]);
+        expect(saved).toHaveLength(2);
     });
 });
