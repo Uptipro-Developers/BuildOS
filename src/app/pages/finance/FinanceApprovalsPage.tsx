@@ -60,7 +60,6 @@ const typeColors: Record<string, string> = {
   "Budget Override": "bg-red-50 text-red-700",
   "Payment Request": "bg-emerald-50 text-emerald-700",
   "Vendor Invoice": "bg-purple-50 text-purple-700",
-  "Purchase Invoice": "bg-purple-50 text-purple-700",
 };
 
 function fmt(n: number) {
@@ -205,7 +204,6 @@ export function FinanceApprovalsPage() {
               "Budget Override",
               "Payment Request",
               "Vendor Invoice",
-              "Purchase Invoice",
             ] as const
           ).map((t) => (
             <option key={t} value={t}>

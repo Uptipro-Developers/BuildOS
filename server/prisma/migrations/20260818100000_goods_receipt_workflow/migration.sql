@@ -1,5 +1,0 @@
--- AlterTable
-ALTER TABLE "GoodsReceiptItem" ADD COLUMN IF NOT EXISTS "pendingReceived" DOUBLE PRECISION;
-ALTER TABLE "GoodsReceiptItem" ADD COLUMN IF NOT EXISTS "pendingAccepted" DOUBLE PRECISION;
-ALTER TABLE "GoodsReceiptItem" ADD COLUMN IF NOT EXISTS "pendingRejected" DOUBLE PRECISION;
-ALTER TABLE "GoodsReceiptItem" ADD COLUMN IF NOT EXISTS "pendingReason" TEXT;

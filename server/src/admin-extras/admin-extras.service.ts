@@ -17,7 +17,6 @@ import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 import { PermissionsService } from '../permissions/permissions.service';
 import { EmailTemplateService, type ComposedEmail } from '../email/email-template.service';
 import { WebhookService } from '../integrations/webhook.service';
-import { GoodsReceiptsService } from '../goods-receipts/goods-receipts.service';
 import {
     NOTIFICATION_EVENTS,
     NOTIFICATION_EVENT_KEYS,
@@ -104,7 +103,6 @@ export class AdminExtrasService {
         private permissions: PermissionsService,
         private emailTemplates: EmailTemplateService,
         private webhooks: WebhookService,
-        private goodsReceipts: GoodsReceiptsService,
     ) { }
 
     private settingsFilePath = path.join(process.cwd(), 'data', 'admin-settings.json');
@@ -706,8 +704,8 @@ export class AdminExtrasService {
         const known = ['view', 'create', 'edit', 'approve', 'delete'];
         const actions = Array.isArray(input?.actions)
             ? (input.actions as unknown[])
-                .map((a) => String(a).trim().toLowerCase())
-                .filter((a) => known.includes(a))
+                  .map((a) => String(a).trim().toLowerCase())
+                  .filter((a) => known.includes(a))
             : known;
         if (actions.length === 0) {
             throw new BadRequestException('A process must support at least one permission');
@@ -895,66 +893,66 @@ export class AdminExtrasService {
     }
 
     private async sendInviteEmail(email: string, name: string, activationLink: string): Promise<void> {
-        const companyProfile = await this.prisma.companyProfile.findUnique({ where: { id: 'singleton' } }).catch(() => null);
-        const companyName = String(companyProfile?.name ?? '').trim() || 'BuildOS';
+                const companyProfile = await this.prisma.companyProfile.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+                const companyName = String(companyProfile?.name ?? '').trim() || 'BuildOS';
 
-        // Admin-configured template ("New User Created") takes
-        // precedence over the built-in invite email.
-        try {
-            const userRecord = await this.prisma.user
-                .findUnique({ where: { email } })
-                .catch(() => null);
-            const vars = {
-                ...this.toTemplateVars(userRecord as any),
-                name,
-                user_name: name,
-                email,
-                user_email: email,
-                activation_link: activationLink,
-                company_name: companyName,
-            };
-            const templated = await this.composeTemplatedEmail('New User Created', vars);
-            if (templated) {
-                // The Activate Account button used to be appended
-                // unconditionally, so an admin could neither reposition it
-                // nor relabel it, and a template with its own button got a
-                // second one underneath. It is now only added when the
-                // template does not provide a link of its own — write
-                // `[[Activate Account]]({{activation_link}})` in the body
-                // to control it.
-                const fallbackButton = templated.hasLink
-                    ? ''
-                    : `<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;">` +
-                    `<a href="${this.escapeHtml(activationLink)}" style="display:inline-block;` +
-                    `background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;` +
-                    `font-weight:600;padding:12px 20px;border-radius:10px;">Activate Account</a></p>`;
-                await this.mailQueue.enqueueEmail({
+                // Admin-configured template ("New User Created") takes
+                // precedence over the built-in invite email.
+                try {
+                    const userRecord = await this.prisma.user
+                        .findUnique({ where: { email } })
+                        .catch(() => null);
+                    const vars = {
+                        ...this.toTemplateVars(userRecord as any),
+                        name,
+                        user_name: name,
+                        email,
+                        user_email: email,
+                        activation_link: activationLink,
+                        company_name: companyName,
+                    };
+                    const templated = await this.composeTemplatedEmail('New User Created', vars);
+                    if (templated) {
+                        // The Activate Account button used to be appended
+                        // unconditionally, so an admin could neither reposition it
+                        // nor relabel it, and a template with its own button got a
+                        // second one underneath. It is now only added when the
+                        // template does not provide a link of its own — write
+                        // `[[Activate Account]]({{activation_link}})` in the body
+                        // to control it.
+                        const fallbackButton = templated.hasLink
+                            ? ''
+                            : `<p style="margin:16px 0 0;font-family:Segoe UI,Arial,sans-serif;">` +
+                              `<a href="${this.escapeHtml(activationLink)}" style="display:inline-block;` +
+                              `background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px;` +
+                              `font-weight:600;padding:12px 20px;border-radius:10px;">Activate Account</a></p>`;
+                        await this.mailQueue.enqueueEmail({
+                            to: email,
+                            subject: templated.subject || `Activate your ${companyName} account`,
+                            text: templated.hasLink
+                                ? templated.text
+                                : `${templated.text}\n\nActivate your account: ${activationLink}`,
+                            html: `${templated.html}${fallbackButton}`,
+                            ...(templated.cc.length > 0 ? { cc: templated.cc } : {}),
+                        });
+                        return;
+                    }
+                } catch (error) {
+                    this.logger.warn(
+                        `Falling back to default invite email; template failed: ${(error as Error).message}`,
+                    );
+                }
+
+                const logo = this.resolveInviteLogo(companyProfile?.logoUrl);
+                const escapedName = this.escapeHtml(name);
+                const escapedCompanyName = this.escapeHtml(companyName);
+                const escapedActivationLink = this.escapeHtml(activationLink);
+
+                const payload: EmailPayload = {
                     to: email,
-                    subject: templated.subject || `Activate your ${companyName} account`,
-                    text: templated.hasLink
-                        ? templated.text
-                        : `${templated.text}\n\nActivate your account: ${activationLink}`,
-                    html: `${templated.html}${fallbackButton}`,
-                    ...(templated.cc.length > 0 ? { cc: templated.cc } : {}),
-                });
-                return;
-            }
-        } catch (error) {
-            this.logger.warn(
-                `Falling back to default invite email; template failed: ${(error as Error).message}`,
-            );
-        }
-
-        const logo = this.resolveInviteLogo(companyProfile?.logoUrl);
-        const escapedName = this.escapeHtml(name);
-        const escapedCompanyName = this.escapeHtml(companyName);
-        const escapedActivationLink = this.escapeHtml(activationLink);
-
-        const payload: EmailPayload = {
-            to: email,
-            subject: `Activate your ${companyName} account`,
-            text: `Hi ${name},\n\nYou have been invited to ${companyName}. Activate your account here: ${activationLink}\n\nThis link expires in 7 days.`,
-            html: `
+                    subject: `Activate your ${companyName} account`,
+                    text: `Hi ${name},\n\nYou have been invited to ${companyName}. Activate your account here: ${activationLink}\n\nThis link expires in 7 days.`,
+                    html: `
 <!doctype html>
 <html lang="en">
     <body style="margin:0;padding:0;background:#f3f8ff;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
@@ -1074,18 +1072,18 @@ export class AdminExtrasService {
         return fallbackUrl;
     }
 
-    private buildActivationLink(token: string): string {
-        return `${this.getFrontendBaseUrl()}/auth/activate?token=${encodeURIComponent(token)}`;
-    }
+        private buildActivationLink(token: string): string {
+                return `${this.getFrontendBaseUrl()}/auth/activate?token=${encodeURIComponent(token)}`;
+        }
 
-    private escapeHtml(value: string): string {
-        return String(value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
+        private escapeHtml(value: string): string {
+                return String(value)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+        }
 
     private normalizeApprovalStatus(status: string) {
         const s = String(status || '').toLowerCase();
@@ -1094,20 +1092,10 @@ export class AdminExtrasService {
         return 'pending';
     }
 
-    /**
-     * A purchase invoice's raw status, normalised for exact comparison.
-     * Mirrors normaliseStatus in ProcurementRequestsService and the frontend's
-     * procurementWorkflow.tsx, since the same column has been written in
-     * several shapes over time ("Pending Review", "pending-review").
-     */
-    private normaliseInvoiceStatus(status: unknown): string {
-        return String(status ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    }
-
     private normalizeAssignedApps(input: unknown, role?: string): string[] {
         const normalizedRole = String(role ?? '').trim().toLowerCase();
         const defaultApps = ['ess'];
-
+        
         // For admin role, only return all apps if no specific apps were provided
         if (normalizedRole.includes('admin')) {
             const hasSpecificApps = Array.isArray(input) && input.length > 0;
@@ -1156,10 +1144,6 @@ export class AdminExtrasService {
                 return 'p_material_requests';
             case 'Purchase Order':
                 return 'p_purchase_orders';
-            case 'Purchase Invoice':
-                return 'p_purchase_invoices';
-            case 'Goods Receipt':
-                return 'p_goods_receipt';
             default:
                 return null;
         }
@@ -1460,32 +1444,6 @@ export class AdminExtrasService {
                 description: e.description,
                 approvalFlow: flowForType('Expense Claim'),
             })));
-
-            // Pending Review invoices are deliberately excluded: they have not
-            // been sent for approval yet, so there is nothing here for an
-            // approver to decide. Without this filter every invoice ever raised
-            // showed up in the approvals queue as "pending" the moment it was
-            // created, before Finance ever sent it for approval.
-            const purchaseInvoices = (
-                await this.prisma.purchaseInvoice.findMany({ orderBy: { createdAt: 'desc' } })
-            ).filter((i) => this.normaliseInvoiceStatus(i.status) !== 'pending_review');
-            rows.push(...purchaseInvoices.map((i) => ({
-                id: i.id,
-                module: 'finance',
-                type: 'Purchase Invoice',
-                title: `${i.invoiceNo} — ${i.supplierName}`,
-                project: i.poRef ?? 'Finance',
-                // Invoices have no internal raiser — a supplier's name never
-                // matches a caller's identity, so the self-approval block never
-                // fires for this type, which is the correct outcome.
-                requestedBy: i.supplierName,
-                date: i.invoiceDate,
-                amount: i.total,
-                status: this.normalizeApprovalStatus(i.status),
-                urgency: 'normal',
-                description: i.poRef ? `PO ${i.poRef}` : '',
-                approvalFlow: flowForType('Purchase Invoice'),
-            })));
         }
 
         if (target === 'all' || target === 'procurement') {
@@ -1536,30 +1494,6 @@ export class AdminExtrasService {
                 urgency: 'normal',
                 description: `Expected ${o.expectedDate.toISOString().slice(0, 10)}`,
                 approvalFlow: flowForType('Purchase Order'),
-            })));
-
-            // A GRN still at "pending" has not been recorded yet — nothing for an
-            // approver to decide, same reasoning as excluding Pending Review
-            // invoices above.
-            const goodsReceipts = await this.prisma.goodsReceipt.findMany({
-                where: { NOT: { status: 'pending' } },
-                orderBy: { receivedDate: 'desc' },
-            });
-            rows.push(...goodsReceipts.map((g) => ({
-                id: g.id,
-                module: 'procurement',
-                type: 'Goods Receipt',
-                title: `${g.reference} — ${g.supplierName}`,
-                project: g.poRef ?? 'Procurement',
-                requestedBy: g.receivedBy,
-                date: g.receivedDate,
-                // Its terminal states (partial_delivery, over_supply, ...) don't
-                // contain "approve"/"paid"/"complete", so normalizeApprovalStatus
-                // would misread every one of them as still pending.
-                status: g.status === 'rejected' ? 'rejected' : g.status === 'pending_approval' ? 'pending' : 'approved',
-                urgency: 'normal',
-                description: g.mrRef ? `PO ${g.poRef ?? ''} · MR ${g.mrRef}` : `PO ${g.poRef ?? ''}`,
-                approvalFlow: flowForType('Goods Receipt'),
             })));
         }
 
@@ -1634,13 +1568,7 @@ export class AdminExtrasService {
             };
         });
 
-        // A non-admin sees only the approvals actually assigned to them — always,
-        // regardless of what `onlyMine` says, so this cannot be widened by a
-        // client-passed flag. Admins are never blocked by this: their "see all" is
-        // a visibility feature (Admin ▸ Approvals, `scope: "all"`), not an
-        // authority override, so their own `onlyMine` toggle is respected as-is.
-        const restrictToMine = isSuperUser ? Boolean(options?.onlyMine) : true;
-        return restrictToMine ? stamped.filter((row: any) => mayApprove(row)) : stamped;
+        return options?.onlyMine ? stamped.filter((row: any) => mayApprove(row)) : stamped;
     }
 
     async referenceData() {
@@ -1876,59 +1804,6 @@ export class AdminExtrasService {
             });
         }
 
-        // Try to find and update in purchase invoices. Mirrors the decision onto
-        // the linked purchase order (see ProcurementRequestsService.updateInvoice)
-        // so Procurement and Finance cannot disagree about where the money is.
-        // Posting to the ledger only unlocks once this lands on "approved".
-        const purchaseInvoice = await this.prisma.purchaseInvoice.findUnique({ where: { id } }).catch(() => null);
-        if (purchaseInvoice) {
-            await guard('p_purchase_invoices');
-            const invoiceStatus =
-                status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : 'pending_approval';
-            const updated = await this.prisma.purchaseInvoice.update({
-                where: { id },
-                data: {
-                    status: invoiceStatus,
-                    notes: data?.reason
-                        ? `${purchaseInvoice.notes ?? ''}\n${data.reason}`.trim()
-                        : purchaseInvoice.notes,
-                },
-            });
-            if (purchaseInvoice.poRef) {
-                const poStatus =
-                    invoiceStatus === 'approved'
-                        ? 'finance_accepted'
-                        : invoiceStatus === 'rejected'
-                            ? 'finance_declined'
-                            : null;
-                if (poStatus) {
-                    await this.prisma.purchaseOrder
-                        .updateMany({
-                            where: { OR: [{ poRef: purchaseInvoice.poRef }, { id: purchaseInvoice.poRef }] },
-                            data: {
-                                status: poStatus as any,
-                                financeDecidedAt: new Date(),
-                                ...(invoiceStatus === 'rejected'
-                                    ? { declineReason: data?.reason ?? 'Declined by Finance.' }
-                                    : {}),
-                            },
-                        })
-                        .catch(() => undefined);
-                }
-            }
-            return updated;
-        }
-
-        // Try to find and update in goods receipts. The guard and the stock
-        // posting both live in GoodsReceiptsService.accept — called from here
-        // or from the page's own Accept button, it is the same gate.
-        const goodsReceipt = await this.prisma.goodsReceipt.findUnique({ where: { id } }).catch(() => null);
-        if (goodsReceipt) {
-            if (status === 'approved') return this.goodsReceipts.accept(id, forUser);
-            if (status === 'rejected') return this.goodsReceipts.raiseRejectionNote(id, data?.reason ?? '', forUser);
-            throw new BadRequestException('A goods receipt can only be approved or rejected here.');
-        }
-
         throw new BadRequestException(`Approval with ID ${id} not found`);
     }
 
@@ -2053,23 +1928,16 @@ export class AdminExtrasService {
         return { message: 'Account activated. You can now log in.' };
     }
 
-    async findAllUsers(search?: string, department?: string, role?: string) {
+    async findAllUsers(search?: string) {
         const users = await this.prisma.user.findMany({
-            where: {
-                ...(search
-                    ? {
-                        OR: [
-                            { name: { contains: search, mode: 'insensitive' as const } },
-                            { email: { contains: search, mode: 'insensitive' as const } },
-                        ],
-                    }
-                    : {}),
-                // Exact match: this is how Procurement Settings › Signatories narrows
-                // the Name list to people whose own department/role columns match
-                // what was picked, rather than fetching every user in the company.
-                ...(department ? { department } : {}),
-                ...(role ? { role } : {}),
-            },
+            where: search
+                ? {
+                    OR: [
+                        { name: { contains: search, mode: 'insensitive' } },
+                        { email: { contains: search, mode: 'insensitive' } },
+                    ],
+                }
+                : {},
             select: {
                 id: true, userId: true, name: true, email: true, role: true,
                 department: true, phone: true, status: true, lastLogin: true,
@@ -2283,7 +2151,7 @@ export class AdminExtrasService {
     async updateRole(id: string, data: any) {
         const current = await this.prisma.appRole.findUnique({ where: { id } });
         if (!current) throw new BadRequestException('Role not found');
-
+        
         const isCurrentAdminRole = String(current.name ?? '').trim().toLowerCase() === 'admin';
         const requestedName =
             typeof data?.name === 'string' ? data.name.trim() : String(current.name ?? '').trim();
@@ -2367,10 +2235,10 @@ export class AdminExtrasService {
         const settings = await this.readAdminSettings();
         const name = String(data?.name ?? '').trim();
         if (!name) throw new BadRequestException('Issue type name is required');
-
+        
         const exists = settings.issueTypes.some((t: any) => t.name.toLowerCase() === name.toLowerCase());
         if (exists) throw new ConflictException(`Issue type '${name}' already exists`);
-
+        
         const next = {
             id: crypto.randomUUID(),
             name,
@@ -2415,10 +2283,10 @@ export class AdminExtrasService {
         const settings = await this.readAdminSettings();
         const name = String(data?.name ?? '').trim();
         if (!name) throw new BadRequestException('Category name is required');
-
+        
         const exists = settings.changeCategories.some((c: any) => c.name.toLowerCase() === name.toLowerCase());
         if (exists) throw new ConflictException(`Category '${name}' already exists`);
-
+        
         const next = {
             id: crypto.randomUUID(),
             name,

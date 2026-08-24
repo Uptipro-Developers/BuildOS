@@ -49,22 +49,10 @@ export class PurchaseOrdersController {
      * Finance never heard about any of it. Making them endpoints is also what
      * lets the server refuse an out-of-order move.
      */
-    /** "Save and Preview PO" in the wizard — see `createPO` for what this actually does. */
-    @Post(':id/create-po')
-    @RequiresProcess('p_purchase_orders', 'edit')
-    createPO(@Param('id') id: string, @Body() body: any) {
-        return this.purchaseOrdersService.createPO(id, {
-            paymentTermId: body?.paymentTermId,
-            deliverySplit: body?.deliverySplit,
-            signatories: body?.signatories,
-            paymentTermSnapshot: body?.paymentTermSnapshot,
-        });
-    }
-
     @Post(':id/send-to-finance')
     @RequiresProcess('p_purchase_orders', 'edit')
     sendToFinance(@Param('id') id: string, @Body() body: any) {
-        return this.purchaseOrdersService.sendToFinance(id, body?.actor, body?.paymentTermId, body?.deliverySplit);
+        return this.purchaseOrdersService.sendToFinance(id, body?.actor);
     }
 
     @Post(':id/request-payment-confirmation')

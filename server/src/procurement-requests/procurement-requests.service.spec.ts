@@ -84,7 +84,7 @@ function makeService() {
                 Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', poRef: 'PO-0031', supplierName: 'Dangote Cement', ...data }),
             ),
             findUnique: jest.fn(() =>
-                Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', poRef: 'PO-0031', status: 'approved', notes: null }),
+                Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', poRef: 'PO-0031', status: 'accepted', notes: null }),
             ),
         },
         materialRequest: {
@@ -108,10 +108,10 @@ function makeService() {
                     seq === 'RFQ'
                         ? 'RFQ-0011'
                         : seq === 'PurchaseOrder'
-                            ? 'PO-0032'
-                            : seq === 'PurchaseInvoice'
-                                ? 'PI-004'
-                                : 'PR-0019',
+                          ? 'PO-0032'
+                          : seq === 'PurchaseInvoice'
+                            ? 'PI-004'
+                            : 'PR-0019',
             }),
         ),
     };
@@ -404,9 +404,9 @@ describe('approving a supplier quote', () => {
  * read "Unpaid" forever, because nothing joined them.
  */
 describe('recording a decision on a purchase invoice', () => {
-    it('accepts the order in Procurement when Finance approves the invoice', async () => {
+    it('accepts the order in Procurement when Finance accepts the invoice', async () => {
         const { service, purchaseOrderUpdates } = makeService();
-        await service.updateInvoice('inv-1', { status: 'approved' });
+        await service.updateInvoice('inv-1', { status: 'accepted' });
 
         expect(purchaseOrderUpdates[0].data).toMatchObject({
             status: 'finance_accepted',
@@ -422,10 +422,10 @@ describe('recording a decision on a purchase invoice', () => {
         expect(purchaseOrderUpdates[0].data.paidAt).toBeInstanceOf(Date);
     });
 
-    it('sends the reason back with a rejection, so the buyer knows what to fix', async () => {
+    it('sends the reason back with a decline, so the buyer knows what to fix', async () => {
         const { service, purchaseOrderUpdates } = makeService();
         await service.updateInvoice('inv-1', {
-            status: 'rejected',
+            status: 'declined',
             notes: 'Budget line exhausted',
         });
 
@@ -469,67 +469,5 @@ describe('creating a purchase invoice', () => {
                 data: expect.objectContaining({ invoiceNo: 'PI-004' }),
             }),
         );
-    });
-});
-
-describe('sending a purchase invoice for approval', () => {
-    const balancedDraft = {
-        date: '2026-01-15',
-        method: 'Bank Transfer',
-        lines: [
-            { id: 'l1', glCode: '2100', account: 'Accounts Payable', debit: 100, credit: 0, description: '' },
-            { id: 'l2', glCode: '1000', account: 'Cash & Bank', debit: 0, credit: 100, description: '' },
-        ],
-    };
-
-    it('moves a pending-review invoice to pending approval, saving the posting draft', async () => {
-        const { service, prisma } = makeService();
-        prisma.purchaseInvoice.findUnique = jest.fn(() =>
-            Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', status: 'pending_review' }),
-        );
-
-        await service.sendInvoiceForApproval('inv-1', balancedDraft);
-
-        expect(prisma.purchaseInvoice.update).toHaveBeenCalledWith({
-            where: { id: 'inv-1' },
-            data: { status: 'pending_approval', postingDraft: balancedDraft },
-        });
-    });
-
-    it('refuses to send an invoice that is not pending review', async () => {
-        const { service, prisma } = makeService();
-        prisma.purchaseInvoice.findUnique = jest.fn(() =>
-            Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', status: 'approved' }),
-        );
-
-        await expect(service.sendInvoiceForApproval('inv-1', balancedDraft)).rejects.toThrow(
-            /pending review can be sent for approval/i,
-        );
-    });
-
-    it('refuses to send without any posting lines', async () => {
-        const { service, prisma } = makeService();
-        prisma.purchaseInvoice.findUnique = jest.fn(() =>
-            Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', status: 'pending_review' }),
-        );
-
-        await expect(
-            service.sendInvoiceForApproval('inv-1', { date: '2026-01-15', method: 'Bank Transfer', lines: [] }),
-        ).rejects.toThrow(/posting lines are required/i);
-    });
-
-    it('refuses to send unbalanced posting lines', async () => {
-        const { service, prisma } = makeService();
-        prisma.purchaseInvoice.findUnique = jest.fn(() =>
-            Promise.resolve({ id: 'inv-1', invoiceNo: 'PI-004', status: 'pending_review' }),
-        );
-
-        await expect(
-            service.sendInvoiceForApproval('inv-1', {
-                date: '2026-01-15',
-                method: 'Bank Transfer',
-                lines: [{ debit: 100, credit: 0 }, { debit: 0, credit: 50 }],
-            }),
-        ).rejects.toThrow(/must balance/i);
     });
 });

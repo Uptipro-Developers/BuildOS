@@ -1,19 +1,15 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  getProcessMappings,
-  saveProcessMappings,
-} from "../../api/finance-extras";
+import { getProcessMappings, saveProcessMappings } from "../../api/finance-extras";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import {
   Plus, Edit, Trash2, X, AlertTriangle,
-  Info, Download, ChevronDown,
+  Info, Download,
 } from "lucide-react";
 import { DataTable, type Column } from "../../components/DataTable";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { useChangelog } from "../../stores/changelogStore";
 import { exportCSV } from "../../utils/exportCSV";
-import { ACCOUNT_TYPES } from "./types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MappingStatus = "mapped" | "unmapped";
@@ -47,34 +43,30 @@ interface TableRow {
   mapping: ProcessMapping;
 }
 
-interface MappingLineForm {
-  process: string;
-  account: string; // "code name" e.g. "5100 Labour Costs"
-  action: "debit" | "credit";
-  amountField: string;
-}
-
 // ── Chart of Accounts ─────────────────────────────────────────────────────────
-const COA: readonly { code: string; name: string; type: string }[] = [
-  { code: "1100", name: "Accounts Receivable", type: "Assets" },
-  { code: "1110", name: "Cash & Bank", type: "Assets" },
-  { code: "1200", name: "Staff Advances", type: "Assets" },
-  { code: "1210", name: "Plant & Equipment", type: "Assets" },
-  { code: "1300", name: "Inventory", type: "Assets" },
-  { code: "2000", name: "Accounts Payable", type: "Liabilities" },
-  { code: "2100", name: "Accrued Liabilities", type: "Liabilities" },
-  { code: "2300", name: "Tax Payable – VAT", type: "Liabilities" },
-  { code: "2310", name: "Tax Payable – WHT", type: "Liabilities" },
-  { code: "2320", name: "PAYE Liability", type: "Liabilities" },
-  { code: "4100", name: "Contract Revenue", type: "Income" },
-  { code: "4200", name: "Service Income", type: "Income" },
-  { code: "5100", name: "Labour Costs", type: "Expenses" },
-  { code: "5200", name: "Material Costs", type: "Expenses" },
-  { code: "5300", name: "Equipment Costs", type: "Expenses" },
-  { code: "5400", name: "Overhead", type: "Expenses" },
+const COA: readonly { code: string; name: string }[] = [
+  { code: "1100", name: "Accounts Receivable" },
+  { code: "1110", name: "Cash & Bank" },
+  { code: "1200", name: "Staff Advances" },
+  { code: "1210", name: "Plant & Equipment" },
+  { code: "1300", name: "Inventory" },
+  { code: "2000", name: "Accounts Payable" },
+  { code: "2100", name: "Accrued Liabilities" },
+  { code: "2300", name: "Tax Payable – VAT" },
+  { code: "2310", name: "Tax Payable – WHT" },
+  { code: "2320", name: "PAYE Liability" },
+  { code: "4100", name: "Contract Revenue" },
+  { code: "4200", name: "Service Income" },
+  { code: "5100", name: "Labour Costs" },
+  { code: "5200", name: "Material Costs" },
+  { code: "5300", name: "Equipment Costs" },
+  { code: "5400", name: "Overhead" },
 ] as const;
 
-type AccountOption = { code: string; name: string; type: string };
+/** GL code lookup: account name → numeric code */
+const COA_MAP: Record<string, string> = Object.fromEntries(
+  COA.map((a) => [a.name, a.code]),
+);
 
 // ── Source Fields ─────────────────────────────────────────────────────────────
 const SOURCE_FIELDS = [
@@ -174,51 +166,14 @@ const APP_COLORS: Record<string, string> = {
   Finance: "bg-emerald-100 text-emerald-700",
 };
 
-/**
- * The amount field options for each process — what the "Amount" select in
- * the mapping modal actually offers, not just a single auto-picked default.
- * Keyed with the exact strings from PROCESSES_BY_APP so the two stay in
- * lockstep; the first entry in each list is the default a process falls
- * back to.
- */
-const AMOUNT_FIELDS_BY_PROCESS: Record<string, string[]> = {
-  "Purchase Request": ["purchaseValue", "unitPrice (per line item)", "negotiatedTotal (per item)"],
-  "Purchase Order": ["totalValue", "receivedValue", "unitCost (per item)", "qty", "tranchePercent (payment terms, must total 100%)"],
-  "Supplier Payment": ["paymentAmount", "netPayment", "whtDeducted"],
-  "Goods Receipt": ["orderedQty", "receivedQty", "acceptedQty", "rejectedQty"],
-  "Invoice Processing": ["invoiceTotal", "debitLine (DR Accounts Payable)", "creditLine (CR Cash & Bank)", "balanceCheck (debits = credits)"],
-  "Supplier Advance": ["advanceAmount"],
-  "Material Transfer": ["transferCost", "qty"],
-  "Stock Adjustment": ["adjustmentValue"],
-  "Material Return": ["qty"],
-  "Issue to Site": ["qty", "unitCost (for value)"],
-  "Goods Received Note": ["orderedQty", "receivedQty", "acceptedQty", "rejectedQty", "unitCost (from PO for value)"],
-  "Payroll Disbursement": ["paymentAmount", "netPayment"],
-  Payroll: ["grossSalary", "payeTax", "netPay"],
-  Allowances: ["allowanceTotal"],
-  "Salary Advance": ["advanceAmount"],
-  Deductions: ["deductionAmount"],
-  "Bonus Payment": ["bonusAmount"],
-  "Pension Remittance": ["pensionAmount", "employeePercent", "employerPercent"],
-  "Expense Claim": ["claimAmount"],
-  Reimbursement: ["reimbursementAmount"],
-  "Travel Advance": ["advanceAmount"],
-  "Leave Encashment": ["encashmentAmount"],
-  "Project Expense": ["expenseAmount"],
-  "Resource Allocation": ["labourCost", "plannedCost", "actualCost"],
-  "Contract Revenue": ["invoiceAmount"],
-  Retention: ["retentionAmount", "retentionPercent"],
-  "Milestone Billing": ["milestoneValue"],
-  "Bank Reconciliation": ["statementBalance", "ledgerBalance"],
-  "Journal Entry": ["debit (per line)", "credit (per line)", "balancedTotal (debits = credits)"],
-  "Asset Depreciation": ["depreciationAmount"],
-  "Tax Filing": ["taxAmount", "taxRate"],
-  "WHT Deduction": ["whtDeducted", "whtRate"],
-};
-
-/** Options for a process, falling back to the generic flat list for any process not yet in the map above. */
-function amountFieldsFor(process: string): string[] {
-  return AMOUNT_FIELDS_BY_PROCESS[process] ?? SOURCE_FIELDS;
+/** Build a mapping line with auto-populated glCode from COA_MAP */
+function ln(
+  id: string,
+  account: string,
+  action: "debit" | "credit",
+  field: string,
+): AccountMappingLine {
+  return { id, account, glCode: COA_MAP[account] ?? "", action, field };
 }
 
 // ── Account Mapping Modal ──────────────────────────────────────────────────────
@@ -232,126 +187,68 @@ function MappingModal({
   onSave: (m: ProcessMapping) => void;
 }) {
   const today = formatDateByGeneralSettings(new Date());
-  const accountOptions = COA.map((a) => `${a.code} ${a.name}`);
-  const typeByAccount = Object.fromEntries(
-    COA.map((a) => [`${a.code} ${a.name}`, a.type]),
-  );
-  const defaultDebit = accountOptions.includes("5100 Labour Costs")
-    ? "5100 Labour Costs"
-    : accountOptions[0] ?? "";
-  const defaultCredit = accountOptions.includes("1110 Cash & Bank")
-    ? "1110 Cash & Bank"
-    : accountOptions[1] ?? accountOptions[0] ?? "";
-  const accountNameOf = (account: string) =>
-    account.includes(" ") ? account.slice(account.indexOf(" ") + 1) : account;
-
   const [application, setApplication] = useState(
     initial?.application ?? APPLICATIONS[0],
   );
-  const [process, setProcess] = useState(
-    initial?.process ?? PROCESSES_BY_APP[APPLICATIONS[0]]?.[0] ?? "",
+  const [process, setProcess] = useState(initial?.process ?? "");
+  const [lines, setLines] = useState<AccountMappingLine[]>(
+    initial?.lines?.length
+      ? initial.lines
+      : [
+          ln(`nl-${Date.now()}-0`, COA[0].name, "debit", SOURCE_FIELDS[0]),
+          ln(`nl-${Date.now()}-1`, COA[1].name, "credit", SOURCE_FIELDS[0]),
+        ],
   );
-  const [lines, setLines] = useState<MappingLineForm[]>(() => {
-    if (initial?.lines?.length) {
-      return initial.lines.map((l) => ({
-        process: initial.process,
-        account: l.glCode ? `${l.glCode} ${l.account}`.trim() : l.account,
-        action: l.action,
-        amountField: l.field,
-      }));
-    }
-    const defProc = PROCESSES_BY_APP[APPLICATIONS[0]]?.[0] ?? "";
-    const defField = amountFieldsFor(defProc)[0] ?? "Amount";
-    return [
-      {
-        process: defProc,
-        account: defaultDebit,
-        action: "debit",
-        amountField: defField,
-      },
-      {
-        process: defProc,
-        account: defaultCredit,
-        action: "credit",
-        amountField: defField,
-      },
-    ];
-  });
 
   const availableProcesses = PROCESSES_BY_APP[application] ?? [];
-  const debitCount = lines.filter((l) => l.action === "debit").length;
-  const creditCount = lines.filter((l) => l.action === "credit").length;
-  const allFilled =
-    lines.length > 1 &&
-    lines.every(
-      (l) => l.process.trim() && l.account.trim() && l.amountField.trim(),
-    );
-  const bothSides = debitCount > 0 && creditCount > 0;
-  const canSubmit = application && process.trim() && allFilled && bothSides;
-
-  const updateLine = (idx: number, patch: Partial<MappingLineForm>) =>
-    setLines((prev) =>
-      prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
-    );
 
   const updateApplication = (app: string) => {
     setApplication(app);
-    const first = PROCESSES_BY_APP[app]?.[0] ?? "";
-    setProcess(first);
-    const opts = amountFieldsFor(first);
-    const def = opts[0] ?? "Amount";
+    setProcess("");
+  };
+
+  const updateAccount = (idx: number, accountName: string) => {
     setLines((prev) =>
-      prev.map((l) => ({
-        ...l,
-        process: first,
-        // Keep a manual choice only if it's still a valid option for the
-        // new process — the option list itself changes now, not just the
-        // recommended default, so a field from the old process may no
-        // longer exist to keep.
-        amountField: opts.includes(l.amountField) ? l.amountField : def,
-      })),
+      prev.map((l, i) =>
+        i === idx
+          ? { ...l, account: accountName, glCode: COA_MAP[accountName] ?? "" }
+          : l,
+      ),
     );
   };
 
-  const handleProcessChange = (next: string) => {
-    setProcess(next);
-    const opts = amountFieldsFor(next);
-    const def = opts[0] ?? "Amount";
-    setLines((prev) =>
-      prev.map((l) => ({
-        ...l,
-        process: next,
-        amountField: opts.includes(l.amountField) ? l.amountField : def,
-      })),
-    );
+  const updateLine = <K extends keyof AccountMappingLine>(
+    idx: number,
+    key: K,
+    val: AccountMappingLine[K],
+  ) => {
+    setLines((p) => p.map((l, i) => (i === idx ? { ...l, [key]: val } : l)));
   };
 
-  const addLine = () =>
-    setLines((prev) => [
-      ...prev,
-      {
-        process,
-        account: "",
-        action: "debit",
-        amountField: amountFieldsFor(process)[0] ?? "Amount",
-      },
+  const addLine = () => {
+    setLines((p) => [
+      ...p,
+      ln(`nl-${Date.now()}`, COA[0].name, "debit", SOURCE_FIELDS[0]),
     ]);
+  };
+
+  const removeLine = (idx: number) => {
+    setLines((p) => p.filter((_, i) => i !== idx));
+  };
+
+  const valid =
+    application &&
+    process.trim() &&
+    lines.length > 0 &&
+    lines.every((l) => l.account && l.field);
 
   function save() {
-    if (!canSubmit) return;
+    if (!valid) return;
     onSave({
       id: initial?.id ?? `pm-${Date.now()}`,
       application,
       process: process.trim(),
-      lines: lines.map((l) => ({
-        id: `nl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        account: accountNameOf(l.account),
-        glCode: l.account.includes(" ")
-          ? l.account.slice(0, l.account.indexOf(" "))
-          : "",
-        action: l.action,
-        field: l.amountField,
-      })),
+      lines,
       status: "mapped",
       lastUpdated: today,
       updatedBy: "Sola Adeleke",
@@ -361,242 +258,171 @@ function MappingModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">
-              {initial ? "Edit Account Mapping" : "New Account Mapping"}
-            </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Define which chart of accounts entries are affected by each
-              business process
-            </p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <h2 className="text-base font-semibold text-gray-900">
+            {initial ? "Edit Account Mapping" : "New Account Mapping"}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-5">
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
           {/* Application + Process */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Source Application <span className="text-red-500">*</span>
+                Application <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <select
-                  value={application}
-                  onChange={(e) => updateApplication(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white appearance-none pr-7 focus:ring-2 focus:ring-emerald-500"
-                >
-                  {APPLICATIONS.map((a) => (
-                    <option key={a}>{a}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-              </div>
+              <select
+                value={application}
+                onChange={(e) => updateApplication(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {APPLICATIONS.map((a) => (
+                  <option key={a}>{a}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Linked Process <span className="text-red-500">*</span>
+                Process <span className="text-red-500">*</span>
               </label>
-              <div className="relative">
-                <select
-                  value={process}
-                  onChange={(e) => handleProcessChange(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white appearance-none pr-7 focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="">Select process…</option>
-                  {availableProcesses.map((p) => (
-                    <option key={p}>{p}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
-              </div>
+              <select
+                value={process}
+                onChange={(e) => setProcess(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">Select process…</option>
+                {availableProcesses.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Process-to-Account Mapping */}
-          <div className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
-              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                Process-to-Account Mapping
+          {/* Mapping lines */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Account Mapping Lines
               </p>
               <button
                 onClick={addLine}
-                className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium"
               >
                 <Plus className="w-3.5 h-3.5" /> Add Line
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 text-[10px] text-gray-400 uppercase tracking-wide">
-                    <th className="px-3 py-2 font-semibold min-w-28">Account type</th>
-                    <th className="px-3 py-2 font-semibold min-w-36">Account No</th>
-                    <th className="px-3 py-2 font-semibold min-w-36">AccountName</th>
-                    <th className="px-3 py-2 font-semibold min-w-24">Action</th>
-                    <th className="px-3 py-2 font-semibold min-w-28">Amount</th>
-                    <th className="px-3 py-2 w-10"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line, idx) => {
-                    const lineType = typeByAccount[line.account] ?? "";
-                    const typeOpts = lineType
-                      ? [lineType, ...ACCOUNT_TYPES.filter((t) => t !== lineType)]
-                      : ACCOUNT_TYPES;
-                    const accountsForType = COA.filter(
-                      (a) => !lineType || a.type === lineType,
-                    );
-                    return (
-                      <tr key={idx} className="border-b border-gray-50 last:border-0">
 
-                        <td className="px-3 py-2">
-                          <select
-                            value={lineType}
-                            onChange={(e) => {
-                              const first = COA.find(
-                                (a) => a.type === e.target.value,
-                              );
-                              updateLine(idx, {
-                                account: first
-                                  ? `${first.code} ${first.name}`
-                                  : "",
-                              });
-                            }}
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500"
-                          >
-                            {typeOpts.map((t) => (
-                              <option key={t}>{t}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <select
-                            value={line.account}
-                            onChange={(e) =>
-                              updateLine(idx, { account: e.target.value })
-                            }
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500"
-                          >
-                            {line.account &&
-                              !accountsForType.some(
-                                (a) => `${a.code} ${a.name}` === line.account,
-                              ) && <option value={line.account}>{line.account}</option>}
-                            {accountsForType.map((a) => (
-                              <option key={a.code} value={`${a.code} ${a.name}`}>
-                                {a.code} – {a.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            value={accountNameOf(line.account)}
-                            readOnly
-                            placeholder="Account name"
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-600 pointer-events-none"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <select
-                            value={line.action}
-                            onChange={(e) =>
-                              updateLine(idx, {
-                                action: e.target.value as "debit" | "credit",
-                              })
-                            }
-                            className={`w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-medium ${line.action === "debit"
-                              ? "text-blue-700 bg-blue-50"
-                              : "text-green-700 bg-green-50"
-                              }`}
-                          >
-                            <option value="debit">Debit</option>
-                            <option value="credit">Credit</option>
-                          </select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <select
-                            value={line.amountField}
-                            onChange={(e) =>
-                              updateLine(idx, { amountField: e.target.value })
-                            }
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500"
-                          >
-                            {/* A mapping saved before this process had its own field list may have a
-                                value that isn't one of the current options — keep it selectable rather
-                                than silently losing what was actually saved. */}
-                            {line.amountField &&
-                              !amountFieldsFor(process).includes(line.amountField) && (
-                                <option value={line.amountField}>{line.amountField}</option>
-                              )}
-                            {amountFieldsFor(process).map((f) => (
-                              <option key={f}>{f}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <button
-                            onClick={() =>
-                              setLines((prev) =>
-                                prev.filter((_, i) => i !== idx),
-                              )
-                            }
-                            disabled={lines.length <= 1}
-                            className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Remove line"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center justify-between gap-2 px-4 pt-2 pb-3">
-              <p className="text-xs text-gray-400">
-                <span className="text-blue-600 font-medium">
-                  {debitCount} Debit
+            <div className="space-y-2">
+              {/* Column headers */}
+              <div className="grid grid-cols-[2fr_72px_112px_1.3fr_32px] gap-2 px-1">
+                <span className="text-xs text-gray-400 font-medium">
+                  Account
                 </span>
-                {" · "}
-                <span className="text-green-600 font-medium">
-                  {creditCount} Credit
+                <span className="text-xs text-gray-400 font-medium text-center">
+                  GL Code
                 </span>
-                {" line"}
-                {lines.length === 1 ? "" : "s"}
-              </p>
-              <p className="text-xs text-gray-400">
-                Each line maps an account to this process
-              </p>
+                <span className="text-xs text-gray-400 font-medium">
+                  Action
+                </span>
+                <span className="text-xs text-gray-400 font-medium">
+                  Field (Source)
+                </span>
+                <span />
+              </div>
+
+              {lines.map((line, idx) => (
+                <div
+                  key={line.id}
+                  className="grid grid-cols-[2fr_72px_112px_1.3fr_32px] gap-2 items-center"
+                >
+                  {/* Account dropdown */}
+                  <select
+                    value={line.account}
+                    onChange={(e) => updateAccount(idx, e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {COA.map((a) => (
+                      <option key={a.code} value={a.name}>
+                        {a.code} · {a.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* GL Code — read-only, auto-filled */}
+                  <input
+                    value={line.glCode}
+                    readOnly
+                    tabIndex={-1}
+                    className="border border-gray-100 bg-gray-50 rounded-lg px-2 py-2 text-sm text-center font-mono text-gray-500 cursor-default select-none focus:outline-none"
+                  />
+
+                  {/* Action */}
+                  <select
+                    value={line.action}
+                    onChange={(e) =>
+                      updateLine(
+                        idx,
+                        "action",
+                        e.target.value as "debit" | "credit",
+                      )
+                    }
+                    className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="debit">Debit</option>
+                    <option value="credit">Credit</option>
+                  </select>
+
+                  {/* Field dropdown */}
+                  <select
+                    value={line.field}
+                    onChange={(e) => updateLine(idx, "field", e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    {SOURCE_FIELDS.map((f) => (
+                      <option key={f}>{f}</option>
+                    ))}
+                  </select>
+
+                  {/* Remove */}
+                  <button
+                    onClick={() => removeLine(idx)}
+                    disabled={lines.length <= 1}
+                    className="p-1.5 text-gray-300 hover:text-red-500 disabled:opacity-30 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
             </div>
-            {!bothSides && (
-              <p className="text-xs text-red-500 flex items-center gap-1 px-4 pb-3">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                Add at least one Debit and one Credit line so the posting can
-                balance.
+
+            {lines.length === 0 && (
+              <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" /> At least one mapping
+                line is required.
               </p>
             )}
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 rounded-b-2xl bg-gray-50">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-100"
           >
             Cancel
           </button>
           <button
             onClick={save}
-            disabled={!canSubmit}
-            className="px-5 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            disabled={!valid}
+            className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Plus className="w-4 h-4" />
             {initial ? "Save Changes" : "Create Mapping"}
           </button>
         </div>
@@ -620,7 +446,7 @@ export function ProcessMappingPage() {
   useEffect(() => {
     getProcessMappings()
       .then((d) => setMappings(d as ProcessMapping[]))
-      .catch(() => { });
+      .catch(() => {});
   }, []);
 
   const filtered = mappings.filter((m) => {
@@ -808,8 +634,8 @@ export function ProcessMappingPage() {
       <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
         <Info className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
         <p className="text-sm text-emerald-800">
-          Configure each process to a Chart of Accounts entry. Postings must
-          balance (debits = credits) before they are applied to the ledger.
+          Each process can have multiple debit and credit lines. All line fields
+          are applied when the process fires a financial posting.
         </p>
       </div>
 
@@ -844,10 +670,10 @@ export function ProcessMappingPage() {
           <p className="text-2xl font-bold text-blue-600">
             {mappings.length > 0
               ? Math.round(
-                (mappings.filter((m) => m.status === "mapped").length /
-                  mappings.length) *
-                100,
-              )
+                  (mappings.filter((m) => m.status === "mapped").length /
+                    mappings.length) *
+                    100,
+                )
               : 0}
             %
           </p>
@@ -862,10 +688,11 @@ export function ProcessMappingPage() {
             <button
               key={a}
               onClick={() => setAppFilter(a)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors ${appFilter === a
-                ? "bg-emerald-600 text-white"
-                : "text-gray-600 hover:bg-gray-100"
-                }`}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors ${
+                appFilter === a
+                  ? "bg-emerald-600 text-white"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
             >
               {a}
             </button>
@@ -876,10 +703,11 @@ export function ProcessMappingPage() {
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${statusFilter === s
-                ? "bg-emerald-600 text-white"
-                : "text-gray-600 hover:bg-gray-100"
-                }`}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${
+                statusFilter === s
+                  ? "bg-emerald-600 text-white"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
             >
               {s}
             </button>

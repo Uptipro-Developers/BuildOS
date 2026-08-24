@@ -1,4 +1,4 @@
-import { Fragment, useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { ChevronUp, ChevronDown, ArrowUpDown, Search, X } from "lucide-react";
 
 export interface Column<T> {
@@ -22,10 +22,6 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
   headerExtra?: ReactNode;
   pageSize?: number;
-  /** Whether `row` should show its expanded content, rendered by `renderExpanded`. */
-  isExpanded?: (row: T) => boolean;
-  /** Full-width content shown in its own row directly beneath an expanded row. */
-  renderExpanded?: (row: T) => ReactNode;
 }
 
 type SortDir = "asc" | "desc" | null;
@@ -44,7 +40,6 @@ export function DataTable<T>({
   columns, data, keyExtractor, searchPlaceholder = "Search...",
   searchFields, emptyMessage = "No data found",
   onRowClick, headerExtra, pageSize = 50,
-  isExpanded, renderExpanded,
 }: DataTableProps<T>) {
   const [globalSearch, setGlobalSearch] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "", dir: null });
@@ -202,27 +197,14 @@ export function DataTable<T>({
             {paged.length === 0 ? (
               <tr><td colSpan={columns.length} className="px-4 py-12 text-center text-sm text-gray-400">{emptyMessage}</td></tr>
             ) : (
-              paged.map(row => {
-                const key = keyExtractor(row);
-                const expanded = Boolean(renderExpanded && isExpanded?.(row));
-                return (
-                  <Fragment key={key}>
-                    <tr onClick={() => onRowClick?.(row)}
-                      className={`transition-colors ${onRowClick ? "cursor-pointer hover:bg-emerald-50/40" : "hover:bg-gray-50"}`}>
-                      {columns.map(col => (
-                        <td key={col.key} className={`px-4 py-3 text-sm ${col.className ?? ""}`}>{col.render(row)}</td>
-                      ))}
-                    </tr>
-                    {expanded && (
-                      <tr className="bg-gray-50/60">
-                        <td colSpan={columns.length} className="px-4 py-4">
-                          {renderExpanded!(row)}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })
+              paged.map(row => (
+                <tr key={keyExtractor(row)} onClick={() => onRowClick?.(row)}
+                  className={`transition-colors ${onRowClick ? "cursor-pointer hover:bg-emerald-50/40" : "hover:bg-gray-50"}`}>
+                  {columns.map(col => (
+                    <td key={col.key} className={`px-4 py-3 text-sm ${col.className ?? ""}`}>{col.render(row)}</td>
+                  ))}
+                </tr>
+              ))
             )}
           </tbody>
         </table>

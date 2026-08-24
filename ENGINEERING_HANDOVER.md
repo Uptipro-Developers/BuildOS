@@ -243,7 +243,7 @@ Four decorators, read via `Reflector` metadata by whichever guard is actually ap
 
 ### 7.1 Frontend ⇄ backend contract
 
-- Base URL: `VITE_API_URL`, defaulting to `http://localhost:3001/api`.
+- Base URL: `VITE_API_URL`, defaulting to `https://buildos-production-e328.up.railway.app/api`.
 - `src/app/api/client.ts` centralizes fetch, bearer-token injection, one-retry-on-401 refresh, and error-message extraction. All 60 per-resource files in `src/app/api/` sit on top of it — new resources should follow the same thin-wrapper pattern.
 - Response envelope is inconsistent across controllers: some return `{ success, data }`, some return `{ data, total }` (paginated), some return the raw payload or array directly. The client ships `unwrapApiResult()` and `toApiArray()` specifically to paper over this — use them for any new API file rather than assuming a shape.
 - There is no generated OpenAPI/Swagger spec (`@nestjs/swagger` is not a dependency, re-confirmed). `BuildOS.postman_collection.json` is the closest thing to living API documentation.
@@ -363,10 +363,10 @@ Re-measured in this revision: **~105 KB, 85 async methods** in one class (prior 
 
 ### 9.1 Frontend (`.env.example`, repo root)
 
-| Variable                 | In `.env.example`?                       | Purpose                                                 | Default / fallback          |
-| ------------------------ | ---------------------------------------- | ------------------------------------------------------- | --------------------------- |
-| `VITE_GA_MEASUREMENT_ID` | Yes (only var present)                   | Google Analytics measurement ID.                        | empty                       |
-| `VITE_API_URL`           | Read in code, absent from `.env.example` | Backend base URL used by every `src/app/api/*.ts` file. | `http://localhost:3001/api` |
+| Variable                 | In `.env.example`?                       | Purpose                                                 | Default / fallback                                   |
+| ------------------------ | ---------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `VITE_GA_MEASUREMENT_ID` | Yes (only var present)                   | Google Analytics measurement ID.                        | empty                                                |
+| `VITE_API_URL`           | Read in code, absent from `.env.example` | Backend base URL used by every `src/app/api/*.ts` file. | `https://buildos-production-e328.up.railway.app/api` |
 
 ### 9.2 Backend (`server/.env.example`)
 

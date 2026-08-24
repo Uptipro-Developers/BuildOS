@@ -7,117 +7,61 @@ import {
   ChevronRight,
   XCircle,
   X,
+  Plus,
   LinkIcon,
-  FileEdit,
-  FileText,
-  AlertTriangle,
-  CheckCircle2,
-  Mail,
-  Send,
-  Package,
 } from "lucide-react";
 import { notifyLoadFailure } from "../../utils/loadFailure";
 import { getReferenceData } from "../../api/reference-data";
+import { fetchPurchaseOrders } from "../../api/purchase-orders";
 import {
   getGoodsReceipts,
-  updateGoodsReceiptRecord,
-  acceptGoodsReceipt,
-  raiseGoodsReceiptRejectionNote,
+  openGoodsReceipt,
+  receiveGoods,
   rejectGoodsReceipt,
-  sendGoodsReceiptToFinance,
-  notifyGoodsReceiptSupplier,
   type GoodsReceipt,
-  type GoodsReceiptItem,
 } from "../../api/goods-receipts";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import { StatusBadge } from "../../components/StatusBadge";
 import { RowAction, RowActionNote, RowActions } from "../../components/RowAction";
-import { GOODS_RECEIPT_STATUS, statusDef } from "../../utils/procurementWorkflow";
+import {
+  GOODS_RECEIPT_STATUS,
+  statusDef,
+} from "../../utils/procurementWorkflow";
 
-/** Mirrors GoodsReceiptsService.timingBucket on the server. */
-function paymentBucket(po?: GoodsReceipt["purchaseOrder"]): "before" | "after" | "both" {
-  const tranches = po?.paymentTermSnapshot?.tranches ?? [];
-  if (tranches.length === 0) return "after";
-  const beforeCount = tranches.filter((t) => t.timing === "on_po_approval").length;
-  if (beforeCount === 0) return "after";
-  if (beforeCount === tranches.length) return "before";
-  return "both";
-}
-
-function paymentTermLabel(po?: GoodsReceipt["purchaseOrder"]): string {
-  const snap = po?.paymentTermSnapshot;
-  const tranches = snap?.tranches ?? [];
-  if (tranches.length > 0) return tranches.map((t) => `${t.percent}% ${t.title}`).join(" + ");
-  return snap?.name || "—";
-}
-
-const DECIDED_STATUSES = ["partial_delivery", "over_supply", "under_supply", "fully_received"];
-
-/** Nothing has been accepted before a decision, and nothing more before delivery. */
-function canSendToFinance(grn: GoodsReceipt): boolean {
-  if (!DECIDED_STATUSES.includes(grn.status)) return false;
-  if (!grn.purchaseOrder || grn.purchaseOrder.sentToFinance) return false;
-  return paymentBucket(grn.purchaseOrder) !== "before";
-}
-
-function hasOutstanding(grn: GoodsReceipt): boolean {
-  return grn.items.some((it) => it.accepted < it.ordered);
-}
-
-function hasRejections(grn: GoodsReceipt): boolean {
-  return grn.items.some((it) => it.rejected > 0 || (it.pendingRejected ?? 0) > 0);
-}
-
-/** What to show for a line — the not-yet-decided draft while one is pending, else the settled cumulative total. */
-function displayQty(it: GoodsReceiptItem, usePending: boolean) {
-  return usePending
-    ? {
-      received: it.pendingReceived ?? 0,
-      accepted: it.pendingAccepted ?? 0,
-      rejected: it.pendingRejected ?? 0,
-      reason: it.pendingReason,
-    }
-    : { received: it.received, accepted: it.accepted, rejected: it.rejected, reason: it.reason };
-}
-
-const TABS: { key: string; label: string; match: (g: GoodsReceipt) => boolean }[] = [
-  { key: "all", label: "All GRNs", match: () => true },
-  { key: "pending", label: "Pending", match: (g) => g.status === "pending" || g.status === "pending_approval" },
-  { key: "partial", label: "Partial", match: (g) => g.status === "partial_delivery" },
-  { key: "completed", label: "Completed", match: (g) => g.status === "fully_received" },
-  { key: "over_supply", label: "Over Supply", match: (g) => g.status === "over_supply" },
-  { key: "under_supply", label: "Under Supply", match: (g) => g.status === "under_supply" },
-  { key: "rejected", label: "Rejected", match: (g) => g.status === "rejected" },
+const TABS: { key: string; label: string }[] = [
+  { key: "all", label: "All GRNs" },
+  { key: "pending", label: "Awaiting Receipt" },
+  { key: "received", label: "Received" },
+  { key: "rejected", label: "Rejected" },
 ];
 
-/** One line as it is being keyed in the record form. */
+/** One line as it is being keyed in the receive form. */
 interface ReceiveLineForm {
   material: string;
   unit: string;
   ordered: number;
-  outstanding: number;
   received: string;
   accepted: string;
   rejected: string;
   reason: string;
 }
 
-type RecordMode = "record" | "edit" | "remaining";
-
 /**
- * Records what arrived. Nothing here touches stock — Update Record, Edit
- * Record and Record Remaining Delivery all post to the same draft, decided
- * later by Accept & Update Stock.
+ * Records what arrived and posts it to stock.
+ *
+ * The quantities are keyed against the lines of the purchase order the receipt
+ * was opened for, so a receipt can only ever be for something that was actually
+ * ordered — the old form let a delivery be typed in from scratch, against a
+ * free-text material and a hand-entered "ordered" figure, and then stored none
+ * of it anywhere.
  */
-function RecordDeliveryModal({
+function ReceiveDeliveryModal({
   grn,
-  mode,
   onClose,
   onDone,
 }: {
   grn: GoodsReceipt;
-  mode: RecordMode;
   onClose: () => void;
   onDone: (updated: GoodsReceipt) => void;
 }) {
@@ -126,31 +70,18 @@ function RecordDeliveryModal({
   const [deliveryNote, setDeliveryNote] = useState(grn.deliveryNote ?? "");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
-  const [lines, setLines] = useState<ReceiveLineForm[]>(() =>
-    grn.items.map((it) => {
-      const outstanding = Math.max(it.ordered - it.accepted, 0);
-      const defaults =
-        mode === "edit"
-          ? {
-            received: it.pendingReceived ?? 0,
-            accepted: it.pendingAccepted ?? 0,
-            rejected: it.pendingRejected ?? 0,
-            reason: it.pendingReason ?? "",
-          }
-          : mode === "remaining"
-            ? { received: outstanding, accepted: outstanding, rejected: 0, reason: "" }
-            : { received: it.ordered, accepted: it.ordered, rejected: 0, reason: "" };
-      return {
-        material: it.material,
-        unit: it.unit,
-        ordered: it.ordered,
-        outstanding,
-        received: String(defaults.received),
-        accepted: String(defaults.accepted),
-        rejected: String(defaults.rejected),
-        reason: defaults.reason,
-      };
-    }),
+  const [lines, setLines] = useState<ReceiveLineForm[]>(
+    grn.items.map((it) => ({
+      material: it.material,
+      unit: it.unit,
+      ordered: it.ordered,
+      // Defaults to the full order, which is what usually turns up; anything
+      // short or damaged is corrected line by line.
+      received: String(it.ordered),
+      accepted: String(it.ordered),
+      rejected: "0",
+      reason: "",
+    })),
   );
 
   useEffect(() => {
@@ -163,7 +94,7 @@ function RecordDeliveryModal({
         setStores(list);
         setStoreId((prev) => prev || list[0]?.id || "");
       })
-      .catch(() => { });
+      .catch(() => {});
   }, []);
 
   function update(i: number, key: keyof ReceiveLineForm, value: string) {
@@ -171,6 +102,8 @@ function RecordDeliveryModal({
       prev.map((l, j) => {
         if (j !== i) return l;
         const next = { ...l, [key]: value };
+        // Accepted follows received minus rejected unless it is being edited
+        // directly, so the common case needs one number rather than three.
         if (key === "received" || key === "rejected") {
           const received = parseFloat(next.received) || 0;
           const rejected = parseFloat(next.rejected) || 0;
@@ -198,7 +131,7 @@ function RecordDeliveryModal({
     if (!valid || saving) return;
     setSaving(true);
     try {
-      const updated = await updateGoodsReceiptRecord(grn.id, {
+      const updated = await receiveGoods(grn.id, {
         storeId,
         storeName: stores.find((s) => s.id === storeId)?.name ?? "",
         deliveryNote: deliveryNote.trim() || undefined,
@@ -207,6 +140,7 @@ function RecordDeliveryModal({
         items: lines.map((l) => ({
           material: l.material,
           unit: l.unit,
+          ordered: l.ordered,
           received: parseFloat(l.received) || 0,
           accepted: parseFloat(l.accepted) || 0,
           rejected: parseFloat(l.rejected) || 0,
@@ -215,21 +149,13 @@ function RecordDeliveryModal({
       });
       onDone(updated);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save the record.");
+      toast.error(
+        e instanceof Error ? e.message : "Could not record the delivery.",
+      );
     } finally {
       setSaving(false);
     }
   }
-
-  const title =
-    mode === "edit" ? "Edit Record" : mode === "remaining" ? "Record Remaining Delivery" : "Update Record";
-  const confirmLabel = saving
-    ? "Saving…"
-    : mode === "edit"
-      ? "Save Changes"
-      : mode === "remaining"
-        ? "Record Delivery"
-        : "Save Record";
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -237,13 +163,16 @@ function RecordDeliveryModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
-              {title} — {grn.reference}
+              Receive Delivery — {grn.reference}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               {grn.supplierName} · purchase order {grn.poRef}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -253,6 +182,9 @@ function RecordDeliveryModal({
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Receiving store <span className="text-red-500">*</span>
               </label>
+              {/* Stock has to land somewhere specific: this store is what the
+                  movement, the shelf quantity and the storefront all update
+                  against. */}
               <select
                 value={storeId}
                 onChange={(e) => setStoreId(e.target.value)}
@@ -267,7 +199,9 @@ function RecordDeliveryModal({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Delivery note no.</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Delivery note no.
+              </label>
               <input
                 value={deliveryNote}
                 onChange={(e) => setDeliveryNote(e.target.value)}
@@ -298,9 +232,6 @@ function RecordDeliveryModal({
                     </td>
                     <td className="px-3 py-1.5 text-right text-gray-600">
                       {l.ordered}
-                      {mode === "remaining" && (
-                        <p className="text-[11px] text-blue-600">{l.outstanding} outstanding</p>
-                      )}
                     </td>
                     {(["received", "accepted", "rejected"] as const).map((k) => (
                       <td key={k} className="px-2 py-1.5">
@@ -317,7 +248,11 @@ function RecordDeliveryModal({
                       <input
                         value={l.reason}
                         onChange={(e) => update(i, "reason", e.target.value)}
-                        placeholder={(parseFloat(l.rejected) || 0) > 0 ? "Required" : "If any rejections"}
+                        placeholder={
+                          (parseFloat(l.rejected) || 0) > 0
+                            ? "Required"
+                            : "If any rejections"
+                        }
                         className="w-40 border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                     </td>
@@ -328,7 +263,9 @@ function RecordDeliveryModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Notes
+            </label>
             <textarea
               rows={2}
               value={notes}
@@ -346,7 +283,10 @@ function RecordDeliveryModal({
             </ul>
           )}
           <p className="text-xs text-gray-400">
-            This only records what arrived — nothing is posted to stock until it is accepted.
+            Accepted quantities are added to the chosen store and to the material
+            catalogue, and recorded as an incoming stock movement against{" "}
+            {grn.reference}. Rejected quantities are recorded but not added to
+            stock.
           </p>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
@@ -359,10 +299,10 @@ function RecordDeliveryModal({
           <button
             onClick={() => void save()}
             disabled={!valid || saving}
-            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <PackageCheck className="w-4 h-4" />
-            {confirmLabel}
+            {saving ? "Posting to stock…" : "Receive & Update Stock"}
           </button>
         </div>
       </div>
@@ -370,26 +310,45 @@ function RecordDeliveryModal({
   );
 }
 
-/** Sends a pending record back for correction — the reject side of the decision. */
-function RejectionNoteModal({
-  grn,
+/** Opens a receipt for a confirmed order that does not have one yet. */
+function OpenReceiptModal({
   onClose,
   onDone,
 }: {
-  grn: GoodsReceipt;
   onClose: () => void;
-  onDone: (updated: GoodsReceipt) => void;
+  onDone: (grn: GoodsReceipt) => void;
 }) {
-  const [reason, setReason] = useState("");
+  const [orders, setOrders] = useState<
+    { id: string; poRef: string; supplier: string }[]
+  >([]);
+  const [orderId, setOrderId] = useState("");
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    // Only confirmed orders: the goods are paid for and on their way, which is
+    // the point at which a delivery can be expected.
+    fetchPurchaseOrders({ status: "confirmed" })
+      .then((rows) => {
+        const list = rows.map((o) => ({
+          id: o.id,
+          poRef: o.poRef,
+          supplier: o.supplier,
+        }));
+        setOrders(list);
+        setOrderId((prev) => prev || list[0]?.id || "");
+      })
+      .catch((err) => notifyLoadFailure("purchase orders", err));
+  }, []);
+
   async function save() {
-    if (!reason.trim() || saving) return;
+    if (!orderId || saving) return;
     setSaving(true);
     try {
-      onDone(await raiseGoodsReceiptRejectionNote(grn.id, reason.trim()));
+      onDone(await openGoodsReceipt(orderId));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not raise the rejection note.");
+      toast.error(
+        e instanceof Error ? e.message : "Could not open the goods receipt.",
+      );
     } finally {
       setSaving(false);
     }
@@ -399,23 +358,42 @@ function RejectionNoteModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">Raise Rejection Note — {grn.reference}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <h2 className="text-base font-semibold text-gray-900">
+            Open a goods receipt
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
         <div className="px-6 py-5 space-y-3">
           <p className="text-xs text-gray-500">
-            Sends the record back to whoever recorded it, so it can be corrected. Nothing is posted to
-            stock.
+            Confirming a purchase order opens its receipt automatically. This is
+            here for orders confirmed before that was the case.
           </p>
-          <textarea
-            rows={3}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="What needs to be corrected?"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Confirmed purchase order
+            </label>
+            <select
+              value={orderId}
+              onChange={(e) => setOrderId(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">
+                {orders.length === 0
+                  ? "No confirmed orders awaiting delivery"
+                  : "Select an order…"}
+              </option>
+              {orders.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.poRef} — {o.supplier}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button
@@ -426,208 +404,10 @@ function RejectionNoteModal({
           </button>
           <button
             onClick={() => void save()}
-            disabled={!reason.trim() || saving}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-40 flex items-center gap-2"
+            disabled={!orderId || saving}
+            className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <AlertTriangle className="w-4 h-4" />
-            {saving ? "Sending…" : "Raise Rejection Note"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Notifies the supplier of an over- or under-supply, with an editable prefilled message. */
-function NotifySupplierModal({
-  grn,
-  onClose,
-  onDone,
-}: {
-  grn: GoodsReceipt;
-  onClose: () => void;
-  onDone: (updated: GoodsReceipt) => void;
-}) {
-  const kind = grn.status === "over_supply" ? "Over Supply" : grn.status === "under_supply" ? "Under Supply" : "Delivery Notice";
-  const [email, setEmail] = useState(grn.purchaseOrder?.supplier?.email ?? "");
-  const defaultMessage = useMemo(() => {
-    const variances = grn.items
-      .filter((it) => it.received !== it.ordered)
-      .map((it) => {
-        const variance = it.received - it.ordered;
-        return `• ${it.material}: ordered ${it.ordered}, received ${it.received} (${variance > 0 ? "+" : ""}${variance})`;
-      });
-    return [
-      `Dear ${grn.supplierName},`,
-      "",
-      `We are writing regarding ${grn.reference} against purchase order ${grn.poRef ?? ""} — we noted the following ${kind.toLowerCase()}:`,
-      "",
-      ...variances,
-      "",
-      "Kindly advise on how you wish to proceed.",
-      "",
-      "Regards,",
-      "Procurement Team",
-    ].join("\n");
-  }, [grn, kind]);
-  const [message, setMessage] = useState(defaultMessage);
-  const [saving, setSaving] = useState(false);
-
-  async function send() {
-    if (!email.trim() || !message.trim() || saving) return;
-    setSaving(true);
-    try {
-      onDone(await notifyGoodsReceiptSupplier(grn.id, { email: email.trim(), message: message.trim() }));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not send the notification.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-900">Notify Supplier — {kind}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="bg-purple-50 border border-purple-100 rounded-xl px-4 py-2.5 text-sm text-purple-700 font-medium">
-            {grn.reference} · {grn.supplierName}
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Supplier Email <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="procurement@supplier.ng"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Message</label>
-            <textarea
-              rows={8}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => void send()}
-            disabled={!email.trim() || !message.trim() || saving}
-            className="px-4 py-2 text-sm bg-amber-500 text-white rounded-xl hover:bg-amber-600 disabled:opacity-40 flex items-center gap-2"
-          >
-            <AlertTriangle className="w-4 h-4" />
-            {saving ? "Sending…" : "Send Notification"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** A read-only view of the record — what arrived, against what was ordered. */
-function GoodsReceiptDocumentModal({ grn, onClose }: { grn: GoodsReceipt; onClose: () => void }) {
-  const usePending = grn.status === "pending_approval";
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h2 className="text-base font-semibold text-gray-900">Goods Received Note — {grn.reference}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="px-6 py-6 space-y-4">
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            {[
-              { label: "Supplier", value: grn.supplierName },
-              { label: "Purchase Order", value: grn.poRef || "—" },
-              { label: "Material Request", value: grn.mrRef || "—" },
-              { label: "Delivery Note", value: grn.deliveryNote || "—" },
-              { label: "Store", value: grn.storeName || "—" },
-              { label: "Payment Term", value: paymentTermLabel(grn.purchaseOrder) },
-            ].map((f) => (
-              <div key={f.label}>
-                <p className="text-xs text-gray-400">{f.label}</p>
-                <p className="font-medium text-gray-900 mt-0.5">{f.value}</p>
-              </div>
-            ))}
-          </div>
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="min-w-[560px] w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200 text-left">
-                  {["Material", "Ordered", "Received", "Accepted", "Rejected", "Variance"].map((h) => (
-                    <th key={h} className="px-3 py-2 text-xs font-medium text-gray-500">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {grn.items.map((item) => {
-                  const q = displayQty(item, usePending);
-                  const variance = q.received - item.ordered;
-                  return (
-                    <tr key={item.id}>
-                      <td className="px-3 py-2 font-medium text-gray-900">{item.material}</td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {item.ordered} {item.unit}
-                      </td>
-                      <td className="px-3 py-2 font-medium text-gray-900">
-                        {q.received} {item.unit}
-                      </td>
-                      <td className="px-3 py-2 text-green-700 font-medium">
-                        {q.accepted} {item.unit}
-                      </td>
-                      <td className="px-3 py-2">
-                        {q.rejected > 0 ? (
-                          <span className="text-red-600 font-medium">
-                            {q.rejected} {item.unit}
-                          </span>
-                        ) : (
-                          <span className="text-gray-300">—</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-xs">
-                        {variance === 0 ? (
-                          <span className="text-gray-400">Exact</span>
-                        ) : variance > 0 ? (
-                          <span className="text-purple-600 font-medium">+{variance} over</span>
-                        ) : (
-                          <span className="text-amber-600 font-medium">{variance} short</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {grn.notes && <p className="text-xs text-gray-500 whitespace-pre-line">{grn.notes}</p>}
-        </div>
-        <div className="flex justify-end px-6 py-4 border-t border-gray-100">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
-          >
-            Close
+            {saving ? "Opening…" : "Open receipt"}
           </button>
         </div>
       </div>
@@ -641,16 +421,10 @@ export function GoodsReceiptPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
-
-  const [recordTarget, setRecordTarget] = useState<{ grn: GoodsReceipt; mode: RecordMode } | null>(null);
-  const [rejectNoteTarget, setRejectNoteTarget] = useState<GoodsReceipt | null>(null);
-  const [notifyTarget, setNotifyTarget] = useState<GoodsReceipt | null>(null);
-  const [documentTarget, setDocumentTarget] = useState<GoodsReceipt | null>(null);
-  const [outrightRejectTarget, setOutrightRejectTarget] = useState<GoodsReceipt | null>(null);
-  const [outrightRejectReason, setOutrightRejectReason] = useState("");
-
-  const [accepting, setAccepting] = useState<string | null>(null);
-  const [sendingToFinance, setSendingToFinance] = useState<string | null>(null);
+  const [receiveGrn, setReceiveGrn] = useState<GoodsReceipt | null>(null);
+  const [rejectGrn, setRejectGrn] = useState<GoodsReceipt | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showOpen, setShowOpen] = useState(false);
 
   useEffect(() => {
     getGoodsReceipts()
@@ -659,15 +433,10 @@ export function GoodsReceiptPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  function replace(updated: GoodsReceipt) {
-    setGrnList((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
-  }
-
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    const tab = TABS.find((t) => t.key === activeTab) ?? TABS[0];
     return grnList.filter((g) => {
-      const matchTab = tab.match(g);
+      const matchTab = activeTab === "all" || g.status === activeTab;
       const matchSearch =
         !q ||
         g.reference.toLowerCase().includes(q) ||
@@ -677,155 +446,79 @@ export function GoodsReceiptPage() {
     });
   }, [grnList, activeTab, search]);
 
-  async function handleAccept(grn: GoodsReceipt) {
-    if (accepting) return;
-    setAccepting(grn.id);
-    try {
-      const updated = await acceptGoodsReceipt(grn.id);
-      replace(updated);
-      toast.success(`${updated.reference} accepted and posted to stock.`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not accept the record.");
-    } finally {
-      setAccepting(null);
-    }
-  }
-
-  async function handleSendToFinance(grn: GoodsReceipt) {
-    if (sendingToFinance) return;
-    setSendingToFinance(grn.id);
-    try {
-      const updated = await sendGoodsReceiptToFinance(grn.id);
-      replace(updated);
-      toast.success(`${updated.poRef ?? grn.reference} sent to Finance.`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not send to Finance.");
-    } finally {
-      setSendingToFinance(null);
-    }
-  }
-
-  async function confirmOutrightReject() {
-    const grn = outrightRejectTarget;
+  async function confirmReject() {
+    const grn = rejectGrn;
     if (!grn) return;
-    const reason = outrightRejectReason.trim();
-    setOutrightRejectTarget(null);
-    setOutrightRejectReason("");
+    const reason = rejectReason.trim();
+    setRejectGrn(null);
+    setRejectReason("");
     try {
       const updated = await rejectGoodsReceipt(grn.id, reason);
-      replace(updated);
+      setGrnList((prev) => prev.map((g) => (g.id === grn.id ? updated : g)));
       toast.success(`${grn.reference} rejected. Nothing was added to stock.`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not reject the delivery.");
+      toast.error(
+        e instanceof Error ? e.message : "Could not reject the delivery.",
+      );
     }
   }
 
   if (loading)
     return <div className="p-8 text-center text-gray-400 text-sm">Loading…</div>;
 
-  const actionsFor = (grn: GoodsReceipt) => {
-    const outstanding = hasOutstanding(grn);
-    return (
-      <RowActions>
-        <RowAction
-          icon={<FileText className="w-3.5 h-3.5" />}
-          label="View Document"
-          tone="neutral"
-          onClick={() => setDocumentTarget(grn)}
-        />
-        {grn.status === "pending" && (
-          <>
-            <RowAction
-              icon={<PackageCheck className="w-3.5 h-3.5" />}
-              label="Update Record"
-              tone="primary"
-              onClick={() => setRecordTarget({ grn, mode: "record" })}
-            />
-            <RowAction
-              icon={<XCircle className="w-3.5 h-3.5" />}
-              label="Reject"
-              tone="negative"
-              onClick={() => setOutrightRejectTarget(grn)}
-            />
-          </>
-        )}
-        {grn.status === "pending_approval" && (
-          <>
-            <RowAction
-              icon={<FileEdit className="w-3.5 h-3.5" />}
-              label="Edit Record"
-              tone="neutral"
-              onClick={() => setRecordTarget({ grn, mode: "edit" })}
-            />
-            <RowAction
-              icon={<AlertTriangle className="w-3.5 h-3.5" />}
-              label="Raise Rejection Note"
-              tone="negative"
-              disabled={!grn.canDecide}
-              title={grn.canDecide ? undefined : "Only the configured Goods Receipt approver may decide this record"}
-              onClick={() => setRejectNoteTarget(grn)}
-            />
-            <RowAction
-              icon={<CheckCircle2 className="w-3.5 h-3.5" />}
-              label="Accept & Update Stock"
-              tone="positive"
-              disabled={!grn.canDecide}
-              title={grn.canDecide ? undefined : "Only the configured Goods Receipt approver may decide this record"}
-              busy={accepting === grn.id}
-              busyLabel="Accepting…"
-              onClick={() => void handleAccept(grn)}
-            />
-          </>
-        )}
-        {DECIDED_STATUSES.includes(grn.status) && (
-          <>
-            {outstanding && (
-              <RowAction
-                icon={<Package className="w-3.5 h-3.5" />}
-                label="Record Remaining Delivery"
-                tone="primary"
-                onClick={() => setRecordTarget({ grn, mode: "remaining" })}
-              />
-            )}
-            {(grn.status === "over_supply" || grn.status === "under_supply") && (
-              <RowAction
-                icon={<Mail className="w-3.5 h-3.5" />}
-                label="Notify Supplier"
-                tone="warning"
-                onClick={() => setNotifyTarget(grn)}
-              />
-            )}
-            {grn.purchaseOrder?.sentToFinance ? (
-              <RowActionNote>Sent to Finance</RowActionNote>
-            ) : (
-              canSendToFinance(grn) && (
-                <RowAction
-                  icon={<Send className="w-3.5 h-3.5" />}
-                  label="Send to Finance"
-                  tone="primary"
-                  busy={sendingToFinance === grn.id}
-                  busyLabel="Sending…"
-                  onClick={() => void handleSendToFinance(grn)}
-                />
-              )
-            )}
-          </>
-        )}
-        {grn.status === "rejected" && <RowActionNote>Rejected</RowActionNote>}
-      </RowActions>
-    );
-  };
-
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Goods Receipt</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Receive confirmed purchase orders into stock</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Goods Receipt</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Receive confirmed purchase orders into stock
+          </p>
+        </div>
+        <button
+          onClick={() => setShowOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800"
+        >
+          <Plus className="w-3.5 h-3.5" /> Open Receipt
+        </button>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        {[
+          {
+            label: "Total GRNs",
+            value: grnList.length,
+            color: "bg-gray-50 border-gray-200 text-gray-900",
+          },
+          {
+            label: "Awaiting Receipt",
+            value: grnList.filter((g) => g.status === "pending").length,
+            color: "bg-amber-50 border-amber-200 text-amber-700",
+          },
+          {
+            label: "Received",
+            value: grnList.filter((g) => g.status === "received").length,
+            color: "bg-emerald-50 border-emerald-200 text-emerald-700",
+          },
+          {
+            label: "Rejected",
+            value: grnList.filter((g) => g.status === "rejected").length,
+            color: "bg-red-50 border-red-200 text-red-700",
+          },
+        ].map((s) => (
+          <div key={s.label} className={`p-4 rounded-lg border ${s.color}`}>
+            <p className="text-2xl font-bold">{s.value}</p>
+            <p className="text-sm mt-0.5 opacity-80">{s.label}</p>
+          </div>
+        ))}
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
         {TABS.map((tab) => {
-          const count = grnList.filter(tab.match).length;
+          const count =
+            tab.key === "all"
+              ? grnList.length
+              : grnList.filter((g) => g.status === tab.key).length;
           return (
             <button
               key={tab.key}
@@ -858,16 +551,21 @@ export function GoodsReceiptPage() {
         {filtered.map((grn) => {
           const cfg = statusDef(GOODS_RECEIPT_STATUS, grn.status);
           const isExpanded = expanded === grn.id;
-          const usePending = grn.status === "pending_approval";
+          const hasRejections = grn.items.some((i) => i.rejected > 0);
           return (
-            <div key={grn.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div
+              key={grn.id}
+              className="bg-white rounded-lg border border-gray-200 overflow-hidden"
+            >
               <div
                 className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-gray-50"
                 onClick={() => setExpanded(isExpanded ? null : grn.id)}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap">
-                    <span className="text-sm font-semibold text-gray-900">{grn.reference}</span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {grn.reference}
+                    </span>
                     <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
                       PO: {grn.poRef}
                     </span>
@@ -878,18 +576,15 @@ export function GoodsReceiptPage() {
                       </span>
                     )}
                     <StatusBadge {...cfg} />
-                    {grn.purchaseOrder?.sentToFinance && (
-                      <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">
-                        <Send className="w-3 h-3" /> Sent to Finance
-                      </span>
-                    )}
-                    {hasRejections(grn) && (
+                    {hasRejections && (
                       <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
                         <XCircle className="w-3 h-3" /> Rejections
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-gray-700 font-medium mt-1">{grn.supplierName}</p>
+                  <p className="text-sm text-gray-700 font-medium mt-1">
+                    {grn.supplierName}
+                  </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {grn.items.length} line item
                     {grn.items.length === 1 ? "" : "s"}
@@ -898,14 +593,43 @@ export function GoodsReceiptPage() {
                   </p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-semibold text-gray-900">{grn.storeName || "—"}</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {grn.storeName || "—"}
+                  </p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {grn.stockPostedAt
                       ? formatDateByGeneralSettings(grn.stockPostedAt)
                       : "Not yet received"}
                   </p>
                 </div>
-                <div onClick={(e) => e.stopPropagation()}>{actionsFor(grn)}</div>
+                <div onClick={(e) => e.stopPropagation()}>
+                  {/* Receive or reject — nothing else. "Accept & Update Stock"
+                      used to set a status in React state and touch no stock at
+                      all; this posts the movement, the store shelf and the
+                      material catalogue in one go. */}
+                  <RowActions>
+                    {grn.status === "pending" ? (
+                      <>
+                        <RowAction
+                          icon={<PackageCheck className="w-3.5 h-3.5" />}
+                          label="Receive & Update Stock"
+                          tone="positive"
+                          onClick={() => setReceiveGrn(grn)}
+                        />
+                        <RowAction
+                          icon={<XCircle className="w-3.5 h-3.5" />}
+                          label="Reject"
+                          tone="negative"
+                          onClick={() => setRejectGrn(grn)}
+                        />
+                      </>
+                    ) : grn.status === "received" ? (
+                      <RowActionNote>Posted to {grn.storeName}</RowActionNote>
+                    ) : (
+                      <RowActionNote>Rejected</RowActionNote>
+                    )}
+                  </RowActions>
+                </div>
                 {isExpanded ? (
                   <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
                 ) : (
@@ -920,13 +644,14 @@ export function GoodsReceiptPage() {
                       { label: "GRN Number", value: grn.reference },
                       { label: "Purchase Order", value: grn.poRef || "—" },
                       { label: "Material Request", value: grn.mrRef || "—" },
-                      { label: "Payment Term", value: paymentTermLabel(grn.purchaseOrder) },
                       { label: "Delivery Note", value: grn.deliveryNote || "—" },
                       { label: "Store", value: grn.storeName || "—" },
                     ].map((f) => (
                       <div key={f.label}>
                         <p className="text-xs text-gray-500">{f.label}</p>
-                        <p className="font-medium text-gray-900 mt-0.5">{f.value}</p>
+                        <p className="font-medium text-gray-900 mt-0.5">
+                          {f.value}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -934,35 +659,48 @@ export function GoodsReceiptPage() {
                     <table className="min-w-[640px] w-full text-sm bg-white rounded-md border border-gray-200">
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-200 text-left">
-                          {["Material", "Ordered", "Received", "Accepted", "Rejected", "Variance", "Notes"].map(
-                            (h) => (
-                              <th key={h} className="px-3 py-2 text-xs font-medium text-gray-500">
-                                {h}
-                              </th>
-                            ),
-                          )}
+                          {[
+                            "Material",
+                            "Ordered",
+                            "Received",
+                            "Accepted",
+                            "Rejected",
+                            "Variance",
+                            "Notes",
+                          ].map((h) => (
+                            <th
+                              key={h}
+                              className="px-3 py-2 text-xs font-medium text-gray-500"
+                            >
+                              {h}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {grn.items.map((item) => {
-                          const q = displayQty(item, usePending);
-                          const variance = q.received - item.ordered;
+                          const variance = item.received - item.ordered;
                           return (
-                            <tr key={item.id} className={q.rejected > 0 ? "bg-red-50/40" : ""}>
-                              <td className="px-3 py-2 font-medium text-gray-900">{item.material}</td>
+                            <tr
+                              key={item.id}
+                              className={item.rejected > 0 ? "bg-red-50/40" : ""}
+                            >
+                              <td className="px-3 py-2 font-medium text-gray-900">
+                                {item.material}
+                              </td>
                               <td className="px-3 py-2 text-gray-600">
                                 {item.ordered} {item.unit}
                               </td>
                               <td className="px-3 py-2 font-medium text-gray-900">
-                                {q.received} {item.unit}
+                                {item.received} {item.unit}
                               </td>
                               <td className="px-3 py-2 text-green-700 font-medium">
-                                {q.accepted} {item.unit}
+                                {item.accepted} {item.unit}
                               </td>
                               <td className="px-3 py-2">
-                                {q.rejected > 0 ? (
+                                {item.rejected > 0 ? (
                                   <span className="text-red-600 font-medium">
-                                    {q.rejected} {item.unit}
+                                    {item.rejected} {item.unit}
                                   </span>
                                 ) : (
                                   <span className="text-gray-300">—</span>
@@ -972,7 +710,9 @@ export function GoodsReceiptPage() {
                                 {grn.status === "pending" ? (
                                   <span className="text-gray-300 text-xs">—</span>
                                 ) : variance === 0 ? (
-                                  <span className="text-gray-400 text-xs">Exact</span>
+                                  <span className="text-gray-400 text-xs">
+                                    Exact
+                                  </span>
                                 ) : variance > 0 ? (
                                   <span className="text-purple-600 text-xs font-medium">
                                     +{variance} over
@@ -983,7 +723,9 @@ export function GoodsReceiptPage() {
                                   </span>
                                 )}
                               </td>
-                              <td className="px-3 py-2 text-xs text-gray-400">{q.reason || "—"}</td>
+                              <td className="px-3 py-2 text-xs text-gray-400">
+                                {item.reason || "—"}
+                              </td>
                             </tr>
                           );
                         })}
@@ -991,7 +733,9 @@ export function GoodsReceiptPage() {
                     </table>
                   </div>
                   {grn.notes && (
-                    <p className="text-xs text-gray-500 mt-3 whitespace-pre-line">{grn.notes}</p>
+                    <p className="text-xs text-gray-500 mt-3 whitespace-pre-line">
+                      {grn.notes}
+                    </p>
                   )}
                 </div>
               )}
@@ -1001,61 +745,51 @@ export function GoodsReceiptPage() {
         {filtered.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <PackageCheck className="w-8 h-8 mx-auto mb-2 opacity-40" />
-            <p className="text-sm">No goods receipts yet. Confirming a purchase order opens one.</p>
+            <p className="text-sm">
+              No goods receipts yet. Confirming a purchase order opens one.
+            </p>
           </div>
         )}
       </div>
 
-      {recordTarget && (
-        <RecordDeliveryModal
-          grn={recordTarget.grn}
-          mode={recordTarget.mode}
-          onClose={() => setRecordTarget(null)}
+      {receiveGrn && (
+        <ReceiveDeliveryModal
+          grn={receiveGrn}
+          onClose={() => setReceiveGrn(null)}
           onDone={(updated) => {
-            replace(updated);
-            setRecordTarget(null);
-            toast.success(`${updated.reference} recorded — awaiting a decision.`);
+            setGrnList((prev) =>
+              prev.map((g) => (g.id === updated.id ? updated : g)),
+            );
+            setReceiveGrn(null);
+            toast.success(`${updated.reference} received into ${updated.storeName}.`, {
+              description:
+                "Stock movement recorded, and the material is now available in inventory.",
+            });
           }}
         />
       )}
 
-      {rejectNoteTarget && (
-        <RejectionNoteModal
-          grn={rejectNoteTarget}
-          onClose={() => setRejectNoteTarget(null)}
-          onDone={(updated) => {
-            replace(updated);
-            setRejectNoteTarget(null);
-            toast.success(`${updated.reference} sent back for correction.`);
+      {showOpen && (
+        <OpenReceiptModal
+          onClose={() => setShowOpen(false)}
+          onDone={(grn) => {
+            setGrnList((prev) =>
+              prev.some((g) => g.id === grn.id) ? prev : [grn, ...prev],
+            );
+            setShowOpen(false);
           }}
         />
       )}
 
-      {notifyTarget && (
-        <NotifySupplierModal
-          grn={notifyTarget}
-          onClose={() => setNotifyTarget(null)}
-          onDone={(updated) => {
-            replace(updated);
-            setNotifyTarget(null);
-            toast.success("Supplier notified.");
-          }}
-        />
-      )}
-
-      {documentTarget && (
-        <GoodsReceiptDocumentModal grn={documentTarget} onClose={() => setDocumentTarget(null)} />
-      )}
-
-      {outrightRejectTarget && (
+      {rejectGrn && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <h2 className="text-base font-semibold text-gray-900">
-                Reject delivery — {outrightRejectTarget.reference}
+                Reject delivery — {rejectGrn.reference}
               </h2>
               <button
-                onClick={() => setOutrightRejectTarget(null)}
+                onClick={() => setRejectGrn(null)}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X className="w-5 h-5" />
@@ -1063,27 +797,27 @@ export function GoodsReceiptPage() {
             </div>
             <div className="px-6 py-5 space-y-3">
               <p className="text-xs text-gray-500">
-                Nothing will be added to stock. The receipt stays on record against{" "}
-                {outrightRejectTarget.poRef}.
+                Nothing will be added to stock. The receipt stays on record
+                against {rejectGrn.poRef}.
               </p>
               <textarea
                 rows={3}
-                value={outrightRejectReason}
-                onChange={(e) => setOutrightRejectReason(e.target.value)}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
                 placeholder="Why is this delivery being rejected?"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
               <button
-                onClick={() => setOutrightRejectTarget(null)}
+                onClick={() => setRejectGrn(null)}
                 className="px-4 py-2 text-sm border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50"
               >
                 Cancel
               </button>
               <button
-                onClick={() => void confirmOutrightReject()}
-                disabled={!outrightRejectReason.trim()}
+                onClick={() => void confirmReject()}
+                disabled={!rejectReason.trim()}
                 className="px-4 py-2 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-40 flex items-center gap-2"
               >
                 <XCircle className="w-4 h-4" /> Reject delivery

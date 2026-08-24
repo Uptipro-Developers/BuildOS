@@ -112,8 +112,8 @@ export class AdminExtrasController {
 
     @Get('audit-logs')
     @Roles('admin', 'compliance-officer')
-    getAuditLogs(@Query('limit') limit?: number, @Query('offset') offset?: number) {
-        return this.svc.getAuditLogs(limit, offset);
+    getAuditLogs(@Query('limit') limit?: number, @Query('offset') offset?: number) { 
+        return this.svc.getAuditLogs(limit, offset); 
     }
 
     // ── Users ──
@@ -121,20 +121,16 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     inviteUser(@Body() body: { email: string; name: string; role?: string; assignedApps?: string[]; department?: string }) { return this.svc.inviteUser(body); }
-
+    
     @Post('users/:id/resend-invite')
     @Roles('admin')
     @RequireApp('admin')
     resendInvite(@Param('id') id: string) { return this.svc.resendInvite(id); }
-
+    
     @Get('users')
     @Roles('admin')
     @RequireApp('admin')
-    getAllUsers(
-        @Query('search') search?: string,
-        @Query('department') department?: string,
-        @Query('role') role?: string,
-    ) { return this.svc.findAllUsers(search, department, role); }
+    getAllUsers(@Query('search') search?: string) { return this.svc.findAllUsers(search); }
 
     // ── Employee → User sync (Admin › Users › Pending Sync from HR) ──
     // Declared before 'users/:id' so "pending-sync" is not captured as an :id.
@@ -155,17 +151,17 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     getUser(@Param('id') id: string) { return this.svc.findUser(id); }
-
+    
     @Post('users')
     @Roles('admin')
     @RequireApp('admin')
     createUser(@Body() body: any) { return this.svc.createUser(body); }
-
+    
     @Put('users/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateUser(@Param('id') id: string, @Body() body: any) { return this.svc.updateUser(id, body); }
-
+    
     @Delete('users/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -176,22 +172,22 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     getAllRoles() { return this.svc.findAllRoles(); }
-
+    
     @Get('roles/:id')
     @Roles('admin')
     @RequireApp('admin')
     getRole(@Param('id') id: string) { return this.svc.findRole(id); }
-
+    
     @Post('roles')
     @Roles('admin')
     @RequireApp('admin')
     createRole(@Body() body: any) { return this.svc.createRole(body); }
-
+    
     @Put('roles/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateRole(@Param('id') id: string, @Body() body: any) { return this.svc.updateRole(id, body); }
-
+    
     @Delete('roles/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -208,17 +204,17 @@ export class AdminExtrasController {
     @Get('issue-types/public')
     @Public()
     getPublicIssueTypes() { return this.svc.findAllIssueTypes(); }
-
+    
     @Post('issue-types')
     @Roles('admin')
     @RequireApp('admin')
     createIssueType(@Body() body: any) { return this.svc.createIssueType(body); }
-
+    
     @Put('issue-types/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateIssueType(@Param('id') id: string, @Body() body: any) { return this.svc.updateIssueType(id, body); }
-
+    
     @Delete('issue-types/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -235,17 +231,17 @@ export class AdminExtrasController {
     @Get('change-categories/public')
     @Public()
     getPublicChangeCategories() { return this.svc.findAllChangeCategories(); }
-
+    
     @Post('change-categories')
     @Roles('admin')
     @RequireApp('admin')
     createChangeCategory(@Body() body: any) { return this.svc.createChangeCategory(body); }
-
+    
     @Put('change-categories/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateChangeCategory(@Param('id') id: string, @Body() body: any) { return this.svc.updateChangeCategory(id, body); }
-
+    
     @Delete('change-categories/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -256,17 +252,17 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     getProcessCatalog() { return this.svc.findProcessCatalog(); }
-
+    
     @Post('process-catalog')
     @Roles('admin')
     @RequireApp('admin')
     createProcessCatalogItem(@Body() body: any) { return this.svc.createProcessCatalogItem(body); }
-
+    
     @Patch('process-catalog/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateProcessCatalogItem(@Param('id') id: string, @Body() body: any) { return this.svc.updateProcessCatalogItem(id, body); }
-
+    
     @Delete('process-catalog/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -277,17 +273,17 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     getProcessWorkflows() { return this.svc.findProcessWorkflows(); }
-
+    
     @Post('process-workflows')
     @Roles('admin')
     @RequireApp('admin')
     createProcessWorkflow(@Body() body: any) { return this.svc.createProcessWorkflow(body); }
-
+    
     @Patch('process-workflows/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateProcessWorkflow(@Param('id') id: string, @Body() body: any) { return this.svc.updateProcessWorkflow(id, body); }
-
+    
     @Delete('process-workflows/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -334,7 +330,7 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     getCompanyProfile() { return this.svc.getCompanyProfile(); }
-
+    
     @Put('company-profile')
     @Roles('admin')
     @RequireApp('admin')
@@ -345,12 +341,12 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     getAllDirectors() { return this.svc.findAllDirectors(); }
-
+    
     @Post('directors')
     @Roles('admin')
     @RequireApp('admin')
     createDirector(@Body() body: any) { return this.svc.createDirector(body); }
-
+    
     @Put('directors/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -363,7 +359,7 @@ export class AdminExtrasController {
         const items = Array.isArray(body) ? body : (body?.items ?? []);
         return this.svc.reorderDirectors(items);
     }
-
+    
     @Delete('directors/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -384,12 +380,12 @@ export class AdminExtrasController {
     @Roles('admin')
     @RequireApp('admin')
     createEmailConfig(@Body() body: any) { return this.svc.createEmailConfig(body); }
-
+    
     @Patch('email-config/:id')
     @Roles('admin')
     @RequireApp('admin')
     updateEmailConfig(@Param('id') id: string, @Body() body: any) { return this.svc.updateEmailConfig(id, body); }
-
+    
     @Delete('email-config/:id')
     @Roles('admin')
     @RequireApp('admin')
@@ -398,13 +394,13 @@ export class AdminExtrasController {
     // ── Units of Measurement ──
     @Get('units')
     getUnits() { return this.svc.findUnits(); }
-
+    
     @Post('units')
     createUnit(@Body() body: any) { return this.svc.createUnit(body); }
-
+    
     @Patch('units/:id')
     updateUnit(@Param('id') id: string, @Body() body: any) { return this.svc.updateUnit(id, body); }
-
+    
     @Delete('units/:id')
     deleteUnit(@Param('id') id: string) { return this.svc.deleteUnit(id); }
 

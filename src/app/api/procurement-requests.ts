@@ -21,28 +21,11 @@ export interface PurchaseRequest {
     suppliers?: PRSupplier[];
     createdAt: string;
 }
-/** One GL posting line — a debit or credit against an account. */
-export interface PostingLine {
-    id?: string;
-    glCode?: string;
-    account?: string;
-    debit: number;
-    credit: number;
-    description?: string;
-}
-/** The accounting treatment chosen when an invoice is sent for approval. */
-export interface PostingDraft {
-    date: string;
-    method: string;
-    lines: PostingLine[];
-}
 export interface PurchaseInvoice {
     id: string; invoiceNo: string; poRef?: string; supplierName: string;
     supplierId?: string; invoiceDate: string; dueDate: string;
     lines: any[]; subtotal: number; vatTotal: number; total: number;
     status: string; notes?: string; createdAt: string;
-    /** Set once the invoice has been sent for approval; read-only from then on. */
-    postingDraft?: PostingDraft | null;
 }
 export interface SentRFQ {
     id: string; rfqRef: string; supplierName: string; supplierId?: string;
@@ -83,12 +66,6 @@ export const createPurchaseInvoice = (data: Partial<PurchaseInvoice>) =>
     apiFetch<PurchaseInvoice>('/purchase-invoices', { method: 'POST', body: JSON.stringify(data) });
 export const updatePurchaseInvoice = (id: string, data: Partial<PurchaseInvoice>) =>
     apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-/** Moves a Pending Review invoice to Pending Approval, with the posting treatment already decided. */
-export const sendPurchaseInvoiceForApproval = (id: string, postingDraft: PostingDraft) =>
-    apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}/send-for-approval`, {
-        method: 'POST',
-        body: JSON.stringify({ postingDraft }),
-    });
 /**
  * Cancels an invoice. There is deliberately no delete: the invoice is the link
  * between a purchase order and its payment, so removing it leaves the order in

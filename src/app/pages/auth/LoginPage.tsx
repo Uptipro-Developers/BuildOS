@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { Building2, Eye, EyeOff } from "lucide-react";
 import { apiFetch } from "../../api/client";
 import { saveAuthSession } from "../../utils/authSession";
-import { API_BASE_URL } from "../../utils/apiConfig";
 import { toast } from "sonner";
 
 export function LoginPage() {
@@ -43,7 +42,10 @@ export function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const baseUrl = (
+        import.meta.env.VITE_API_URL || "https://buildos-production-e328.up.railway.app/api"
+      ).replace(/\/$/, "");
+      const response = await fetch(`${baseUrl}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

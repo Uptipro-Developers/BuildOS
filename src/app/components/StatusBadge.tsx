@@ -28,9 +28,7 @@ export function StatusBadge({
       className={`inline-flex items-center gap-1.5 w-fit whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${badge}`}
     >
       {icon}
-      {
-        label === "Draft" ? "PO not Created" : label
-      }
+      {label}
     </span>
   );
 }
