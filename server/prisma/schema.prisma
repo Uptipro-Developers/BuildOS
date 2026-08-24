@@ -892,6 +892,7 @@ model MaterialType {
   material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
   name         String
   sku          String?
+  unit         String
   totalQty     Float    @default(0)
   availableQty Float    @default(0)
   reservedQty  Float    @default(0)

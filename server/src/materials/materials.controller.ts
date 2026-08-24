@@ -15,6 +15,13 @@ export class MaterialsController {
     getAllMaterials(@Query('search') search?: string, @Query('category') category?: string) {
         return this.svc.findAllMaterials(search, category);
     }
+    // Catalogue-aware "Add Material" flow: search existing MaterialType rows
+    // by name, then apply real stock quantities onto the ones picked.
+    // Registered before ':id' so 'type-search' isn't swallowed by that route.
+    @Get('materials/type-search')
+    searchMaterialTypes(@Query('q') q?: string) { return this.adminExtras.searchMaterialTypes(q ?? ''); }
+    @Post('materials/type-stock')
+    applyMaterialStockUpdate(@Body() body: any) { return this.adminExtras.applyMaterialStockUpdate(body); }
     @Get('materials/:id')
     getMaterial(@Param('id') id: string) { return this.svc.findMaterial(id); }
     @Post('materials')

@@ -1,10 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { exportCSV } from "../../utils/exportCSV";
 import {
   getMaterials,
   createMaterial,
   updateMaterial,
   deleteMaterial,
+  searchMaterialTypes,
+  applyMaterialStockUpdate,
+  MaterialTypeSearchResult,
+  MaterialWithTypes,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
 import { getMaterialCategories } from "../../api/admin-extras";
@@ -227,9 +231,373 @@ function TrackModal({
             className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
           >
             {allocationStatus === "Available" &&
-            material.allocationStatus === "Allocated"
+              material.allocationStatus === "Allocated"
               ? "Confirm Return"
               : "Save Status"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Add Material (catalogue-aware stock entry) ────────────────────────────────
+// Updates Total Qty/Available/Reserved/Unit Cost on existing MaterialType rows
+// picked from the catalogue (Storefront Config → Material Categories) — it
+// never creates a new Material or Type. Material Name/Category/Material Type/
+// Unit auto-fill from whichever catalogue Type is picked first; every further
+// Type added must belong to that same Material.
+interface StockRow {
+  key: string;
+  typeId: string;
+  name: string;
+  sku: string | null;
+  unit: string;
+  totalQty: string;
+  availableQty: string;
+  reservedQty: string;
+  unitCost: string;
+}
+
+function AddMaterialModal({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (material: MaterialWithTypes) => void;
+}) {
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [materialId, setMaterialId] = useState<string | null>(null);
+  const [materialName, setMaterialName] = useState("");
+  const [category, setCategory] = useState("");
+  const [classification, setClassification] = useState("");
+  const [reorderLevel, setReorderLevel] = useState("0");
+  const [rows, setRows] = useState<StockRow[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(() => {
+      searchMaterialTypes(q)
+        .then((hits) => {
+          // Once a Material is locked in, only offer Types from that same
+          // Material — every row in one submission has to share it.
+          setResults(materialId ? hits.filter((h) => h.material.id === materialId) : hits);
+        })
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [query, materialId]);
+
+  function pickResult(hit: MaterialTypeSearchResult) {
+    if (rows.some((r) => r.typeId === hit.id)) {
+      toast.error(`"${hit.name}" has already been added.`);
+      return;
+    }
+    if (!materialId) {
+      setMaterialId(hit.material.id);
+      setMaterialName(hit.material.name);
+      setCategory(hit.material.category);
+      setClassification(hit.material.materialType);
+      setReorderLevel(String(hit.material.reorderLevel ?? 0));
+    }
+    setRows((prev) => [
+      ...prev,
+      {
+        key: `${hit.id}-${prev.length}`,
+        typeId: hit.id,
+        name: hit.name,
+        sku: hit.sku,
+        unit: hit.unit,
+        totalQty: String(hit.totalQty ?? 0),
+        availableQty: String(hit.availableQty ?? 0),
+        reservedQty: String(hit.reservedQty ?? 0),
+        unitCost: String(hit.unitCost ?? 0),
+      },
+    ]);
+    setQuery("");
+    setResults([]);
+  }
+
+  function removeRow(key: string) {
+    setRows((prev) => {
+      const next = prev.filter((r) => r.key !== key);
+      if (next.length === 0) {
+        setMaterialId(null);
+        setMaterialName("");
+        setCategory("");
+        setClassification("");
+      }
+      return next;
+    });
+  }
+
+  function updateRow(key: string, patch: Partial<StockRow>) {
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+
+  const canSave = Boolean(materialId) && rows.length > 0 && !saving;
+
+  async function save() {
+    if (!materialId || rows.length === 0) return;
+    setSaving(true);
+    try {
+      const result = await applyMaterialStockUpdate({
+        materialId,
+        reorderLevel: Number(reorderLevel) || 0,
+        types: rows.map((r) => ({
+          typeId: r.typeId,
+          totalQty: Number(r.totalQty) || 0,
+          availableQty: Number(r.availableQty) || 0,
+          reservedQty: Number(r.reservedQty) || 0,
+          unitCost: Number(r.unitCost) || 0,
+        })),
+      });
+      onSaved(result);
+      toast.success(`"${materialName}" updated.`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update material stock.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-5 border-b border-gray-100 flex items-start justify-between flex-shrink-0">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Add Material</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Pick a type from the catalogue to update its stock.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 overflow-y-auto">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Add from Catalogue
+            </label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by material type (e.g. Ordinary Portland Cement)…"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              Search matches material types; name, category and unit auto-fill from the chosen type.
+            </p>
+            {query.trim() && (
+              <div className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                {searching ? (
+                  <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>
+                ) : results.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-red-500">
+                    No matching material type found for "{query.trim()}"
+                    {materialId ? ` under ${materialName}` : ""}.
+                  </p>
+                ) : (
+                  results.map((hit) => (
+                    <button
+                      key={hit.id}
+                      type="button"
+                      onClick={() => pickResult(hit)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-teal-50 border-b border-gray-100 last:border-0"
+                    >
+                      <span className="font-medium text-gray-900">{hit.name}</span>{" "}
+                      <span className="text-xs text-gray-400">
+                        {hit.material.name} · {hit.material.category}
+                        {hit.sku ? ` · ${hit.sku}` : ""}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Material Name
+              </label>
+              <input
+                value={materialName}
+                disabled
+                placeholder="Pick a type above"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Category
+              </label>
+              <input
+                value={category}
+                disabled
+                placeholder="—"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Material Type
+              </label>
+              <input
+                value={classification}
+                disabled
+                placeholder="—"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Reorder Level
+              </label>
+              <input
+                type="number"
+                value={reorderLevel}
+                onChange={(e) => setReorderLevel(e.target.value)}
+                disabled={!materialId}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-gray-50 disabled:text-gray-400"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-medium text-gray-600">
+                Stock Types
+              </label>
+              <button
+                type="button"
+                onClick={() => searchRef.current?.focus()}
+                className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Type
+              </button>
+            </div>
+            {rows.length === 0 ? (
+              <p className="text-xs text-gray-400 italic">
+                Search the catalogue above and pick a type to add it here.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {rows.map((r) => (
+                  <div key={r.key} className="border border-gray-200 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
+                          Type Name
+                        </label>
+                        <input
+                          value={r.name}
+                          disabled
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
+                          SKU
+                        </label>
+                        <input
+                          value={r.sku ?? ""}
+                          disabled
+                          placeholder="—"
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
+                        />
+                      </div>
+                      <div className="w-16">
+                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
+                          Unit
+                        </label>
+                        <input
+                          value={r.unit}
+                          disabled
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeRow(r.key)}
+                        title="Remove type"
+                        className="self-end mb-1.5 p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {(
+                        [
+                          ["totalQty", "Total Qty"],
+                          ["availableQty", "Available"],
+                          ["reservedQty", "Reserved"],
+                          ["unitCost", `Unit Cost ${getCurrencySymbol()}`],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <div key={key}>
+                          <label className="block text-[10px] font-medium text-gray-500 mb-1">
+                            {label}
+                          </label>
+                          <input
+                            type="number"
+                            value={r[key]}
+                            onChange={(e) => updateRow(r.key, { [key]: e.target.value })}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {rows.length === 0 && (
+              <p className="text-xs text-red-500 mt-2">
+                Search and select at least one material type from the catalogue to continue.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void save()}
+            disabled={!canSave}
+            title={canSave ? undefined : "Select at least one material type from the catalogue"}
+            className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving…" : "Add Material"}
           </button>
         </div>
       </div>
@@ -247,6 +615,7 @@ export function AllMaterialsPage() {
   );
   const [typeFilter, setTypeFilter] = useState<MaterialType | "All">("All");
   const [showModal, setShowModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [editTarget, setEditTarget] = useState<Material | null>(null);
   const [form, setForm] = useState<Omit<Material, "id">>({ ...BLANK });
   const [deleteTarget, setDeleteTarget] = useState<Material | null>(null);
@@ -282,7 +651,7 @@ export function AllMaterialsPage() {
     materialType: m.materialType === "Reusable" ? "Reusable" : "Consumable",
     allocationStatus:
       m.allocationStatus === "Allocated" ||
-      m.allocationStatus === "Under Maintenance"
+        m.allocationStatus === "Under Maintenance"
         ? m.allocationStatus
         : "Available",
     allocatedTo: m.allocatedTo,
@@ -306,7 +675,7 @@ export function AllMaterialsPage() {
         setMaterials(materialData.map(toMaterial));
         setProjectOptions(refs.projects.map((p) => p.name));
       })
-            .catch((err: unknown) =>
+      .catch((err: unknown) =>
         toast.error(
           err instanceof Error ? err.message : "Failed to load materials.",
         ),
@@ -329,11 +698,6 @@ export function AllMaterialsPage() {
     return matchSearch && matchCat && matchStatus && matchType;
   });
 
-  function openAdd() {
-    setEditTarget(null);
-    setForm({ ...BLANK });
-    setShowModal(true);
-  }
   function openEdit(m: Material) {
     setEditTarget(m);
     const { id: _id, ...rest } = m;
@@ -447,7 +811,7 @@ export function AllMaterialsPage() {
             <Download className="w-4 h-4" /> Export
           </button>
           <button
-            onClick={openAdd}
+            onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm px-4 py-2 rounded-xl"
           >
             <Plus className="w-4 h-4" /> Add Material
@@ -644,25 +1008,25 @@ export function AllMaterialsPage() {
                       )}
                       {(status === "Low Stock" ||
                         status === "Out of Stock") && (
-                        <button
-                          onClick={() => {
-                            setProcurementTarget(m);
-                            setProcurementQty("");
-                          }}
-                          className={`p-1 rounded ${sentToProcurement.has(m.id) ? "text-green-500" : "text-amber-500 hover:text-amber-700 hover:bg-amber-50"}`}
-                          title={
-                            sentToProcurement.has(m.id)
-                              ? "Sent to Procurement"
-                              : "Send for Procurement"
-                          }
-                        >
-                          {sentToProcurement.has(m.id) ? (
-                            <CheckCircle className="w-3.5 h-3.5" />
-                          ) : (
-                            <ShoppingCart className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      )}
+                          <button
+                            onClick={() => {
+                              setProcurementTarget(m);
+                              setProcurementQty("");
+                            }}
+                            className={`p-1 rounded ${sentToProcurement.has(m.id) ? "text-green-500" : "text-amber-500 hover:text-amber-700 hover:bg-amber-50"}`}
+                            title={
+                              sentToProcurement.has(m.id)
+                                ? "Sent to Procurement"
+                                : "Send for Procurement"
+                            }
+                          >
+                            {sentToProcurement.has(m.id) ? (
+                              <CheckCircle className="w-3.5 h-3.5" />
+                            ) : (
+                              <ShoppingCart className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
                       <button
                         onClick={() => openEdit(m)}
                         className="p-1 text-gray-400 hover:text-teal-600 rounded hover:bg-teal-50"
@@ -922,6 +1286,22 @@ export function AllMaterialsPage() {
               ),
             );
             setTrackTarget(null);
+          }}
+        />
+      )}
+
+      {/* Add Material (catalogue-aware stock entry) */}
+      {showAddModal && (
+        <AddMaterialModal
+          onClose={() => setShowAddModal(false)}
+          onSaved={(updated) => {
+            setMaterials((prev) => {
+              const idx = prev.findIndex((m) => m.id === updated.id);
+              if (idx === -1) return [...prev, toMaterial(updated)];
+              const next = [...prev];
+              next[idx] = toMaterial(updated);
+              return next;
+            });
           }}
         />
       )}

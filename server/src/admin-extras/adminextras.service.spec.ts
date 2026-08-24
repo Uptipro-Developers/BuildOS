@@ -36,9 +36,27 @@ function makeService() {
             }),
             deleteMany: jest.fn(() => Promise.resolve({ count: 0 })),
             update: jest.fn(({ data }: any) => Promise.resolve({ id: 'mat-1', ...data })),
+            findUnique: jest.fn(() =>
+                Promise.resolve({
+                    id: 'mat-1',
+                    name: 'Cement (50kg bag)',
+                    types: [{ id: 'type-1' }, { id: 'type-2' }],
+                }),
+            ),
+            findUniqueOrThrow: jest.fn(() =>
+                Promise.resolve({
+                    id: 'mat-1',
+                    totalQty: 0,
+                    availableQty: 0,
+                    reservedQty: 0,
+                    unitCost: 0,
+                    types: [],
+                }),
+            ),
         },
         materialType: {
             findMany: jest.fn(() => Promise.resolve([])),
+            update: jest.fn(({ data }: any) => Promise.resolve({ id: 'type-1', ...data })),
         },
         $transaction: jest.fn((fn: any) => fn(prisma)),
     };
@@ -84,10 +102,11 @@ describe('material categories', () => {
                         {
                             name: 'Ordinary Portland Cement',
                             sku: 'CEM-OPC-50',
+                            unit: 'bags',
                             dimensions: [{ kind: 'Weight', value: 50, unit: 'kg' }],
                         },
-                        // No name — dropped.
-                        { name: '', sku: 'ignored', dimensions: [] },
+                        // No unit — dropped (unit is required on a Type).
+                        { name: 'No Unit Type', sku: 'ignored', dimensions: [] },
                     ],
                 },
                 // No name — the whole material is dropped.
@@ -110,6 +129,7 @@ describe('material categories', () => {
                         {
                             name: 'Ordinary Portland Cement',
                             sku: 'CEM-OPC-50',
+                            unit: 'bags',
                             dimensions: [{ kind: 'Weight', value: 50, unit: 'kg' }],
                         },
                     ],
@@ -181,7 +201,7 @@ describe('material categories', () => {
                 {
                     name: 'Concrete Block',
                     classification: 'Consumable',
-                    types: [{ name: 'Solid Block', sku: 'BLK-SLD-9', dimensions: [] }],
+                    types: [{ name: 'Solid Block', sku: 'BLK-SLD-9', unit: 'blocks', dimensions: [] }],
                 },
             ],
         });
@@ -196,7 +216,7 @@ describe('material categories', () => {
                 category: 'Concrete & Cement',
                 materialType: 'Consumable',
                 types: {
-                    create: [{ name: 'Solid Block', sku: 'BLK-SLD-9', dimensions: [] }],
+                    create: [{ name: 'Solid Block', sku: 'BLK-SLD-9', unit: 'blocks', dimensions: [] }],
                 },
             },
         });
@@ -235,5 +255,95 @@ describe('material categories', () => {
         const { service, prisma } = makeService();
         prisma.materialCategory.delete.mockRejectedValueOnce(new Error('Record to delete does not exist.'));
         await expect(service.deleteMaterialCategory('missing')).rejects.toBeInstanceOf(NotFoundException);
+    });
+});
+
+describe('All Materials — catalogue-aware stock entry', () => {
+    it('searches MaterialType rows by name, including the parent Material', async () => {
+        const { service, prisma } = makeService();
+        await service.searchMaterialTypes('cem');
+        expect(prisma.materialType.findMany).toHaveBeenCalledWith({
+            where: { name: { contains: 'cem', mode: 'insensitive' } },
+            include: {
+                material: {
+                    select: { id: true, name: true, category: true, materialType: true, reorderLevel: true },
+                },
+            },
+            orderBy: { name: 'asc' },
+            take: 20,
+        });
+    });
+
+    it('does not query for a blank search', async () => {
+        const { service, prisma } = makeService();
+        const result = await service.searchMaterialTypes('   ');
+        expect(result).toEqual([]);
+        expect(prisma.materialType.findMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a stock update with no materialId', async () => {
+        const { service } = makeService();
+        await expect(service.applyMaterialStockUpdate({ types: [{ typeId: 'type-1' }] })).rejects.toBeInstanceOf(
+            BadRequestException,
+        );
+    });
+
+    it('refuses a stock update with no types', async () => {
+        const { service } = makeService();
+        await expect(service.applyMaterialStockUpdate({ materialId: 'mat-1', types: [] })).rejects.toBeInstanceOf(
+            BadRequestException,
+        );
+    });
+
+    it('refuses when the Material does not exist', async () => {
+        const { service, prisma } = makeService();
+        prisma.material.findUnique.mockResolvedValueOnce(null);
+        await expect(
+            service.applyMaterialStockUpdate({ materialId: 'missing', types: [{ typeId: 'type-1' }] }),
+        ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('refuses a Type that does not belong to the given Material', async () => {
+        const { service } = makeService();
+        await expect(
+            service.applyMaterialStockUpdate({ materialId: 'mat-1', types: [{ typeId: 'type-from-elsewhere' }] }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('applies stock to each Type, optionally patches reorderLevel, and rolls up the Material', async () => {
+        const { service, prisma } = makeService();
+        await service.applyMaterialStockUpdate({
+            materialId: 'mat-1',
+            reorderLevel: 25,
+            types: [
+                { typeId: 'type-1', totalQty: 300, availableQty: 300, reservedQty: 0, unitCost: 8000 },
+                { typeId: 'type-2', totalQty: 200, availableQty: 150, reservedQty: 50, unitCost: 8500 },
+            ],
+        });
+
+        expect(prisma.material.update).toHaveBeenCalledWith({
+            where: { id: 'mat-1' },
+            data: { reorderLevel: 25 },
+        });
+        expect(prisma.materialType.update).toHaveBeenCalledWith({
+            where: { id: 'type-1' },
+            data: { totalQty: 300, availableQty: 300, reservedQty: 0, unitCost: 8000 },
+        });
+        expect(prisma.materialType.update).toHaveBeenCalledWith({
+            where: { id: 'type-2' },
+            data: { totalQty: 200, availableQty: 150, reservedQty: 50, unitCost: 8500 },
+        });
+    });
+
+    it('leaves reorderLevel untouched when it is not submitted', async () => {
+        const { service, prisma } = makeService();
+        await service.applyMaterialStockUpdate({
+            materialId: 'mat-1',
+            types: [{ typeId: 'type-1', totalQty: 10, availableQty: 10, reservedQty: 0, unitCost: 100 }],
+        });
+        // material.update is still called once, by the rollup — just never with reorderLevel.
+        for (const call of prisma.material.update.mock.calls) {
+            expect(call[0].data).not.toHaveProperty('reorderLevel');
+        }
     });
 });

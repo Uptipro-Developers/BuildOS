@@ -81,6 +81,7 @@ export interface MaterialCatalogTypeRecord {
     id: string;
     name: string;
     sku: string | null;
+    unit: string;
     totalQty: number;
     availableQty: number;
     reservedQty: number;
@@ -123,6 +124,7 @@ export interface MaterialCatalogDimensionInput {
 export interface MaterialCatalogTypeInput {
     name: string;
     sku?: string | null;
+    unit: string;
     dimensions: MaterialCatalogDimensionInput[];
 }
 

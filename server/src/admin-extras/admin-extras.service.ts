@@ -2876,7 +2876,7 @@ export class AdminExtrasService {
         },
     };
 
-    /** Normalises submitted materials/types/dimensions, dropping empty rows. */
+    /** Normalises submitted materials/types/dimensions, dropping empty rows. A Type needs both a name and a unit — unit is required on MaterialType. */
     private buildMaterialCreateInput(materials: any) {
         const list = Array.isArray(materials) ? materials : [];
         return list
@@ -2887,6 +2887,7 @@ export class AdminExtrasService {
                     .map((t: any) => ({
                         name: String(t?.name ?? '').trim(),
                         sku: String(t?.sku ?? '').trim() || null,
+                        unit: String(t?.unit ?? '').trim(),
                         dimensions: (Array.isArray(t?.dimensions) ? t.dimensions : [])
                             .map((d: any) => ({
                                 kind: String(d?.kind ?? '').trim(),
@@ -2895,7 +2896,7 @@ export class AdminExtrasService {
                             }))
                             .filter((d: any) => d.kind),
                     }))
-                    .filter((t: any) => t.name),
+                    .filter((t: any) => t.name && t.unit),
             }))
             .filter((m: any) => m.name);
     }
@@ -2920,7 +2921,7 @@ export class AdminExtrasService {
         tx: any,
         categoryId: string,
         categoryName: string,
-        m: { name: string; classification: string; types: { name: string; sku: string | null; dimensions: any[] }[] },
+        m: { name: string; classification: string; types: { name: string; sku: string | null; unit: string; dimensions: any[] }[] },
     ) {
         this.logger.log(
             `[MaterialCategory:material] creating "${m.name}" under categoryId=${categoryId} with ${m.types.length} type(s): ` +
@@ -2933,13 +2934,94 @@ export class AdminExtrasService {
                 category: categoryName,
                 materialType: m.classification,
                 types: {
-                    create: m.types.map((t) => ({ name: t.name, sku: t.sku, dimensions: t.dimensions })),
+                    create: m.types.map((t) => ({ name: t.name, sku: t.sku, unit: t.unit, dimensions: t.dimensions })),
                 },
             },
         });
         this.logger.log(`[MaterialCategory:material] material.create returned id=${created.id}`);
         await this.recalcMaterialTotals(tx, created.id);
         return created;
+    }
+
+    // ── All Materials → Add Material (catalogue-aware stock entry) ──
+    // Searches existing MaterialType rows so a store clerk can pick a
+    // catalogue-defined Type (and its parent Material's name/category/
+    // classification) rather than typing a material in freehand, then apply
+    // real stock quantities/cost onto that Type. This never creates a new
+    // Material or Type — every typeId submitted must already exist under the
+    // given Material, or the whole update is rejected.
+
+    async searchMaterialTypes(query: string) {
+        const q = String(query ?? '').trim();
+        if (!q) return [];
+        return this.prisma.materialType.findMany({
+            where: { name: { contains: q, mode: 'insensitive' } },
+            include: {
+                material: {
+                    select: { id: true, name: true, category: true, materialType: true, reorderLevel: true },
+                },
+            },
+            orderBy: { name: 'asc' },
+            take: 20,
+        });
+    }
+
+    async applyMaterialStockUpdate(data: any) {
+        const materialId = String(data?.materialId ?? '').trim();
+        if (!materialId) throw new BadRequestException('materialId is required');
+
+        const submitted = Array.isArray(data?.types) ? data.types : [];
+        if (submitted.length === 0) throw new BadRequestException('At least one Type is required');
+
+        const material = await this.prisma.material.findUnique({ where: { id: materialId }, include: { types: true } });
+        if (!material) throw new NotFoundException('Material not found');
+
+        const validTypeIds = new Set(material.types.map((t) => t.id));
+        const updates = submitted.map((t: any) => ({
+            typeId: String(t?.typeId ?? '').trim(),
+            totalQty: Number(t?.totalQty) || 0,
+            availableQty: Number(t?.availableQty) || 0,
+            reservedQty: Number(t?.reservedQty) || 0,
+            unitCost: Number(t?.unitCost) || 0,
+        }));
+        for (const u of updates) {
+            if (!u.typeId || !validTypeIds.has(u.typeId)) {
+                throw new BadRequestException('One of the selected Types no longer belongs to this Material');
+            }
+        }
+        const reorderLevel = data?.reorderLevel !== undefined ? Number(data.reorderLevel) || 0 : undefined;
+
+        this.logger.log(
+            `[MaterialStock:apply] materialId=${materialId} updating ${updates.length} type(s)` +
+            (reorderLevel !== undefined ? `, reorderLevel=${reorderLevel}` : ''),
+        );
+
+        await this.prisma.$transaction(async (tx) => {
+            if (reorderLevel !== undefined) {
+                await tx.material.update({ where: { id: materialId }, data: { reorderLevel } });
+            }
+            for (const u of updates) {
+                await tx.materialType.update({
+                    where: { id: u.typeId },
+                    data: {
+                        totalQty: u.totalQty,
+                        availableQty: u.availableQty,
+                        reservedQty: u.reservedQty,
+                        unitCost: u.unitCost,
+                    },
+                });
+            }
+            await this.recalcMaterialTotals(tx, materialId);
+        });
+
+        const result = await this.prisma.material.findUniqueOrThrow({
+            where: { id: materialId },
+            include: { types: { orderBy: { createdAt: 'asc' } } },
+        });
+        this.logger.log(
+            `[MaterialStock:apply] committed — totalQty=${result.totalQty} availableQty=${result.availableQty} unitCost=${result.unitCost}`,
+        );
+        return result;
     }
 
     async findMaterialCategories() {

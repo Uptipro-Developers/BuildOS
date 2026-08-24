@@ -1609,6 +1609,8 @@ interface TypeFormRow {
   key: string;
   name: string;
   sku: string;
+  /** Stocking unit — required, since each Type is its own stocked row. */
+  unit: string;
   dimensions: DimensionFormRow[];
 }
 interface MaterialFormRow {
@@ -1622,7 +1624,7 @@ function blankDimension(): DimensionFormRow {
   return { key: nextCatalogFormKey(), kind: "Length", value: "", unit: "" };
 }
 function blankType(): TypeFormRow {
-  return { key: nextCatalogFormKey(), name: "", sku: "", dimensions: [blankDimension()] };
+  return { key: nextCatalogFormKey(), name: "", sku: "", unit: "", dimensions: [blankDimension()] };
 }
 function blankMaterial(): MaterialFormRow {
   return { key: nextCatalogFormKey(), name: "", classification: "Consumable", types: [blankType()] };
@@ -1692,6 +1694,7 @@ function MaterialCategoriesPanel() {
               key: nextCatalogFormKey(),
               name: t.name,
               sku: t.sku || "",
+              unit: t.unit || "",
               dimensions: t.dimensions.length
                 ? t.dimensions.map((d) => ({
                   key: nextCatalogFormKey(),
@@ -1805,11 +1808,14 @@ function MaterialCategoriesPanel() {
   function findIncompleteRow(): string | null {
     for (const m of materials) {
       const materialName = m.name.trim();
-      if (materialName) continue;
       for (const t of m.types) {
         const typeName = t.name.trim();
-        if (typeName) {
+        if (!typeName) continue;
+        if (!materialName) {
           return `"${typeName}" needs its material's name filled in before it can be saved.`;
+        }
+        if (!t.unit.trim()) {
+          return `"${typeName}" under "${materialName}" needs a stocking unit before it can be saved.`;
         }
       }
     }
@@ -1839,6 +1845,7 @@ function MaterialCategoriesPanel() {
               .map((t) => ({
                 name: t.name.trim(),
                 sku: t.sku.trim() || undefined,
+                unit: t.unit.trim(),
                 dimensions: t.dimensions
                   .filter((d) => d.kind)
                   .map((d) => ({
@@ -2207,6 +2214,19 @@ function MaterialCategoriesPanel() {
                                   placeholder="SKU (e.g. GT-W-600600)"
                                   className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                 />
+                                <select
+                                  value={t.unit}
+                                  onChange={(e) =>
+                                    updateTypeRow(m.key, t.key, { unit: e.target.value })
+                                  }
+                                  title="Stocking unit"
+                                  className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                >
+                                  <option value="">Unit*</option>
+                                  {DIMENSION_UNITS.map((u) => (
+                                    <option key={u} value={u}>{u}</option>
+                                  ))}
+                                </select>
                                 <button
                                   type="button"
                                   onClick={() => addDimension(m.key, t.key)}

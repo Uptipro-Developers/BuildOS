@@ -47,6 +47,54 @@ export interface MaterialReturn {
     requestDate: string; approvedAt?: string;
 }
 
+/** One dimension entry stored on a MaterialType, e.g. { kind: "Weight", value: 50, unit: "kg" }. */
+export interface MaterialTypeDimension {
+    kind: string;
+    value: number | null;
+    unit: string | null;
+}
+
+/** A Type row as it lives on a Material — the thing that actually carries stock. */
+export interface MaterialTypeRow {
+    id: string;
+    name: string;
+    sku: string | null;
+    unit: string;
+    totalQty: number;
+    availableQty: number;
+    reservedQty: number;
+    unitCost: number;
+    dimensions: MaterialTypeDimension[];
+}
+
+/** A catalogue search hit — a Type plus enough of its parent Material to auto-fill the Add Material form. */
+export interface MaterialTypeSearchResult extends MaterialTypeRow {
+    material: {
+        id: string;
+        name: string;
+        category: string;
+        materialType: string;
+        reorderLevel: number;
+    };
+}
+
+export interface MaterialWithTypes extends Material {
+    types: MaterialTypeRow[];
+}
+
+export interface MaterialStockUpdateInput {
+    materialId: string;
+    /** Omit to leave the Material's reorder level untouched. */
+    reorderLevel?: number;
+    types: {
+        typeId: string;
+        totalQty: number;
+        availableQty: number;
+        reservedQty: number;
+        unitCost: number;
+    }[];
+}
+
 // Materials
 export const getMaterials = () => apiFetch<Material[]>('/materials');
 export const getMaterial = (id: string) => apiFetch<Material>(`/materials/${id}`);
@@ -56,6 +104,14 @@ export const updateMaterial = (id: string, data: Partial<Material>) =>
     apiFetch<Material>(`/materials/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteMaterial = (id: string) =>
     apiFetch<void>(`/materials/${id}`, { method: 'DELETE' });
+
+/** Catalogue search for the "Add Material" flow — matches by Type name. */
+export const searchMaterialTypes = (q: string) =>
+    apiFetch<MaterialTypeSearchResult[]>(`/materials/type-search?q=${encodeURIComponent(q)}`);
+
+/** Applies stock quantities/cost onto one or more existing MaterialType rows under one Material, and rolls the Material's totals up. */
+export const applyMaterialStockUpdate = (data: MaterialStockUpdateInput) =>
+    apiFetch<MaterialWithTypes>('/materials/type-stock', { method: 'POST', body: JSON.stringify(data) });
 
 // Stores
 export const getStores = () => apiFetch<Store[]>('/stores');
