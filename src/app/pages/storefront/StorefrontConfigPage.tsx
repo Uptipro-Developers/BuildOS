@@ -2197,14 +2197,14 @@ function MaterialCategoriesPanel() {
                         <div className="space-y-2 pl-3 border-l-2 border-gray-200">
                           {m.types.map((t) => (
                             <div key={t.key} className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <input
                                   value={t.name}
                                   onChange={(e) =>
                                     updateTypeRow(m.key, t.key, { name: e.target.value })
                                   }
                                   placeholder="Type name (e.g. Wall)"
-                                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                  className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                 />
                                 <input
                                   value={t.sku}
@@ -2212,7 +2212,7 @@ function MaterialCategoriesPanel() {
                                     updateTypeRow(m.key, t.key, { sku: e.target.value })
                                   }
                                   placeholder="SKU (e.g. GT-W-600600)"
-                                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                  className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                 />
                                 <select
                                   value={t.unit}
@@ -2220,7 +2220,7 @@ function MaterialCategoriesPanel() {
                                     updateTypeRow(m.key, t.key, { unit: e.target.value })
                                   }
                                   title="Stocking unit"
-                                  className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                  className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                 >
                                   <option value="">Unit*</option>
                                   {DIMENSION_UNITS.map((u) => (
@@ -2230,7 +2230,7 @@ function MaterialCategoriesPanel() {
                                 <button
                                   type="button"
                                   onClick={() => addDimension(m.key, t.key)}
-                                  className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap"
+                                  className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap shrink-0"
                                 >
                                   <Plus className="w-3.5 h-3.5" /> Dimension
                                 </button>
@@ -2238,20 +2238,20 @@ function MaterialCategoriesPanel() {
                                   type="button"
                                   onClick={() => removeType(m.key, t.key)}
                                   title="Remove type"
-                                  className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
+                                  className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
                               </div>
 
                               {t.dimensions.map((d) => (
-                                <div key={d.key} className="flex items-center gap-2">
+                                <div key={d.key} className="flex flex-wrap items-center gap-2">
                                   <select
                                     value={d.kind}
                                     onChange={(e) =>
                                       updateDimensionRow(m.key, t.key, d.key, { kind: e.target.value })
                                     }
-                                    className="w-32 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                    className="w-32 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                   >
                                     {DIMENSION_KINDS.map((k) => (
                                       <option key={k} value={k}>{k}</option>
@@ -2264,14 +2264,14 @@ function MaterialCategoriesPanel() {
                                       updateDimensionRow(m.key, t.key, d.key, { value: e.target.value })
                                     }
                                     placeholder="Value"
-                                    className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                    className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                   />
                                   <select
                                     value={d.unit}
                                     onChange={(e) =>
                                       updateDimensionRow(m.key, t.key, d.key, { unit: e.target.value })
                                     }
-                                    className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                    className="w-28 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                   >
                                     <option value="">— unit —</option>
                                     {DIMENSION_UNITS.map((u) => (
@@ -2282,7 +2282,7 @@ function MaterialCategoriesPanel() {
                                     type="button"
                                     onClick={() => removeDimension(m.key, t.key, d.key)}
                                     title="Remove dimension"
-                                    className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
+                                    className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
                                   >
                                     <X className="w-3.5 h-3.5" />
                                   </button>

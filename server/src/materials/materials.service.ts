@@ -34,6 +34,9 @@ export class MaterialsService {
                 ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
                 ...(category && category !== 'All' ? { category } : {}),
             },
+            // The All Materials table expands a row into its catalogue Types,
+            // so every row needs them alongside the Material's own rollup.
+            include: { types: { orderBy: { name: 'asc' } } },
             orderBy: { name: 'asc' },
         });
     }
