@@ -9,7 +9,9 @@ import {
   createMaterialRequest,
   updateMaterialRequest,
   getStores,
+  searchMaterialTypes,
   MaterialRequest as ApiMR,
+  MaterialTypeSearchResult,
 } from "../../api/materials";
 import {
   formatDateByGeneralSettings,
@@ -36,7 +38,6 @@ import {
 } from "../../components/AdvancedFilter";
 import { useNumbering } from "../../stores/numberingStore";
 import { getReferenceData } from "../../api/reference-data";
-import { getUnits } from "../../api/admin-extras";
 import { getAuthUserName } from "../../utils/useAuthUser";
 import {
   itemReference,
@@ -82,7 +83,6 @@ type LocalMR = {
     material: string;
     qty: number;
     unit: string;
-    available: number;
     notes: string;
   }[];
 };
@@ -125,7 +125,6 @@ function fromApiMR(r: ApiMR): LocalMR {
         material: r.materialName,
         qty: r.qty,
         unit: r.unit,
-        available: 0,
         notes: r.notes ?? "",
       },
     ],
@@ -194,29 +193,116 @@ const MR_FILTER_FIELDS: FilterFieldDef[] = [
   },
 ];
 
-/**
- * Fallback units, used only until the configured list loads (or if it fails).
- * The real list is Storefront's Units of Measurement — a hardcoded list here
- * offered units nobody had configured and omitted ones they had.
- */
-const MR_UNIT_FALLBACK = [
-  "Tonnes",
-  "Bags",
-  "Metres",
-  "Sheets",
-  "Rolls",
-  "Units",
-  "Cartons",
-  "Litres",
-  "Buckets",
-];
-
 interface MRItem {
   material: string;
   qty: string;
   unit: string;
-  available: string;
   notes: string;
+}
+
+/**
+ * Searches the MaterialType catalogue (the same rows the Storefront "Add
+ * Material" flow searches) and, once one is picked, hands its name and
+ * stocking unit back to the caller. A free-text field let requesters type a
+ * material that did not exist, or a spelling of one that did, and nothing
+ * downstream could match it to stock — this constrains the request to the
+ * real catalogue instead.
+ */
+function MaterialTypeSearchField({
+  selectedName,
+  excludeNames,
+  onPick,
+  onClear,
+}: {
+  selectedName: string;
+  excludeNames: Set<string>;
+  onPick: (hit: MaterialTypeSearchResult) => void;
+  onClear: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(() => {
+      searchMaterialTypes(q)
+        .then((hits) => setResults(hits.filter((h) => !excludeNames.has(h.name))))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(handle);
+    // Re-searching on every keystroke of `excludeNames` (a new Set each
+    // render) would spam the endpoint — the filter is applied to whatever
+    // the last search returned instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  if (selectedName) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          value={selectedName}
+          disabled
+          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
+        />
+        <button
+          type="button"
+          onClick={onClear}
+          title="Change material"
+          className="p-1 text-gray-400 hover:text-red-500 flex-shrink-0"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search material type…"
+        className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {query.trim() && (
+        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+          {searching ? (
+            <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>
+          ) : results.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-red-500">
+              No matching material type found for "{query.trim()}".
+            </p>
+          ) : (
+            results.map((hit) => (
+              <button
+                key={hit.id}
+                type="button"
+                onClick={() => {
+                  onPick(hit);
+                  setQuery("");
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-100 last:border-0"
+              >
+                <span className="font-medium text-gray-900">{hit.name}</span>{" "}
+                <span className="text-xs text-gray-400">
+                  {hit.material.name} · {hit.material.category}
+                  {hit.sku ? ` · ${hit.sku}` : ""}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function NewMRModal({
@@ -248,19 +334,6 @@ function NewMRModal({
 
   const [projects, setProjects] = useState<string[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
-  /**
-   * The material catalogue, for the Materials Requested picker.
-   *
-   * This was a free-text input, so a requester could type a material that does not
-   * exist — or a spelling of one that does — and nothing downstream could match it
-   * to stock. Choosing from the catalogue also fills the unit, which the requester
-   * previously had to guess.
-   */
-  const [materialOptions, setMaterialOptions] = useState<
-    { name: string; unit: string }[]
-  >([]);
-  /** Units of Measurement as configured in Storefront settings. */
-  const [unitOptions, setUnitOptions] = useState<string[]>(MR_UNIT_FALLBACK);
   // MaterialRequest.storeName is required by the backend, so the fulfilling
   // store has to be captured here rather than defaulted server-side.
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
@@ -269,52 +342,31 @@ function NewMRModal({
   const [department, setDepartment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [neededDays, setNeededDays] = useState("5");
-  const [priority, setPriority] = useState<"urgent" | "high" | "normal">(
-    "normal",
+  // "" is the unpicked placeholder state — Project/Fulfilling Store/Priority
+  // used to default to the first loaded option, which looked like a real
+  // choice the requester never actually made.
+  const [priority, setPriority] = useState<"" | "urgent" | "high" | "normal">(
+    "",
   );
   const [justification, setJustification] = useState("");
   const [items, setItems] = useState<MRItem[]>([
-    { material: "", qty: "", unit: "", available: "", notes: "" },
+    { material: "", qty: "", unit: "", notes: "" },
   ]);
 
   useEffect(() => {
     getReferenceData()
       .then((data) => {
-        const projectNames = data.projects.map((p) => p.name);
-        const departmentNames = data.departments.map((d) => d.name);
-        setProjects(projectNames);
-        setDepartments(departmentNames);
-        setProject((prev) => prev || projectNames[0] || "");
-        setDepartment((prev) => prev || departmentNames[0] || "");
-        setMaterialOptions(
-          (data.materials ?? [])
-            .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
-            .filter((m) => m.name),
-        );
+        setProjects(data.projects.map((p) => p.name));
+        setDepartments(data.departments.map((d) => d.name));
       })
-      .catch(() => {});
-    getUnits()
-      .then((rows) => {
-        const names = rows.map((u) => u.abbreviation || u.name).filter(Boolean);
-        if (names.length > 0) setUnitOptions(names);
-      })
-      .catch(() => {
-        /* keep the fallback list */
-      });
+      .catch(() => { });
     getStores()
-      .then((list) => {
-        const options = list.map((s) => ({ id: s.id, name: s.name }));
-        setStores(options);
-        setStoreId((prev) => prev || options[0]?.id || "");
-      })
+      .then((list) => setStores(list.map((s) => ({ id: s.id, name: s.name }))))
       .catch(() => setStores([]));
   }, []);
 
   const addItem = () =>
-    setItems((p) => [
-      ...p,
-      { material: "", qty: "", unit: "", available: "", notes: "" },
-    ]);
+    setItems((p) => [...p, { material: "", qty: "", unit: "", notes: "" }]);
   const removeItem = (i: number) =>
     setItems((p) => p.filter((_, j) => j !== i));
   const updateItem = (i: number, k: keyof MRItem, v: string) =>
@@ -330,14 +382,11 @@ function NewMRModal({
         .map((it) => it.material)
         .filter(Boolean),
     );
-  /** True once every catalogue material is already on a line. */
-  const allMaterialsUsed =
-    materialOptions.length > 0 &&
-    items.filter((it) => it.material).length >= materialOptions.length;
   const { allocate } = useNumbering();
   const valid =
     project &&
     storeId &&
+    priority &&
     justification.trim() &&
     items.every((it) => it.material.trim() && it.qty.trim());
 
@@ -356,7 +405,8 @@ function NewMRModal({
         requestedBy: getAuthUserName() || "Current User",
         department,
         status: "pending",
-        priority,
+        // `valid` guarantees this is non-empty by the time handleSave runs.
+        priority: priority as "urgent" | "high" | "normal",
         submittedDate: fmtDate(today),
         neededBy: addDays(parseInt(neededDays) || 5),
         neededByIso: addDaysIso(parseInt(neededDays) || 5),
@@ -366,7 +416,6 @@ function NewMRModal({
           material: it.material,
           qty: parseFloat(it.qty) || 0,
           unit: it.unit,
-          available: parseFloat(it.available) || 0,
           notes: it.notes,
         })),
       });
@@ -400,6 +449,7 @@ function NewMRModal({
                 onChange={(e) => setProject(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
+                <option value="">Select project…</option>
                 {projects.map((p) => (
                   <option key={p}>{p}</option>
                 ))}
@@ -414,6 +464,7 @@ function NewMRModal({
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
+                <option value="">Select department…</option>
                 {departments.map((d) => (
                   <option key={d}>{d}</option>
                 ))}
@@ -438,13 +489,14 @@ function NewMRModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Priority
+                Priority <span className="text-red-500">*</span>
               </label>
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as typeof priority)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
+                <option value="">Select priority…</option>
                 <option value="normal">Normal</option>
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
@@ -485,13 +537,7 @@ function NewMRModal({
               </label>
               <button
                 onClick={addItem}
-                disabled={allMaterialsUsed}
-                title={
-                  allMaterialsUsed
-                    ? "Every material in the catalogue is already on this request"
-                    : undefined
-                }
-                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 disabled:text-gray-300 disabled:hover:text-gray-300 disabled:cursor-not-allowed"
+                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
               >
                 <Plus className="w-3 h-3" /> Add Item
               </button>
@@ -500,39 +546,20 @@ function NewMRModal({
               {items.map((item, i) => (
                 <div
                   key={i}
-                  className="grid grid-cols-[1fr_60px_80px_60px_1fr_28px] gap-1.5 items-center"
+                  className="grid grid-cols-[1fr_60px_80px_1fr_28px] gap-1.5 items-start"
                 >
-                  <select
-                    value={item.material}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      updateItem(i, "material", name);
-                      // Adopt the catalogue's unit for the chosen material, so the
-                      // request is raised in the unit the material is stocked in.
-                      const chosen = materialOptions.find((m) => m.name === name);
-                      if (chosen?.unit) updateItem(i, "unit", chosen.unit);
+                  <MaterialTypeSearchField
+                    selectedName={item.material}
+                    excludeNames={materialsOnOtherLines(i)}
+                    onPick={(hit) => {
+                      updateItem(i, "material", hit.name);
+                      updateItem(i, "unit", hit.unit);
                     }}
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">
-                      {materialOptions.length === 0
-                        ? "No materials in the catalogue"
-                        : "Select material…"}
-                    </option>
-                    {/* A material already on another line is dropped, so the
-                        same item cannot be requested twice in one request. */}
-                    {materialOptions
-                      .filter(
-                        (m) =>
-                          m.name === item.material ||
-                          !materialsOnOtherLines(i).has(m.name),
-                      )
-                      .map((m) => (
-                        <option key={m.name} value={m.name}>
-                          {m.name}
-                        </option>
-                      ))}
-                  </select>
+                    onClear={() => {
+                      updateItem(i, "material", "");
+                      updateItem(i, "unit", "");
+                    }}
+                  />
                   <input
                     type="number"
                     value={item.qty}
@@ -540,26 +567,12 @@ function NewMRModal({
                     placeholder="Qty"
                     className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <select
-                    value={item.unit}
-                    onChange={(e) => updateItem(i, "unit", e.target.value)}
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {/* Include the line's own unit so a material's configured
-                        unit still renders as selected even if it is not in the
-                        configured list. */}
-                    {Array.from(
-                      new Set([...unitOptions, item.unit].filter(Boolean)),
-                    ).map((u) => (
-                      <option key={u}>{u}</option>
-                    ))}
-                  </select>
                   <input
-                    type="number"
-                    value={item.available}
-                    onChange={(e) => updateItem(i, "available", e.target.value)}
-                    placeholder="Avail."
-                    className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={item.unit}
+                    disabled
+                    placeholder="—"
+                    title="Filled in from the selected material type"
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-500"
                   />
                   <input
                     value={item.notes}
@@ -570,7 +583,7 @@ function NewMRModal({
                   {items.length > 1 && (
                     <button
                       onClick={() => removeItem(i)}
-                      className="text-red-400 hover:text-red-600"
+                      className="text-red-400 hover:text-red-600 mt-1.5"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -1050,9 +1063,6 @@ export function MaterialRequestsPage() {
                             <th className="px-3 py-2 text-xs font-medium text-gray-500 text-right">
                               Requested
                             </th>
-                            <th className="px-3 py-2 text-xs font-medium text-gray-500 text-right">
-                              Available
-                            </th>
                             <th className="px-3 py-2 text-xs font-medium text-gray-500">
                               Notes
                             </th>
@@ -1067,22 +1077,6 @@ export function MaterialRequestsPage() {
                               <td className="px-3 py-2 text-right font-semibold text-gray-900">
                                 {formatNumberByGeneralSettings(item.qty)}{" "}
                                 {item.unit}
-                              </td>
-                              <td className="px-3 py-2 text-right">
-                                <span
-                                  className={
-                                    item.available >= item.qty
-                                      ? "text-green-700 font-medium"
-                                      : item.available > 0
-                                        ? "text-amber-600 font-medium"
-                                        : "text-red-600 font-medium"
-                                  }
-                                >
-                                  {formatNumberByGeneralSettings(
-                                    item.available,
-                                  )}{" "}
-                                  {item.unit}
-                                </span>
                               </td>
                               <td className="px-3 py-2 text-xs text-gray-500">
                                 {item.notes}
@@ -1129,34 +1123,34 @@ export function MaterialRequestsPage() {
                         is nothing to click here — only somewhere to go. */}
                     {(req.status === "approved" ||
                       req.status === "in_procurement") && (
-                      <div className="flex items-center justify-end gap-3 mt-4">
-                        {req.prRef ? (
-                          <>
-                            <span className="text-xs text-gray-500">
-                              Purchase request{" "}
-                              <span className="font-mono font-medium text-gray-700">
-                                {req.prRef}
-                              </span>{" "}
-                              was raised automatically.
-                            </span>
-                            <RowAction
-                              icon={<ShoppingCart className="w-3.5 h-3.5" />}
-                              label="Open Purchase Request"
-                              tone="primary"
-                              onClick={() =>
-                                navigate(
-                                  `/apps/procurement/purchase-requests?pr=${encodeURIComponent(req.prRef!)}`,
-                                )
-                              }
-                            />
-                          </>
-                        ) : (
-                          <RowActionNote>
-                            Raising the purchase request…
-                          </RowActionNote>
-                        )}
-                      </div>
-                    )}
+                        <div className="flex items-center justify-end gap-3 mt-4">
+                          {req.prRef ? (
+                            <>
+                              <span className="text-xs text-gray-500">
+                                Purchase request{" "}
+                                <span className="font-mono font-medium text-gray-700">
+                                  {req.prRef}
+                                </span>{" "}
+                                was raised automatically.
+                              </span>
+                              <RowAction
+                                icon={<ShoppingCart className="w-3.5 h-3.5" />}
+                                label="Open Purchase Request"
+                                tone="primary"
+                                onClick={() =>
+                                  navigate(
+                                    `/apps/procurement/purchase-requests?pr=${encodeURIComponent(req.prRef!)}`,
+                                  )
+                                }
+                              />
+                            </>
+                          ) : (
+                            <RowActionNote>
+                              Raising the purchase request…
+                            </RowActionNote>
+                          )}
+                        </div>
+                      )}
                   </div>
                 </div>
               )}

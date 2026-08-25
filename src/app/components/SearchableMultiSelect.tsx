@@ -18,6 +18,14 @@ interface SearchableMultiSelectProps {
   onNotFoundAction?: { label: string; icon?: ReactNode; onClick: (query: string) => void };
   emptyMessage?: string;
   max?: number;
+  /**
+   * When set, options come from this instead of filtering the static
+   * `options` prop — typed queries are debounced and handed off to the
+   * server (e.g. a catalogue too large to load up front). `options` can
+   * still be passed to seed already-known entries (usually just the ones
+   * currently selected, so their labels render before any search runs).
+   */
+  onSearch?: (query: string) => Promise<Option[]>;
 }
 
 export function SearchableMultiSelect({
@@ -31,11 +39,19 @@ export function SearchableMultiSelect({
   onNotFoundAction,
   emptyMessage = "No results found",
   max,
+  onSearch,
 }: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [remoteOptions, setRemoteOptions] = useState<Option[]>([]);
+  const [searching, setSearching] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Every option ever seen (from `options` or a search response), so a
+  // selected tag still has a label after the live search results move on.
+  const knownRef = useRef<Map<string, Option>>(new Map());
+  for (const o of options) knownRef.current.set(o.value, o);
+  for (const o of remoteOptions) knownRef.current.set(o.value, o);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -48,11 +64,41 @@ export function SearchableMultiSelect({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filtered = options.filter(
-    (o) =>
-      o.label.toLowerCase().includes(query.toLowerCase()) ||
-      (o.group && o.group.toLowerCase().includes(query.toLowerCase()))
-  );
+  // `onSearch` is typically a fresh function on every render of the caller
+  // (and calling it usually updates the caller's own state, e.g. to cache
+  // results), so depending on its identity here re-armed the debounce on
+  // every search response and never let it settle — a stuck "Searching..."
+  // that kept re-querying instead of stopping after the user stopped typing.
+  // A ref sidesteps that: this effect only reacts to `query` changing.
+  const onSearchRef = useRef(onSearch);
+  onSearchRef.current = onSearch;
+
+  useEffect(() => {
+    if (!onSearchRef.current) return;
+    const q = query.trim();
+    if (!q) {
+      setRemoteOptions([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(() => {
+      onSearchRef
+        .current!(q)
+        .then(setRemoteOptions)
+        .catch(() => setRemoteOptions([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [query]);
+
+  const filtered = onSearch
+    ? remoteOptions
+    : options.filter(
+      (o) =>
+        o.label.toLowerCase().includes(query.toLowerCase()) ||
+        (o.group && o.group.toLowerCase().includes(query.toLowerCase()))
+    );
 
   const grouped = filtered.reduce<Record<string, Option[]>>((acc, o) => {
     const g = o.group || "Other";
@@ -75,7 +121,9 @@ export function SearchableMultiSelect({
     onChange(value.filter((v) => v !== optionValue));
   };
 
-  const selectedOptions = options.filter((o) => value.includes(o.value));
+  const selectedOptions = value
+    .map((v) => knownRef.current.get(v))
+    .filter((o): o is Option => Boolean(o));
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
@@ -122,7 +170,9 @@ export function SearchableMultiSelect({
             </div>
           </div>
           <div className="max-h-60 overflow-y-auto">
-            {Object.keys(grouped).length === 0 ? (
+            {onSearch && searching ? (
+              <p className="px-3 py-2 text-sm text-gray-400">Searching...</p>
+            ) : Object.keys(grouped).length === 0 ? (
               <div>
                 <p className="px-3 py-2 text-sm text-gray-400">{emptyMessage}</p>
                 {onNotFoundAction && query.trim().length > 0 && (
@@ -151,9 +201,8 @@ export function SearchableMultiSelect({
                         onClick={() => toggle(option.value)}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-orange-50 transition-colors"
                       >
-                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                          selected ? "bg-orange-500 border-orange-500" : "border-gray-300"
-                        }`}>
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${selected ? "bg-orange-500 border-orange-500" : "border-gray-300"
+                          }`}>
                           {selected && <Check className="w-3 h-3 text-white" />}
                         </div>
                         <span className="flex-1">{option.label}</span>

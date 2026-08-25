@@ -66,11 +66,79 @@ export interface UnitOfMeasurement {
     conversionFactor?: number;
 }
 
+export interface MaterialCatalogDimensionRecord {
+    /** Weight | Length | Width | Breadth | Thickness | Area | Volume | Custom */
+    kind: string;
+    value: number | null;
+    unit: string | null;
+}
+
+/**
+ * A Type is its own row (MaterialType) — the thing that actually carries
+ * stock. Its dimensions live inline as a JSON array, not a nested table.
+ */
+export interface MaterialCatalogTypeRecord {
+    id: string;
+    name: string;
+    sku: string | null;
+    unit: string;
+    totalQty: number;
+    availableQty: number;
+    reservedQty: number;
+    unitCost: number;
+    dimensions: MaterialCatalogDimensionRecord[];
+}
+
+/**
+ * A Material is the same row Goods Receipt/Stock Movement use elsewhere in
+ * the app — real inventory, not disposable catalog-only data. Its
+ * totalQty/availableQty/reservedQty (sums) and unitCost (quantity-weighted
+ * average) are a rollup computed from its Types.
+ */
+export interface MaterialCatalogItemRecord {
+    id: string;
+    name: string;
+    classification: 'Consumable' | 'Reusable';
+    unit: string | null;
+    totalQty: number;
+    availableQty: number;
+    reservedQty: number;
+    unitCost: number;
+    types: MaterialCatalogTypeRecord[];
+}
+
 export interface MaterialCategoryRecord {
     id: string;
     name: string;
-    description: string;
+    description: string | null;
     color: string;
+    materials: MaterialCatalogItemRecord[];
+}
+
+export interface MaterialCatalogDimensionInput {
+    kind: string;
+    value?: number | string | null;
+    unit?: string | null;
+}
+
+export interface MaterialCatalogTypeInput {
+    name: string;
+    sku?: string | null;
+    unit: string;
+    dimensions: MaterialCatalogDimensionInput[];
+}
+
+export interface MaterialCatalogItemInput {
+    name: string;
+    classification: 'Consumable' | 'Reusable';
+    types: MaterialCatalogTypeInput[];
+}
+
+export interface MaterialCategoryInput {
+    name: string;
+    description?: string;
+    color?: string;
+    materials?: MaterialCatalogItemInput[];
 }
 
 export interface EmailTemplateConfig {
@@ -339,12 +407,12 @@ export const updateUnit = (id: string, data: Partial<Omit<UnitOfMeasurement, 'id
 export const deleteUnit = (id: string) =>
     apiFetch<{ ok: boolean }>(`/admin/units/${id}`, { method: 'DELETE' });
 
-// Material Categories
+// Material Categories — Category → Material → Type → Dimension
 export const getMaterialCategories = () =>
     apiFetch<MaterialCategoryRecord[]>('/admin/material-categories');
-export const createMaterialCategory = (data: Omit<MaterialCategoryRecord, 'id'>) =>
+export const createMaterialCategory = (data: MaterialCategoryInput) =>
     apiFetch<MaterialCategoryRecord>('/admin/material-categories', { method: 'POST', body: JSON.stringify(data) });
-export const updateMaterialCategory = (id: string, data: Partial<Omit<MaterialCategoryRecord, 'id'>>) =>
+export const updateMaterialCategory = (id: string, data: Partial<MaterialCategoryInput>) =>
     apiFetch<MaterialCategoryRecord>(`/admin/material-categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteMaterialCategory = (id: string) =>
     apiFetch<{ ok: boolean }>(`/admin/material-categories/${id}`, { method: 'DELETE' });

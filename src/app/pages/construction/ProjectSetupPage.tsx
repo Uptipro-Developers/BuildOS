@@ -53,7 +53,11 @@ import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { getProject } from "../../api/projects";
 import { fetchEmployees } from "../../api/employees";
 import { fetchSuppliers } from "../../api/suppliers";
-import { getMaterials, createMaterialRequest } from "../../api/materials";
+import {
+  createMaterialRequest,
+  searchMaterialTypes,
+  MaterialTypeSearchResult,
+} from "../../api/materials";
 import { listConstructionSettings } from "../../api/construction-settings";
 import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import { getTasks } from "../../api/tasks";
@@ -135,7 +139,14 @@ export function ProjectSetupPage() {
   const [staffList, setStaffList] = useState<string[]>([]);
   const [hrEmployees, setHrEmployees] = useState<any[]>([]);
   const [allVendors, setAllVendors] = useState<any[]>([]);
-  const [materialInventory, setMaterialInventory] = useState<any[]>([]);
+  // Every MaterialType hit ever returned by the Materials search, keyed by
+  // id — the search itself is server-side (searchMaterialTypes), so unlike
+  // the other reference lookups there is no fixed list to hold in state;
+  // this just remembers enough of what was seen to resolve a selected id
+  // back into a full record when "Add Selected" is clicked.
+  const [materialTypeCache, setMaterialTypeCache] = useState<
+    Record<string, MaterialTypeSearchResult>
+  >({});
   const [allTasks, setAllTasks] = useState<any[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
   const [equipmentInventory, setEquipmentInventory] = useState<any[]>([]);
@@ -826,10 +837,9 @@ export function ProjectSetupPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      const [emps, sups, mats, tsk, cls, eqp] = await Promise.all([
+      const [emps, sups, tsk, cls, eqp] = await Promise.all([
         fetchEmployees().catch(() => [] as any[]),
         fetchSuppliers().catch(() => [] as any[]),
-        getMaterials().catch(() => [] as any[]),
         getTasks().catch(() => [] as any[]),
         getClusters().catch(() => [] as any[]),
         getEquipment().catch(() => [] as any[]),
@@ -859,16 +869,6 @@ export function ProjectSetupPage() {
           isMainContractor: false,
         })),
       );
-      setMaterialInventory(
-        (mats as any[]).map((m) => ({
-          id: m.id,
-          name: m.name,
-          category: m.category,
-          unit: m.unit,
-          defaultUnitCost: m.unitCost ?? 0,
-          inStock: m.availableQty ?? 0,
-        })),
-      );
       setAllTasks(tsk as any[]);
       setClusters((cls as any[]).map((c) => c.name).filter(Boolean));
       setEquipmentInventory(
@@ -891,9 +891,9 @@ export function ProjectSetupPage() {
       const days = prev.workingDays.includes(dayIdx)
         ? prev.workingDays.filter((d) => d !== dayIdx)
         : [...prev.workingDays, dayIdx].sort((a, b) => {
-            const order = [1, 2, 3, 4, 5, 6, 0];
-            return order.indexOf(a) - order.indexOf(b);
-          });
+          const order = [1, 2, 3, 4, 5, 6, 0];
+          return order.indexOf(a) - order.indexOf(b);
+        });
       return { ...prev, workingDays: days };
     });
   };
@@ -993,7 +993,7 @@ export function ProjectSetupPage() {
     const dur = Math.max(
       1,
       Math.round((new Date(e).getTime() - new Date(s).getTime()) / 86400000) +
-        1,
+      1,
     );
     const task: Task = {
       id: newId,
@@ -1017,7 +1017,7 @@ export function ProjectSetupPage() {
       notes: "",
       structureEntryId: taskForm.parentTaskId
         ? projectTasks.find((t) => t.id === taskForm.parentTaskId)
-            ?.structureEntryId
+          ?.structureEntryId
         : undefined,
     };
     setProjectTasks((prev) => [...prev, task]);
@@ -1185,31 +1185,31 @@ export function ProjectSetupPage() {
     // server now, and a plain .map callback cannot await.
     const newV: Vendor[] = await Promise.all(
       selectedVendorIds
-      .filter((id) => {
-        const v = allVendors.find((x) => x.id === id);
-        return v && !existingNames.has(v.name);
-      })
-      .map(async (id) => {
-        const v = allVendors.find((x) => x.id === id);
-        return {
-          id: await allocate("Vendor"),
-          projectId: projectId!,
-          assignedWorkPackages: [],
-          name: v?.name || "",
-          trade: v?.trade || "",
-          contractType: v?.contractType || "Labor-only",
-          isNominated: v?.isNominated || false,
-          contractSum: v?.contractSum || 0,
-          blockAssignment: v?.blockAssignment || "",
-          skilledCount: v?.skilledCount || 0,
-          unskilledCount: v?.unskilledCount || 0,
-          mandaysEstimate: v?.mandaysEstimate || 0,
-          status: v?.status || "Awarded",
-          isMainContractor: v?.isMainContractor || false,
-          subcontractorIds: v?.subcontractorIds || [],
-          parentContractorId: v?.parentContractorId || undefined,
-        };
-      }),
+        .filter((id) => {
+          const v = allVendors.find((x) => x.id === id);
+          return v && !existingNames.has(v.name);
+        })
+        .map(async (id) => {
+          const v = allVendors.find((x) => x.id === id);
+          return {
+            id: await allocate("Vendor"),
+            projectId: projectId!,
+            assignedWorkPackages: [],
+            name: v?.name || "",
+            trade: v?.trade || "",
+            contractType: v?.contractType || "Labor-only",
+            isNominated: v?.isNominated || false,
+            contractSum: v?.contractSum || 0,
+            blockAssignment: v?.blockAssignment || "",
+            skilledCount: v?.skilledCount || 0,
+            unskilledCount: v?.unskilledCount || 0,
+            mandaysEstimate: v?.mandaysEstimate || 0,
+            status: v?.status || "Awarded",
+            isMainContractor: v?.isMainContractor || false,
+            subcontractorIds: v?.subcontractorIds || [],
+            parentContractorId: v?.parentContractorId || undefined,
+          };
+        }),
     );
     setProjectVendors((prev) => [...prev, ...newV]);
     setSelectedVendorIds([]);
@@ -1243,11 +1243,11 @@ export function ProjectSetupPage() {
       prev.map((v) =>
         v.id === vendorId
           ? {
-              ...v,
-              representatives: (v.representatives || []).filter(
-                (r) => r.id !== repId,
-              ),
-            }
+            ...v,
+            representatives: (v.representatives || []).filter(
+              (r) => r.id !== repId,
+            ),
+          }
           : v,
       ),
     );
@@ -1257,11 +1257,11 @@ export function ProjectSetupPage() {
       prev.map((v) =>
         v.id === vendorId
           ? {
-              ...v,
-              representatives: (v.representatives || []).map((r) =>
-                r.id === repId ? { ...r, isActive: !r.isActive } : r,
-              ),
-            }
+            ...v,
+            representatives: (v.representatives || []).map((r) =>
+              r.id === repId ? { ...r, isActive: !r.isActive } : r,
+            ),
+          }
           : v,
       ),
     );
@@ -1275,23 +1275,23 @@ export function ProjectSetupPage() {
     // server now, and a plain .map callback cannot await.
     const newStaff: HumanResource[] = await Promise.all(
       selectedEmployeeIds
-      .filter((id) => !existingIds.has(id))
-      .map(async (id) => {
-        const emp = hrEmployees.find((e) => e.id === id);
-        return {
-          id: await allocate("Staff"),
-          projectId: projectId!,
-          source: "employee" as const,
-          name: `${emp?.firstName || ""} ${emp?.lastName || ""}`,
-          trade: emp?.role || "",
-          employeeId: emp?.id || "",
-          dailyRate: emp?.dailyRate || 0,
-          status: "Active" as const,
-          assignedWorkPackages: [],
-          blockAssignment: "",
-          mandaysEstimate: 0,
-        };
-      }),
+        .filter((id) => !existingIds.has(id))
+        .map(async (id) => {
+          const emp = hrEmployees.find((e) => e.id === id);
+          return {
+            id: await allocate("Staff"),
+            projectId: projectId!,
+            source: "employee" as const,
+            name: `${emp?.firstName || ""} ${emp?.lastName || ""}`,
+            trade: emp?.role || "",
+            employeeId: emp?.id || "",
+            dailyRate: emp?.dailyRate || 0,
+            status: "Active" as const,
+            assignedWorkPackages: [],
+            blockAssignment: "",
+            mandaysEstimate: 0,
+          };
+        }),
     );
     setProjectStaff((prev) => [...prev, ...newStaff]);
     setSelectedEmployeeIds([]);
@@ -1306,28 +1306,28 @@ export function ProjectSetupPage() {
     // server now, and a plain .map callback cannot await.
     const newC: HumanResource[] = await Promise.all(
       selectedContractorIds
-      .filter((id) => {
-        const c = individualContractors.find((x) => x.id === id);
-        return c && !existingNames.has(c.name);
-      })
-      .map(async (id) => {
-        const c = individualContractors.find((x) => x.id === id);
-        return {
-          id: await allocate("Contractor"),
-          projectId: projectId!,
-          source: "individual-contractor" as const,
-          name: c?.name || "",
-          trade: c?.trade || "",
-          payRate: c?.payRate || undefined,
-          payRateUnit: c?.payRateUnit || "daily",
-          skilledCount: c?.skilledCount || 0,
-          unskilledCount: c?.unskilledCount || 0,
-          mandaysEstimate: c?.manDays || 0,
-          status: c?.status || "Awarded",
-          assignedWorkPackages: [],
-          blockAssignment: "",
-        };
-      }),
+        .filter((id) => {
+          const c = individualContractors.find((x) => x.id === id);
+          return c && !existingNames.has(c.name);
+        })
+        .map(async (id) => {
+          const c = individualContractors.find((x) => x.id === id);
+          return {
+            id: await allocate("Contractor"),
+            projectId: projectId!,
+            source: "individual-contractor" as const,
+            name: c?.name || "",
+            trade: c?.trade || "",
+            payRate: c?.payRate || undefined,
+            payRateUnit: c?.payRateUnit || "daily",
+            skilledCount: c?.skilledCount || 0,
+            unskilledCount: c?.unskilledCount || 0,
+            mandaysEstimate: c?.manDays || 0,
+            status: c?.status || "Awarded",
+            assignedWorkPackages: [],
+            blockAssignment: "",
+          };
+        }),
     );
     setProjectContractors((prev) => [...prev, ...newC]);
     setSelectedContractorIds([]);
@@ -1336,25 +1336,40 @@ export function ProjectSetupPage() {
     setProjectContractors((prev) => prev.filter((c) => c.id !== id));
 
   // Material helpers
+  /** Searches the MaterialType catalogue for the "Select Materials" picker. */
+  async function searchMaterialsForProject(query: string) {
+    const hits = await searchMaterialTypes(query);
+    setMaterialTypeCache((prev) => {
+      const next = { ...prev };
+      for (const hit of hits) next[hit.id] = hit;
+      return next;
+    });
+    return hits.map((hit) => ({
+      label: `${hit.name} (${hit.availableQty} ${hit.unit} in stock) — ${getCurrencySymbol()}${formatNumberByGeneralSettings(hit.unitCost)}/${hit.unit}`,
+      value: hit.id,
+      group: hit.material.category,
+    }));
+  }
+
   const addMaterial = async () => {
     if (selectedMaterialIds.length === 0) return;
     // Promise.all with an async map: each row's reference is allocated on the
     // server now, and a plain .map callback cannot await.
     const newMats: MaterialResource[] = await Promise.all(
       selectedMaterialIds.map(async (id) => {
-      const inv = materialInventory.find((x) => x.id === id);
-      return {
-        id: await allocate("Material"),
-        projectId: projectId!,
-        name: inv?.name || "Unknown",
-        category: inv?.category || "",
-        unit: inv?.unit || "",
-        estimatedQty: 1,
-        estimatedUnitCost: inv?.defaultUnitCost || 0,
-        totalEstimatedCost: inv?.defaultUnitCost || 0,
-        procurementSource: "internal" as const,
-      };
-    }),
+        const t = materialTypeCache[id];
+        return {
+          id: await allocate("Material"),
+          projectId: projectId!,
+          name: t?.name || "Unknown",
+          category: t?.material.category || "",
+          unit: t?.unit || "",
+          estimatedQty: 1,
+          estimatedUnitCost: t?.unitCost || 0,
+          totalEstimatedCost: t?.unitCost || 0,
+          procurementSource: "internal" as const,
+        };
+      }),
     );
     setProjectMaterials((prev) => [...prev, ...newMats]);
     setSelectedMaterialIds([]);
@@ -1448,13 +1463,12 @@ export function ProjectSetupPage() {
                 className={`flex flex-col items-center gap-1.5 transition-opacity ${isClickable ? "cursor-pointer" : "cursor-default"} ${!isClickable ? "opacity-50" : ""}`}
               >
                 <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
-                    isCompleted
+                  className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${isCompleted
                       ? "bg-green-500 text-white"
                       : isCurrent
                         ? "text-white"
                         : "bg-gray-200 text-gray-500"
-                  }`}
+                    }`}
                   style={
                     isCurrent && !isCompleted
                       ? { backgroundColor: "#E8973A" }
@@ -1468,13 +1482,12 @@ export function ProjectSetupPage() {
                   )}
                 </div>
                 <span
-                  className={`text-xs font-medium whitespace-nowrap ${
-                    isCompleted
+                  className={`text-xs font-medium whitespace-nowrap ${isCompleted
                       ? "text-green-600"
                       : isCurrent
                         ? "font-semibold"
                         : "text-gray-400"
-                  }`}
+                    }`}
                   style={isCurrent && !isCompleted ? { color: "#E8973A" } : {}}
                 >
                   {step.label}
@@ -1482,9 +1495,8 @@ export function ProjectSetupPage() {
               </button>
               {idx < STEPS.length - 1 && (
                 <div
-                  className={`w-12 sm:w-16 lg:w-24 h-0.5 mx-1.5 sm:mx-2 rounded-full ${
-                    completedSteps.has(idx) ? "bg-green-500" : "bg-gray-200"
-                  }`}
+                  className={`w-12 sm:w-16 lg:w-24 h-0.5 mx-1.5 sm:mx-2 rounded-full ${completedSteps.has(idx) ? "bg-green-500" : "bg-gray-200"
+                    }`}
                 />
               )}
             </div>
@@ -1530,11 +1542,10 @@ export function ProjectSetupPage() {
                     setProjectSector(s);
                     setProjectCategory("");
                   }}
-                  className={`text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-                    selected
+                  className={`text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all ${selected
                       ? "text-white border-transparent"
                       : "hover:border-gray-300"
-                  }`}
+                    }`}
                   style={{
                     backgroundColor: selected ? "#E8973A" : "white",
                     borderColor: selected ? "#E8973A" : "#E2E8F0",
@@ -1564,11 +1575,10 @@ export function ProjectSetupPage() {
                   <button
                     key={c}
                     onClick={() => setProjectCategory(c)}
-                    className={`text-left px-4 py-2.5 rounded-lg border text-sm transition-all ${
-                      selected
+                    className={`text-left px-4 py-2.5 rounded-lg border text-sm transition-all ${selected
                         ? "text-white border-transparent"
                         : "hover:bg-gray-50"
-                    }`}
+                      }`}
                     style={{
                       backgroundColor: selected ? "#E8973A" : "white",
                       borderColor: selected ? "#E8973A" : "#E2E8F0",
@@ -1954,11 +1964,10 @@ export function ProjectSetupPage() {
                 onClick={() =>
                   setBasicInfo({ ...basicInfo, contractingModel: opt.value })
                 }
-                className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium text-left transition-colors ${
-                  basicInfo.contractingModel === opt.value
+                className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium text-left transition-colors ${basicInfo.contractingModel === opt.value
                     ? "bg-amber-50 border-amber-400 text-amber-700"
                     : "hover:bg-gray-50 text-gray-600"
-                }`}
+                  }`}
               >
                 <span className="block font-semibold">{opt.label}</span>
                 <span className="block mt-0.5 font-normal opacity-70">
@@ -2181,16 +2190,16 @@ export function ProjectSetupPage() {
                 <Users className="w-3.5 h-3.5" /> Assign
                 {resourceAssignments.filter((a) => a.taskId === task.id)
                   .length > 0 && (
-                  <span
-                    className="bg-white text-orange-700 text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center border"
-                    style={{ borderColor: "#E8973A" }}
-                  >
-                    {
-                      resourceAssignments.filter((a) => a.taskId === task.id)
-                        .length
-                    }
-                  </span>
-                )}
+                    <span
+                      className="bg-white text-orange-700 text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center border"
+                      style={{ borderColor: "#E8973A" }}
+                    >
+                      {
+                        resourceAssignments.filter((a) => a.taskId === task.id)
+                          .length
+                      }
+                    </span>
+                  )}
               </button>
             </div>
             <div className="w-[80px] flex-shrink-0 flex justify-center">
@@ -2318,7 +2327,7 @@ export function ProjectSetupPage() {
                         1,
                         Math.round(
                           (new Date(e).getTime() - new Date(s).getTime()) /
-                            86400000,
+                          86400000,
                         ) + 1,
                       ),
                       actualDuration: null,
@@ -2369,11 +2378,10 @@ export function ProjectSetupPage() {
                   <button
                     key={id || "all"}
                     onClick={() => setStructureFilter(id)}
-                    className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
-                      (id ? structureFilter === id : !structureFilter)
+                    className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${(id ? structureFilter === id : !structureFilter)
                         ? "bg-gray-100 text-gray-700 border-gray-200"
                         : "bg-white text-gray-600 hover:bg-gray-50"
-                    }`}
+                      }`}
                     style={{ borderColor: "#E2E8F0" }}
                   >
                     {id ? se?.name || id : "All"}
@@ -2644,10 +2652,10 @@ export function ProjectSetupPage() {
                                   prev.map((t) =>
                                     t.id === assignModalTaskId
                                       ? {
-                                          ...t,
-                                          vendorId: e.target.value,
-                                          subVendorIds: t.subVendorIds || [],
-                                        }
+                                        ...t,
+                                        vendorId: e.target.value,
+                                        subVendorIds: t.subVendorIds || [],
+                                      }
                                       : t,
                                   ),
                                 );
@@ -2814,11 +2822,11 @@ export function ProjectSetupPage() {
                                   prev.map((t) =>
                                     t.id === assignModalTaskId
                                       ? {
-                                          ...t,
-                                          subVendorIds: (
-                                            t.subVendorIds || []
-                                          ).filter((sid) => sid !== sub!.id),
-                                        }
+                                        ...t,
+                                        subVendorIds: (
+                                          t.subVendorIds || []
+                                        ).filter((sid) => sid !== sub!.id),
+                                      }
                                       : t,
                                   ),
                                 );
@@ -2850,12 +2858,12 @@ export function ProjectSetupPage() {
                             prev.map((t) =>
                               t.id === assignModalTaskId
                                 ? {
-                                    ...t,
-                                    subVendorIds: [
-                                      ...(t.subVendorIds || []),
-                                      e.target.value,
-                                    ],
-                                  }
+                                  ...t,
+                                  subVendorIds: [
+                                    ...(t.subVendorIds || []),
+                                    e.target.value,
+                                  ],
+                                }
                                 : t,
                             ),
                           );
@@ -2923,15 +2931,14 @@ export function ProjectSetupPage() {
                                 resourceId: "",
                               })
                             }
-                            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                              assignForm.resourceType === rt
+                            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${assignForm.resourceType === rt
                                 ? rt === "human"
                                   ? "bg-blue-50 border-blue-400 text-blue-700"
                                   : rt === "material"
                                     ? "bg-green-50 border-green-400 text-green-700"
                                     : "bg-amber-50 border-amber-400 text-amber-700"
                                 : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
-                            }`}
+                              }`}
                           >
                             {rt === "human"
                               ? "Human"
@@ -3215,11 +3222,10 @@ export function ProjectSetupPage() {
     }) => (
       <button
         onClick={() => setHumanSubType(value)}
-        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-          humanSubType === value
+        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${humanSubType === value
             ? "bg-white text-gray-900 shadow-sm border"
             : "text-gray-500 hover:text-gray-700 border border-transparent"
-        }`}
+          }`}
       >
         {label}
       </button>
@@ -3630,79 +3636,79 @@ export function ProjectSetupPage() {
                   s.name.toLowerCase().includes(hrSearch.toLowerCase()) ||
                   s.trade.toLowerCase().includes(hrSearch.toLowerCase()),
               ).length > 0 && (
-                <div>
-                  <div
-                    className="px-5 py-2 bg-gray-50 flex items-center gap-2 cursor-pointer select-none"
-                    onClick={() =>
-                      setHrSectionOpen((prev) => ({
-                        ...prev,
-                        employee: !prev.employee,
-                      }))
-                    }
-                  >
-                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 flex items-center gap-1">
-                      <Users className="w-3 h-3" />{" "}
-                      {basicInfo.contractingModel === "developer"
-                        ? "Our Team"
-                        : basicInfo.contractingModel === "contractor"
-                          ? "Self-Perform"
-                          : "Management Team"}
-                    </span>
-                    <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
-                      {projectStaff.length}
-                    </span>
-                    {hrSectionOpen.employee ? (
-                      <ChevronDown className="w-3 h-3 text-gray-400 ml-auto" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 text-gray-400 ml-auto" />
-                    )}
-                  </div>
-                  {hrSectionOpen.employee &&
-                    projectStaff
-                      .filter(
-                        (s) =>
-                          !hrSearch ||
-                          s.name
-                            .toLowerCase()
-                            .includes(hrSearch.toLowerCase()) ||
-                          s.trade
-                            .toLowerCase()
-                            .includes(hrSearch.toLowerCase()),
-                      )
-                      .map((s) => (
-                        <div
-                          key={s.id}
-                          className="flex items-center justify-between px-5 py-2.5 text-sm pl-10"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div
-                              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
-                              style={{ backgroundColor: "#3B82F6" }}
-                            >
-                              {s.name.charAt(0)}
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900 text-sm">
-                                {s.name}
-                              </p>
-                              <p className="text-[11px] text-gray-500">
-                                {s.trade}
-                                {s.dailyRate
-                                  ? ` · ${getCurrencySymbol()}${formatNumberByGeneralSettings(s.dailyRate)}/day`
-                                  : ""}
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => removeStaff(s.id)}
-                            className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                  <div>
+                    <div
+                      className="px-5 py-2 bg-gray-50 flex items-center gap-2 cursor-pointer select-none"
+                      onClick={() =>
+                        setHrSectionOpen((prev) => ({
+                          ...prev,
+                          employee: !prev.employee,
+                        }))
+                      }
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 flex items-center gap-1">
+                        <Users className="w-3 h-3" />{" "}
+                        {basicInfo.contractingModel === "developer"
+                          ? "Our Team"
+                          : basicInfo.contractingModel === "contractor"
+                            ? "Self-Perform"
+                            : "Management Team"}
+                      </span>
+                      <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
+                        {projectStaff.length}
+                      </span>
+                      {hrSectionOpen.employee ? (
+                        <ChevronDown className="w-3 h-3 text-gray-400 ml-auto" />
+                      ) : (
+                        <ChevronRight className="w-3 h-3 text-gray-400 ml-auto" />
+                      )}
+                    </div>
+                    {hrSectionOpen.employee &&
+                      projectStaff
+                        .filter(
+                          (s) =>
+                            !hrSearch ||
+                            s.name
+                              .toLowerCase()
+                              .includes(hrSearch.toLowerCase()) ||
+                            s.trade
+                              .toLowerCase()
+                              .includes(hrSearch.toLowerCase()),
+                        )
+                        .map((s) => (
+                          <div
+                            key={s.id}
+                            className="flex items-center justify-between px-5 py-2.5 text-sm pl-10"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                </div>
-              )}
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
+                                style={{ backgroundColor: "#3B82F6" }}
+                              >
+                                {s.name.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-900 text-sm">
+                                  {s.name}
+                                </p>
+                                <p className="text-[11px] text-gray-500">
+                                  {s.trade}
+                                  {s.dailyRate
+                                    ? ` · ${getCurrencySymbol()}${formatNumberByGeneralSettings(s.dailyRate)}/day`
+                                    : ""}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => removeStaff(s.id)}
+                              className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                  </div>
+                )}
               {/* Section: Individual Contractors */}
               {projectContractors.filter(
                 (c) =>
@@ -3710,80 +3716,80 @@ export function ProjectSetupPage() {
                   c.name.toLowerCase().includes(hrSearch.toLowerCase()) ||
                   c.trade.toLowerCase().includes(hrSearch.toLowerCase()),
               ).length > 0 && (
-                <div>
-                  <div
-                    className="px-5 py-2 bg-gray-50 flex items-center gap-2 cursor-pointer select-none"
-                    onClick={() =>
-                      setHrSectionOpen((prev) => ({
-                        ...prev,
-                        contractor: !prev.contractor,
-                      }))
-                    }
-                  >
-                    <span className="text-xs font-semibold uppercase tracking-wider text-purple-600 flex items-center gap-1">
-                      <Users className="w-3 h-3" />{" "}
-                      {basicInfo.contractingModel === "developer"
-                        ? "Direct Hires"
-                        : basicInfo.contractingModel === "contractor"
-                          ? "Self-Perform"
-                          : "Direct Hires"}
-                    </span>
-                    <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-medium">
-                      {projectContractors.length}
-                    </span>
-                    {hrSectionOpen.contractor ? (
-                      <ChevronDown className="w-3 h-3 text-gray-400 ml-auto" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 text-gray-400 ml-auto" />
-                    )}
-                  </div>
-                  {hrSectionOpen.contractor &&
-                    projectContractors
-                      .filter(
-                        (c) =>
-                          !hrSearch ||
-                          c.name
-                            .toLowerCase()
-                            .includes(hrSearch.toLowerCase()) ||
-                          c.trade
-                            .toLowerCase()
-                            .includes(hrSearch.toLowerCase()),
-                      )
-                      .map((c) => (
-                        <div
-                          key={c.id}
-                          className="flex items-center justify-between px-5 py-2.5 text-sm pl-10"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div
-                              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
-                              style={{ backgroundColor: "#8B5CF6" }}
-                            >
-                              {c.name.charAt(0)}
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900 text-sm">
-                                {c.name}
-                              </p>
-                              <p className="text-[11px] text-gray-500">
-                                {c.trade}
-                                {c.payRate
-                                  ? ` · ${getCurrencySymbol()}${formatNumberByGeneralSettings(c.payRate)}/${c.payRateUnit}`
-                                  : ""}{" "}
-                                · {(c.skilledCount ?? 0) + (c.unskilledCount ?? 0)} workers
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => removeContractor(c.id)}
-                            className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                  <div>
+                    <div
+                      className="px-5 py-2 bg-gray-50 flex items-center gap-2 cursor-pointer select-none"
+                      onClick={() =>
+                        setHrSectionOpen((prev) => ({
+                          ...prev,
+                          contractor: !prev.contractor,
+                        }))
+                      }
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wider text-purple-600 flex items-center gap-1">
+                        <Users className="w-3 h-3" />{" "}
+                        {basicInfo.contractingModel === "developer"
+                          ? "Direct Hires"
+                          : basicInfo.contractingModel === "contractor"
+                            ? "Self-Perform"
+                            : "Direct Hires"}
+                      </span>
+                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-medium">
+                        {projectContractors.length}
+                      </span>
+                      {hrSectionOpen.contractor ? (
+                        <ChevronDown className="w-3 h-3 text-gray-400 ml-auto" />
+                      ) : (
+                        <ChevronRight className="w-3 h-3 text-gray-400 ml-auto" />
+                      )}
+                    </div>
+                    {hrSectionOpen.contractor &&
+                      projectContractors
+                        .filter(
+                          (c) =>
+                            !hrSearch ||
+                            c.name
+                              .toLowerCase()
+                              .includes(hrSearch.toLowerCase()) ||
+                            c.trade
+                              .toLowerCase()
+                              .includes(hrSearch.toLowerCase()),
+                        )
+                        .map((c) => (
+                          <div
+                            key={c.id}
+                            className="flex items-center justify-between px-5 py-2.5 text-sm pl-10"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                </div>
-              )}
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
+                                style={{ backgroundColor: "#8B5CF6" }}
+                              >
+                                {c.name.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-900 text-sm">
+                                  {c.name}
+                                </p>
+                                <p className="text-[11px] text-gray-500">
+                                  {c.trade}
+                                  {c.payRate
+                                    ? ` · ${getCurrencySymbol()}${formatNumberByGeneralSettings(c.payRate)}/${c.payRateUnit}`
+                                    : ""}{" "}
+                                  · {(c.skilledCount ?? 0) + (c.unskilledCount ?? 0)} workers
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => removeContractor(c.id)}
+                              className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                  </div>
+                )}
               {/* Section: Contractor Companies */}
               {projectVendors.filter(
                 (v) =>
@@ -3791,277 +3797,276 @@ export function ProjectSetupPage() {
                   v.name.toLowerCase().includes(hrSearch.toLowerCase()) ||
                   v.trade.toLowerCase().includes(hrSearch.toLowerCase()),
               ).length > 0 && (
-                <div>
-                  <div
-                    className="px-5 py-2 bg-gray-50 flex items-center gap-2 cursor-pointer select-none"
-                    onClick={() =>
-                      setHrSectionOpen((prev) => ({
-                        ...prev,
-                        vendor: !prev.vendor,
-                      }))
-                    }
-                  >
-                    <span className="text-xs font-semibold uppercase tracking-wider text-orange-600 flex items-center gap-1">
-                      <Building2 className="w-3 h-3" />{" "}
-                      {basicInfo.contractingModel === "developer"
-                        ? "Main + Sub Contractors"
-                        : basicInfo.contractingModel === "contractor"
-                          ? "Subcontractors"
-                          : "Trade Contractors"}
-                    </span>
-                    <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-medium">
-                      {projectVendors.length}
-                    </span>
-                    {hrSectionOpen.vendor ? (
-                      <ChevronDown className="w-3 h-3 text-gray-400 ml-auto" />
-                    ) : (
-                      <ChevronRight className="w-3 h-3 text-gray-400 ml-auto" />
-                    )}
-                  </div>
-                  {hrSectionOpen.vendor &&
-                    projectVendors
-                      .filter(
-                        (v) =>
-                          !hrSearch ||
-                          v.name
-                            .toLowerCase()
-                            .includes(hrSearch.toLowerCase()) ||
-                          v.trade
-                            .toLowerCase()
-                            .includes(hrSearch.toLowerCase()),
-                      )
-                      .map((v) => {
-                        const reps = v.representatives || [];
-                        const repCount = reps.length;
-                        return (
-                          <div key={v.id}>
-                            <div className="flex items-center justify-between px-5 py-2.5 text-sm pl-10">
-                              <div className="flex items-center gap-3">
-                                <div
-                                  className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
-                                  style={{ backgroundColor: "#E8973A" }}
-                                >
-                                  {v.name.charAt(0)}
-                                </div>
-                                <div>
-                                  <p className="font-medium text-gray-900 text-sm flex items-center gap-2">
-                                    {v.name}
-                                    {basicInfo.contractingModel ===
-                                      "developer" &&
-                                      v.isMainContractor && (
-                                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
-                                          Main Contractor
-                                        </span>
-                                      )}
-                                  </p>
-                                  <p className="text-[11px] text-gray-500">
-                                    {v.trade} · {v.contractType}
-                                    {v.parentContractorId &&
-                                      projectVendors.find(
-                                        (p) => p.id === v.parentContractorId,
-                                      ) && (
-                                        <span className="ml-1 text-[10px] text-gray-400">
-                                          — Sub of{" "}
-                                          {
-                                            projectVendors.find(
-                                              (p) =>
-                                                p.id === v.parentContractorId,
-                                            )!.name
-                                          }
-                                        </span>
-                                      )}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                {basicInfo.contractingModel === "developer" && (
-                                  <button
-                                    onClick={() => assignMainContractor(v.id)}
-                                    className={`px-2 py-1 rounded text-[10px] font-medium border hover:bg-blue-50 ${
-                                      v.isMainContractor
-                                        ? "bg-blue-100 text-blue-700 border-blue-200"
-                                        : "text-blue-600"
-                                    }`}
-                                    style={{
-                                      borderColor: v.isMainContractor
-                                        ? "#BFDBFE"
-                                        : "#E2E8F0",
-                                    }}
-                                    title={
-                                      v.isMainContractor
-                                        ? "Remove Main Contractor status"
-                                        : "Designate as Main Contractor"
-                                    }
-                                  >
-                                    {v.isMainContractor
-                                      ? "★ Main"
-                                      : "Set as Main"}
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() =>
-                                    setRepExpandedVendorId(
-                                      repExpandedVendorId === v.id
-                                        ? null
-                                        : v.id,
-                                    )
-                                  }
-                                  className="px-2 py-1 rounded text-[10px] font-medium border hover:bg-gray-50 text-gray-600"
-                                  style={{ borderColor: "#E2E8F0" }}
-                                >
-                                  Reps ({repCount})
-                                </button>
-                                <button
-                                  onClick={() => removeVendor(v.id)}
-                                  className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                            {/* Representatives section */}
-                            {repExpandedVendorId === v.id && (
-                              <div className="px-5 pb-3 pl-16">
-                                <div
-                                  className="rounded-lg border p-3 space-y-2"
-                                  style={{
-                                    borderColor: "#E2E8F0",
-                                    backgroundColor: "#F7F8FA",
-                                  }}
-                                >
-                                  {reps.length === 0 && (
-                                    <p className="text-xs text-gray-400">
-                                      No representatives added yet.
-                                    </p>
-                                  )}
-                                  {reps.map((r) => (
-                                    <div
-                                      key={r.id}
-                                      className="flex items-center justify-between gap-2 bg-white rounded px-3 py-2 border"
-                                      style={{ borderColor: "#E2E8F0" }}
-                                    >
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-medium text-gray-900">
-                                          {r.fullName}
-                                        </p>
-                                        <p className="text-[10px] text-gray-500">
-                                          {r.position} · {r.email} · {r.phone}
-                                        </p>
-                                      </div>
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <span
-                                          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${r.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}
-                                        >
-                                          {r.isActive ? "Active" : "Inactive"}
-                                        </span>
-                                        <button
-                                          onClick={() =>
-                                            toggleRepresentativeActive(
-                                              v.id,
-                                              r.id,
-                                            )
-                                          }
-                                          className="p-0.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-                                          title="Toggle active status"
-                                        >
-                                          <X className="w-3 h-3" />
-                                        </button>
-                                        <button
-                                          onClick={() =>
-                                            removeRepresentative(v.id, r.id)
-                                          }
-                                          className="p-0.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
-                                          title="Remove representative"
-                                        >
-                                          <Trash2 className="w-3 h-3" />
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                  {/* Add new rep form */}
-                                  <div className="grid grid-cols-4 gap-2">
-                                    <input
-                                      type="text"
-                                      value={newRepForm.fullName}
-                                      onChange={(e) =>
-                                        setNewRepForm((prev) => ({
-                                          ...prev,
-                                          fullName: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Full name"
-                                      className="px-2 py-1.5 text-xs rounded border"
-                                      style={{
-                                        borderColor: "#E2E8F0",
-                                        backgroundColor: "white",
-                                      }}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={newRepForm.email}
-                                      onChange={(e) =>
-                                        setNewRepForm((prev) => ({
-                                          ...prev,
-                                          email: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Email"
-                                      className="px-2 py-1.5 text-xs rounded border"
-                                      style={{
-                                        borderColor: "#E2E8F0",
-                                        backgroundColor: "white",
-                                      }}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={newRepForm.phone}
-                                      onChange={(e) =>
-                                        setNewRepForm((prev) => ({
-                                          ...prev,
-                                          phone: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Phone"
-                                      className="px-2 py-1.5 text-xs rounded border"
-                                      style={{
-                                        borderColor: "#E2E8F0",
-                                        backgroundColor: "white",
-                                      }}
-                                    />
-                                    <input
-                                      type="text"
-                                      value={newRepForm.position}
-                                      onChange={(e) =>
-                                        setNewRepForm((prev) => ({
-                                          ...prev,
-                                          position: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Position"
-                                      className="px-2 py-1.5 text-xs rounded border"
-                                      style={{
-                                        borderColor: "#E2E8F0",
-                                        backgroundColor: "white",
-                                      }}
-                                    />
-                                  </div>
-                                  <button
-                                    onClick={() => addRepresentative(v.id)}
-                                    disabled={!newRepForm.fullName.trim()}
-                                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-white disabled:opacity-50"
+                  <div>
+                    <div
+                      className="px-5 py-2 bg-gray-50 flex items-center gap-2 cursor-pointer select-none"
+                      onClick={() =>
+                        setHrSectionOpen((prev) => ({
+                          ...prev,
+                          vendor: !prev.vendor,
+                        }))
+                      }
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-wider text-orange-600 flex items-center gap-1">
+                        <Building2 className="w-3 h-3" />{" "}
+                        {basicInfo.contractingModel === "developer"
+                          ? "Main + Sub Contractors"
+                          : basicInfo.contractingModel === "contractor"
+                            ? "Subcontractors"
+                            : "Trade Contractors"}
+                      </span>
+                      <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-medium">
+                        {projectVendors.length}
+                      </span>
+                      {hrSectionOpen.vendor ? (
+                        <ChevronDown className="w-3 h-3 text-gray-400 ml-auto" />
+                      ) : (
+                        <ChevronRight className="w-3 h-3 text-gray-400 ml-auto" />
+                      )}
+                    </div>
+                    {hrSectionOpen.vendor &&
+                      projectVendors
+                        .filter(
+                          (v) =>
+                            !hrSearch ||
+                            v.name
+                              .toLowerCase()
+                              .includes(hrSearch.toLowerCase()) ||
+                            v.trade
+                              .toLowerCase()
+                              .includes(hrSearch.toLowerCase()),
+                        )
+                        .map((v) => {
+                          const reps = v.representatives || [];
+                          const repCount = reps.length;
+                          return (
+                            <div key={v.id}>
+                              <div className="flex items-center justify-between px-5 py-2.5 text-sm pl-10">
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
                                     style={{ backgroundColor: "#E8973A" }}
                                   >
-                                    <Plus className="w-3 h-3" /> Add
-                                    Representative
+                                    {v.name.charAt(0)}
+                                  </div>
+                                  <div>
+                                    <p className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                                      {v.name}
+                                      {basicInfo.contractingModel ===
+                                        "developer" &&
+                                        v.isMainContractor && (
+                                          <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
+                                            Main Contractor
+                                          </span>
+                                        )}
+                                    </p>
+                                    <p className="text-[11px] text-gray-500">
+                                      {v.trade} · {v.contractType}
+                                      {v.parentContractorId &&
+                                        projectVendors.find(
+                                          (p) => p.id === v.parentContractorId,
+                                        ) && (
+                                          <span className="ml-1 text-[10px] text-gray-400">
+                                            — Sub of{" "}
+                                            {
+                                              projectVendors.find(
+                                                (p) =>
+                                                  p.id === v.parentContractorId,
+                                              )!.name
+                                            }
+                                          </span>
+                                        )}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {basicInfo.contractingModel === "developer" && (
+                                    <button
+                                      onClick={() => assignMainContractor(v.id)}
+                                      className={`px-2 py-1 rounded text-[10px] font-medium border hover:bg-blue-50 ${v.isMainContractor
+                                          ? "bg-blue-100 text-blue-700 border-blue-200"
+                                          : "text-blue-600"
+                                        }`}
+                                      style={{
+                                        borderColor: v.isMainContractor
+                                          ? "#BFDBFE"
+                                          : "#E2E8F0",
+                                      }}
+                                      title={
+                                        v.isMainContractor
+                                          ? "Remove Main Contractor status"
+                                          : "Designate as Main Contractor"
+                                      }
+                                    >
+                                      {v.isMainContractor
+                                        ? "★ Main"
+                                        : "Set as Main"}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() =>
+                                      setRepExpandedVendorId(
+                                        repExpandedVendorId === v.id
+                                          ? null
+                                          : v.id,
+                                      )
+                                    }
+                                    className="px-2 py-1 rounded text-[10px] font-medium border hover:bg-gray-50 text-gray-600"
+                                    style={{ borderColor: "#E2E8F0" }}
+                                  >
+                                    Reps ({repCount})
+                                  </button>
+                                  <button
+                                    onClick={() => removeVendor(v.id)}
+                                    className="p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                </div>
-              )}
+                              {/* Representatives section */}
+                              {repExpandedVendorId === v.id && (
+                                <div className="px-5 pb-3 pl-16">
+                                  <div
+                                    className="rounded-lg border p-3 space-y-2"
+                                    style={{
+                                      borderColor: "#E2E8F0",
+                                      backgroundColor: "#F7F8FA",
+                                    }}
+                                  >
+                                    {reps.length === 0 && (
+                                      <p className="text-xs text-gray-400">
+                                        No representatives added yet.
+                                      </p>
+                                    )}
+                                    {reps.map((r) => (
+                                      <div
+                                        key={r.id}
+                                        className="flex items-center justify-between gap-2 bg-white rounded px-3 py-2 border"
+                                        style={{ borderColor: "#E2E8F0" }}
+                                      >
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-xs font-medium text-gray-900">
+                                            {r.fullName}
+                                          </p>
+                                          <p className="text-[10px] text-gray-500">
+                                            {r.position} · {r.email} · {r.phone}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <span
+                                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${r.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}
+                                          >
+                                            {r.isActive ? "Active" : "Inactive"}
+                                          </span>
+                                          <button
+                                            onClick={() =>
+                                              toggleRepresentativeActive(
+                                                v.id,
+                                                r.id,
+                                              )
+                                            }
+                                            className="p-0.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                                            title="Toggle active status"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                          <button
+                                            onClick={() =>
+                                              removeRepresentative(v.id, r.id)
+                                            }
+                                            className="p-0.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                                            title="Remove representative"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    {/* Add new rep form */}
+                                    <div className="grid grid-cols-4 gap-2">
+                                      <input
+                                        type="text"
+                                        value={newRepForm.fullName}
+                                        onChange={(e) =>
+                                          setNewRepForm((prev) => ({
+                                            ...prev,
+                                            fullName: e.target.value,
+                                          }))
+                                        }
+                                        placeholder="Full name"
+                                        className="px-2 py-1.5 text-xs rounded border"
+                                        style={{
+                                          borderColor: "#E2E8F0",
+                                          backgroundColor: "white",
+                                        }}
+                                      />
+                                      <input
+                                        type="text"
+                                        value={newRepForm.email}
+                                        onChange={(e) =>
+                                          setNewRepForm((prev) => ({
+                                            ...prev,
+                                            email: e.target.value,
+                                          }))
+                                        }
+                                        placeholder="Email"
+                                        className="px-2 py-1.5 text-xs rounded border"
+                                        style={{
+                                          borderColor: "#E2E8F0",
+                                          backgroundColor: "white",
+                                        }}
+                                      />
+                                      <input
+                                        type="text"
+                                        value={newRepForm.phone}
+                                        onChange={(e) =>
+                                          setNewRepForm((prev) => ({
+                                            ...prev,
+                                            phone: e.target.value,
+                                          }))
+                                        }
+                                        placeholder="Phone"
+                                        className="px-2 py-1.5 text-xs rounded border"
+                                        style={{
+                                          borderColor: "#E2E8F0",
+                                          backgroundColor: "white",
+                                        }}
+                                      />
+                                      <input
+                                        type="text"
+                                        value={newRepForm.position}
+                                        onChange={(e) =>
+                                          setNewRepForm((prev) => ({
+                                            ...prev,
+                                            position: e.target.value,
+                                          }))
+                                        }
+                                        placeholder="Position"
+                                        className="px-2 py-1.5 text-xs rounded border"
+                                        style={{
+                                          borderColor: "#E2E8F0",
+                                          backgroundColor: "white",
+                                        }}
+                                      />
+                                    </div>
+                                    <button
+                                      onClick={() => addRepresentative(v.id)}
+                                      disabled={!newRepForm.fullName.trim()}
+                                      className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-white disabled:opacity-50"
+                                      style={{ backgroundColor: "#E8973A" }}
+                                    >
+                                      <Plus className="w-3 h-3" /> Add
+                                      Representative
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                  </div>
+                )}
               {/* Empty search */}
               {allHumanResources.length > 0 &&
                 projectStaff.filter(
@@ -4284,14 +4289,12 @@ export function ProjectSetupPage() {
                 Search Material from Inventory
               </label>
               <SearchableMultiSelect
-                options={materialInventory.map((i) => ({
-                  label: `${i.name} (${i.inStock} ${i.unit} in stock) — ${getCurrencySymbol()}${formatNumberByGeneralSettings(i.defaultUnitCost)}/${i.unit}`,
-                  value: i.id,
-                  group: i.category,
-                }))}
+                options={[]}
+                onSearch={searchMaterialsForProject}
                 value={selectedMaterialIds}
                 onChange={setSelectedMaterialIds}
                 placeholder="Search material..."
+                searchPlaceholder="Search material type..."
                 onNotFoundAction={{
                   label: "Submit Procurement Request",
                   onClick: (q) => {
@@ -4635,11 +4638,10 @@ export function ProjectSetupPage() {
                         <button
                           key={opt}
                           onClick={() => setExternalEquipType(opt)}
-                          className={`px-3 py-2 rounded-lg border text-sm font-medium text-left transition-colors ${
-                            externalEquipType === opt
+                          className={`px-3 py-2 rounded-lg border text-sm font-medium text-left transition-colors ${externalEquipType === opt
                               ? "bg-amber-50 border-amber-400 text-amber-700"
                               : "hover:bg-gray-50"
-                          }`}
+                            }`}
                         >
                           {opt === "client-supplied"
                             ? "Client Supplied"
@@ -4775,7 +4777,7 @@ export function ProjectSetupPage() {
                       estimatedDays: equipmentForm.estimatedDays || 1,
                       totalEstimatedCost: isRented
                         ? (equipmentForm.rentalCostPerDay || 0) *
-                          (equipmentForm.estimatedDays || 1)
+                        (equipmentForm.estimatedDays || 1)
                         : 0,
                       status: "Available",
                     };
@@ -4824,11 +4826,10 @@ export function ProjectSetupPage() {
                 <button
                   key={mode}
                   onClick={() => setReportContributorMode(mode)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                    reportContributorMode === mode
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${reportContributorMode === mode
                       ? "bg-amber-50 border-amber-400 text-amber-700"
                       : "hover:bg-gray-50 text-gray-600"
-                  }`}
+                    }`}
                 >
                   {mode === "employees-only"
                     ? "Employees Only"
@@ -4844,91 +4845,89 @@ export function ProjectSetupPage() {
         {/* Employee contributors */}
         {(reportContributorMode === "employees-only" ||
           reportContributorMode === "both") && (
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Employee Contributors
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {projectStaff.map((s) => {
-                const selected = reportContributorEmployeeIds.includes(s.id);
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() =>
-                      setReportContributorEmployeeIds((prev) =>
-                        prev.includes(s.id)
-                          ? prev.filter((id) => id !== s.id)
-                          : [...prev, s.id],
-                      )
-                    }
-                    className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-colors ${
-                      selected
-                        ? "bg-blue-50 border-blue-300 text-blue-700"
-                        : "hover:bg-gray-50 text-gray-600"
-                    }`}
-                  >
-                    {s.name}
-                  </button>
-                );
-              })}
-              {projectStaff.length === 0 && (
-                <span className="text-[10px] text-gray-400">
-                  No employees registered.
-                </span>
-              )}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Employee Contributors
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {projectStaff.map((s) => {
+                  const selected = reportContributorEmployeeIds.includes(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() =>
+                        setReportContributorEmployeeIds((prev) =>
+                          prev.includes(s.id)
+                            ? prev.filter((id) => id !== s.id)
+                            : [...prev, s.id],
+                        )
+                      }
+                      className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-colors ${selected
+                          ? "bg-blue-50 border-blue-300 text-blue-700"
+                          : "hover:bg-gray-50 text-gray-600"
+                        }`}
+                    >
+                      {s.name}
+                    </button>
+                  );
+                })}
+                {projectStaff.length === 0 && (
+                  <span className="text-[10px] text-gray-400">
+                    No employees registered.
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Contractor rep contributors */}
         {(reportContributorMode === "contractors-only" ||
           reportContributorMode === "both") && (
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Contractor Representative Contributors
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {projectVendors
-                .flatMap((v) =>
-                  (v.representatives || []).map((r) => ({
-                    ...r,
-                    vendorName: v.name,
-                  })),
-                )
-                .map((r) => {
-                  const selected = reportContributorRepIds.includes(r.id);
-                  return (
-                    <button
-                      key={r.id}
-                      onClick={() =>
-                        setReportContributorRepIds((prev) =>
-                          prev.includes(r.id)
-                            ? prev.filter((id) => id !== r.id)
-                            : [...prev, r.id],
-                        )
-                      }
-                      className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-colors ${
-                        selected
-                          ? "bg-orange-50 border-orange-300 text-orange-700"
-                          : "hover:bg-gray-50 text-gray-600"
-                      }`}
-                    >
-                      {r.fullName} ({r.vendorName})
-                    </button>
-                  );
-                })}
-              {projectVendors.reduce(
-                (sum, v) => sum + (v.representatives?.length || 0),
-                0,
-              ) === 0 && (
-                <span className="text-[10px] text-gray-400">
-                  No contractor representatives registered. Add reps in
-                  Resources → Human Resources → Contractors.
-                </span>
-              )}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Contractor Representative Contributors
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {projectVendors
+                  .flatMap((v) =>
+                    (v.representatives || []).map((r) => ({
+                      ...r,
+                      vendorName: v.name,
+                    })),
+                  )
+                  .map((r) => {
+                    const selected = reportContributorRepIds.includes(r.id);
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() =>
+                          setReportContributorRepIds((prev) =>
+                            prev.includes(r.id)
+                              ? prev.filter((id) => id !== r.id)
+                              : [...prev, r.id],
+                          )
+                        }
+                        className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-colors ${selected
+                            ? "bg-orange-50 border-orange-300 text-orange-700"
+                            : "hover:bg-gray-50 text-gray-600"
+                          }`}
+                      >
+                        {r.fullName} ({r.vendorName})
+                      </button>
+                    );
+                  })}
+                {projectVendors.reduce(
+                  (sum, v) => sum + (v.representatives?.length || 0),
+                  0,
+                ) === 0 && (
+                    <span className="text-[10px] text-gray-400">
+                      No contractor representatives registered. Add reps in
+                      Resources → Human Resources → Contractors.
+                    </span>
+                  )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Recurring Reporting Tasks */}
         <div className="border-t pt-4" style={{ borderColor: "#E2E8F0" }}>
@@ -5068,11 +5067,10 @@ export function ProjectSetupPage() {
                 <button
                   key={label}
                   onClick={() => toggleDay(dayIdx)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                    active
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${active
                       ? "text-white border-transparent"
                       : "text-gray-500 bg-white"
-                  }`}
+                    }`}
                   style={{
                     backgroundColor: active ? "#E8973A" : undefined,
                     borderColor: active ? "#E8973A" : "#E2E8F0",
@@ -5291,20 +5289,20 @@ export function ProjectSetupPage() {
     const taskDates =
       projectTasks.length > 0
         ? (() => {
-            const starts = projectTasks.map((t) =>
-              new Date(t.plannedStart).getTime(),
-            );
-            const ends = projectTasks.map((t) =>
-              new Date(t.plannedEnd).getTime(),
-            );
-            const minStart = new Date(Math.min(...starts))
-              .toISOString()
-              .split("T")[0];
-            const maxEnd = new Date(Math.max(...ends))
-              .toISOString()
-              .split("T")[0];
-            return `${fmtDate(minStart)} — ${fmtDate(maxEnd)}`;
-          })()
+          const starts = projectTasks.map((t) =>
+            new Date(t.plannedStart).getTime(),
+          );
+          const ends = projectTasks.map((t) =>
+            new Date(t.plannedEnd).getTime(),
+          );
+          const minStart = new Date(Math.min(...starts))
+            .toISOString()
+            .split("T")[0];
+          const maxEnd = new Date(Math.max(...ends))
+            .toISOString()
+            .split("T")[0];
+          return `${fmtDate(minStart)} — ${fmtDate(maxEnd)}`;
+        })()
         : null;
     const dateRange =
       taskDates ||
@@ -5538,9 +5536,8 @@ export function ProjectSetupPage() {
           return (
             <span key={step.id} className="flex items-center gap-1">
               <span
-                className={`w-2 h-2 rounded-full ${
-                  isCompleted ? "bg-green-500" : isCurrent ? "" : "bg-gray-300"
-                }`}
+                className={`w-2 h-2 rounded-full ${isCompleted ? "bg-green-500" : isCurrent ? "" : "bg-gray-300"
+                  }`}
                 style={
                   isCurrent && !isCompleted
                     ? { backgroundColor: "#E8973A" }
