@@ -34,7 +34,6 @@ import type {
   Vendor,
   VendorRepresentative,
   ProjectCalendar,
-  Sector,
   HumanResource,
   HumanResourceSource,
   MaterialResource,
@@ -43,11 +42,7 @@ import type {
   HumanResourceRole,
 } from "./types";
 import { useRoles } from "../../contexts/RolesContext";
-import {
-  SECTOR_CATEGORIES,
-  getBlockLabel,
-  getStructureConfig,
-} from "./types";
+import { getBlockLabel } from "./types";
 import { useResources } from "../../contexts/ResourceContext";
 import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { getProject } from "../../api/projects";
@@ -58,7 +53,7 @@ import {
   searchMaterialTypes,
   MaterialTypeSearchResult,
 } from "../../api/materials";
-import { listConstructionSettings } from "../../api/construction-settings";
+import { getProjectSectors, type ProjectSector } from "../../api/construction-settings";
 import { useConstructionSettings } from "../../utils/useConstructionSettings";
 import { getTasks } from "../../api/tasks";
 import { getClusters } from "../../api/clusters";
@@ -86,15 +81,6 @@ const STEPS = [
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DAY_INDICES = [1, 2, 3, 4, 5, 6, 0];
-
-const SECTORS: Sector[] = [
-  "Building & Construction",
-  "Civil & Infrastructure",
-  "Industrial & Facilities",
-  "Interior & Fit-out",
-  "Renovation & Maintenance",
-  "Other",
-];
 
 /**
  * Schedule level names and prefixes were built once at module scope from the
@@ -176,7 +162,7 @@ export function ProjectSetupPage() {
   });
 
   // Step 1 — Project Type
-  const [projectSector, setProjectSector] = useState<Sector | "">(
+  const [projectSector, setProjectSector] = useState<string>(
     project?.sector || "",
   );
   const [projectCategory, setProjectCategory] = useState(
@@ -186,53 +172,76 @@ export function ProjectSetupPage() {
     project?.descriptor || "",
   );
 
-  const blockLabel = useMemo(
-    () => getBlockLabel(projectSector as Sector, projectCategory),
-    [projectSector, projectCategory],
+  // The project type taxonomy shown in this wizard — Sector/Category, and
+  // each Category's Level 3 (descriptor mode/options) and Level 4 (structure
+  // header/fields/description) config, are real rows an admin builds under
+  // Settings → Project Types, not a JSON blob or a compiled-in fallback: an
+  // install with none configured shows an empty picker rather than options
+  // nobody chose.
+  const [projectSectors, setProjectSectors] = useState<ProjectSector[]>([]);
+
+  useEffect(() => {
+    getProjectSectors()
+      .then(setProjectSectors)
+      .catch(() => {
+        // Leave the picker empty; the rest of the wizard must still work.
+      });
+  }, []);
+
+  const sectorOptions = useMemo<string[]>(
+    () => projectSectors.map((s) => s.name),
+    [projectSectors],
   );
-  const structureConfig = useMemo(
-    () => (projectCategory ? getStructureConfig(projectCategory) : null),
-    [projectCategory],
+
+  const categoriesForSector = useCallback(
+    (sector: string): string[] =>
+      projectSectors.find((s) => s.name === sector)?.categories.map((c) => c.name) ?? [],
+    [projectSectors],
+  );
+
+  /** The full Category row for the current Sector/Category pick — carries the
+   * Level 3 (descriptor mode/options) and Level 4 (structure) config. */
+  const selectedCategory = useMemo(
+    () =>
+      projectSectors
+        .find((s) => s.name === projectSector)
+        ?.categories.find((c) => c.name === projectCategory) ?? null,
+    [projectSectors, projectSector, projectCategory],
+  );
+
+  // Prefer the category's configured Level 4 header label (e.g. "Building",
+  // "House") — it's a real, admin-set name for what this project breaks into.
+  // getBlockLabel's sector/category heuristic is only the fallback for a
+  // category with no Level 4 configured yet.
+  const blockLabel = useMemo(
+    () =>
+      selectedCategory?.structureHeaderLabel?.trim() ||
+      getBlockLabel(projectSector, projectCategory),
+    [selectedCategory, projectSector, projectCategory],
   );
 
   const [structureEntries, setStructureEntries] = useState<
     Array<{
       id: string;
       name: string;
-      innerUnitCount: number;
       attributes: Record<string, string | number>;
-      innerAttributes: Record<string, string | number>;
     }>
   >([]);
 
   const addStructureEntry = async () => {
-    const config = structureConfig;
-    if (!config) return;
-    const newEntry = {
-      id: await allocate("Structure"),
-      name: "",
-      innerUnitCount: 1,
-      attributes: {} as Record<string, string | number>,
-      innerAttributes: {} as Record<string, string | number>,
-    };
-    config.subUnitFields.forEach((f) => {
-      newEntry.attributes[f.key] = f.type === "number" ? 0 : "";
+    const category = selectedCategory;
+    if (!category) return;
+    const label = category.structureHeaderLabel?.trim() || "Entry";
+    const attributes: Record<string, string | number> = {};
+    category.structureFields.forEach((f) => {
+      attributes[f.key] =
+        f.type === "number" ? 0 : f.type === "select" ? (f.options?.[0] ?? "") : "";
     });
-    config.innerFields.forEach((f) => {
-      newEntry.innerAttributes[f.key] =
-        f.type === "number" ? 0 : (f.options?.[0] ?? "");
-    });
-    setStructureEntries((prev) => [...prev, newEntry]);
-  };
-
-  const updateStructureEntry = (
-    id: string,
-    field: string,
-    value: string | number,
-  ) => {
-    setStructureEntries((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)),
-    );
+    const id = await allocate("Structure");
+    setStructureEntries((prev) => [
+      ...prev,
+      { id, name: `${label} ${prev.length + 1}`, attributes },
+    ]);
   };
 
   const updateStructureEntryAttr = (
@@ -249,29 +258,11 @@ export function ProjectSetupPage() {
     );
   };
 
-  const updateStructureEntryInnerAttr = (
-    id: string,
-    key: string,
-    value: string | number,
-  ) => {
-    setStructureEntries((prev) =>
-      prev.map((e) =>
-        e.id === id
-          ? { ...e, innerAttributes: { ...e.innerAttributes, [key]: value } }
-          : e,
-      ),
-    );
-  };
-
   const removeStructureEntry = (id: string) => {
     setStructureEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
-  const totalSubUnits = structureEntries.length;
-  const totalInnerUnits = structureEntries.reduce(
-    (sum, e) => sum + (e.innerUnitCount || 0),
-    0,
-  );
+  const totalStructureEntries = structureEntries.length;
 
   // Step 2 — Schedule Builder
   const [projectTasks, setProjectTasks] = useState<Task[]>([]);
@@ -367,16 +358,6 @@ export function ProjectSetupPage() {
     string[]
   >([]);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
-  /**
-   * The project type taxonomy shown in this wizard.
-   *
-   * Sectors and categories were compiled-in constants (`SECTORS` here,
-   * `SECTOR_CATEGORIES` in types.ts) while Settings → Project Types edited a
-   * copy on the server. Three independent copies of the same list meant adding
-   * or renaming a sector in Settings changed nothing here, so the two screens
-   * disagreed as soon as anyone configured anything. The constants are now only
-   * the fallback for when nothing has been configured yet.
-   */
   const constructionConfig = useConstructionSettings();
   const {
     names: LEVEL_NAMES,
@@ -390,41 +371,6 @@ export function ProjectSetupPage() {
   const LEAF_LEVEL = LEVEL_ORDER[LEVEL_ORDER.length - 1] ?? 4;
   // Trade types are configured in Settings; this read a static import.
   const tradeTypeOptions = constructionConfig.tradeTypes;
-
-  const [configuredTypes, setConfiguredTypes] = useState<
-    { sector: string; categories: string[] }[] | null
-  >(null);
-
-  useEffect(() => {
-    listConstructionSettings()
-      .then((rows) => {
-        const types = rows?.[0]?.projectTypes;
-        if (Array.isArray(types) && types.length > 0) {
-          setConfiguredTypes(types as { sector: string; categories: string[] }[]);
-        }
-      })
-      .catch(() => {
-        // Fall back to the built-in taxonomy; the wizard must still work.
-      });
-  }, []);
-
-  const sectorOptions = useMemo<Sector[]>(
-    () =>
-      configuredTypes
-        ? (configuredTypes.map((t) => t.sector) as Sector[])
-        : SECTORS,
-    [configuredTypes],
-  );
-
-  const categoriesForSector = useCallback(
-    (sector: string): string[] => {
-      if (configuredTypes) {
-        return configuredTypes.find((t) => t.sector === sector)?.categories ?? [];
-      }
-      return SECTOR_CATEGORIES[sector as Sector] ?? [];
-    },
-    [configuredTypes],
-  );
 
   const [procurementQuery, setProcurementQuery] = useState("");
   // The quantity and notes inputs had no bindings and Submit Request only
@@ -1603,14 +1549,34 @@ export function ProjectSetupPage() {
               Level 3 — Specific Descriptor{" "}
               <span className="text-gray-400 font-normal">(optional)</span>
             </label>
-            <input
-              type="text"
-              value={projectDescriptor}
-              onChange={(e) => setProjectDescriptor(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border text-sm"
-              style={{ borderColor: "#E2E8F0", backgroundColor: "#F7F8FA" }}
-              placeholder="e.g. 22-storey commercial tower, 120-unit estate"
-            />
+            {selectedCategory?.descriptorMode === "dropdown" &&
+              selectedCategory.descriptorOptions.length > 0 ? (
+              <div className="relative">
+                <select
+                  value={projectDescriptor}
+                  onChange={(e) => setProjectDescriptor(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border text-sm appearance-none"
+                  style={{ borderColor: "#E2E8F0", backgroundColor: "#F7F8FA" }}
+                >
+                  <option value="">— Select —</option>
+                  {selectedCategory.descriptorOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={projectDescriptor}
+                onChange={(e) => setProjectDescriptor(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: "#E2E8F0", backgroundColor: "#F7F8FA" }}
+                placeholder="e.g. 22-storey commercial tower, 120-unit estate"
+              />
+            )}
           </div>
         )}
 
@@ -1629,222 +1595,144 @@ export function ProjectSetupPage() {
           </div>
         )}
 
-        {/* Level 4 — Structure Breakdown */}
-        {structureConfig && (
-          <div
-            className="rounded-xl border p-5 space-y-4"
-            style={{ borderColor: "#E2E8F0", backgroundColor: "#F7F8FA" }}
-          >
-            <div>
-              <h3 className="text-base font-bold" style={{ color: "#1A202C" }}>
-                Level 4 — Physical Structure Breakdown
-              </h3>
-              <p className="text-sm mt-1" style={{ color: "#718096" }}>
-                Define the {structureConfig.subUnitLabel}s and{" "}
-                {structureConfig.innerUnitLabel}s that make up this project.
-              </p>
-            </div>
-
-            {structureEntries.length === 0 ? (
-              <div className="text-center py-6 text-gray-400">
-                <Building2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">
-                  No {structureConfig.subUnitLabel.toLowerCase()}s defined yet
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {structureEntries.map((entry, idx) => (
-                  <div
-                    key={entry.id}
-                    className="border rounded-lg p-4"
-                    style={{ borderColor: "#E2E8F0", backgroundColor: "white" }}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <span
-                        className="text-sm font-semibold"
-                        style={{ color: "#1A202C" }}
-                      >
-                        {structureConfig.subUnitLabel} {idx + 1}
-                      </span>
-                      <button
-                        onClick={() => removeStructureEntry(entry.id)}
-                        className="text-red-400 hover:text-red-600 p-1 rounded transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          {structureConfig.subUnitItemLabel}
-                        </label>
-                        <input
-                          type="text"
-                          value={entry.name}
-                          onChange={(e) =>
-                            updateStructureEntry(
-                              entry.id,
-                              "name",
-                              e.target.value,
-                            )
-                          }
-                          className="w-full px-3 py-2 rounded-lg border text-sm"
-                          style={{
-                            borderColor: "#E2E8F0",
-                            backgroundColor: "#F7F8FA",
-                          }}
-                          placeholder={`e.g. ${structureConfig.subUnitLabel} A`}
-                        />
-                      </div>
-                      {structureConfig.subUnitFields.map((f) => (
-                        <div key={f.key}>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">
-                            {f.label}
-                          </label>
-                          {f.type === "number" ? (
-                            <input
-                              type="number"
-                              value={entry.attributes[f.key] ?? ""}
-                              onChange={(e) =>
-                                updateStructureEntryAttr(
-                                  entry.id,
-                                  f.key,
-                                  e.target.value === ""
-                                    ? ""
-                                    : Number(e.target.value),
-                                )
-                              }
-                              className="w-full px-3 py-2 rounded-lg border text-sm"
-                              style={{
-                                borderColor: "#E2E8F0",
-                                backgroundColor: "#F7F8FA",
-                              }}
-                            />
-                          ) : (
-                            <input
-                              type="text"
-                              value={entry.attributes[f.key] ?? ""}
-                              onChange={(e) =>
-                                updateStructureEntryAttr(
-                                  entry.id,
-                                  f.key,
-                                  e.target.value,
-                                )
-                              }
-                              className="w-full px-3 py-2 rounded-lg border text-sm"
-                              style={{
-                                borderColor: "#E2E8F0",
-                                backgroundColor: "#F7F8FA",
-                              }}
-                            />
-                          )}
-                        </div>
-                      ))}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Number of {structureConfig.innerUnitLabel}s
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={entry.innerUnitCount}
-                          onChange={(e) =>
-                            updateStructureEntry(
-                              entry.id,
-                              "innerUnitCount",
-                              Math.max(1, Number(e.target.value)),
-                            )
-                          }
-                          className="w-full px-3 py-2 rounded-lg border text-sm"
-                          style={{
-                            borderColor: "#E2E8F0",
-                            backgroundColor: "#F7F8FA",
-                          }}
-                        />
-                      </div>
-                      {structureConfig.innerFields.map((f) => (
-                        <div key={f.key}>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">
-                            {f.label} (per {structureConfig.innerUnitLabel})
-                          </label>
-                          {f.type === "select" && f.options ? (
-                            <select
-                              value={entry.innerAttributes[f.key] ?? ""}
-                              onChange={(e) =>
-                                updateStructureEntryInnerAttr(
-                                  entry.id,
-                                  f.key,
-                                  e.target.value,
-                                )
-                              }
-                              className="w-full px-3 py-2 rounded-lg border text-sm"
-                              style={{
-                                borderColor: "#E2E8F0",
-                                backgroundColor: "#F7F8FA",
-                              }}
-                            >
-                              {f.options.map((o) => (
-                                <option key={o} value={o}>
-                                  {o}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              type={f.type === "number" ? "number" : "text"}
-                              value={entry.innerAttributes[f.key] ?? ""}
-                              onChange={(e) =>
-                                updateStructureEntryInnerAttr(
-                                  entry.id,
-                                  f.key,
-                                  f.type === "number"
-                                    ? e.target.value === ""
-                                      ? ""
-                                      : Number(e.target.value)
-                                    : e.target.value,
-                                )
-                              }
-                              className="w-full px-3 py-2 rounded-lg border text-sm"
-                              style={{
-                                borderColor: "#E2E8F0",
-                                backgroundColor: "#F7F8FA",
-                              }}
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <button
-              onClick={addStructureEntry}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium w-fit"
-              style={{
-                color: "#E8973A",
-                border: "1px dashed #E8973A",
-                backgroundColor: "#FFF8F0",
-              }}
+        {/* Level 4 — Physical Structure Breakdown */}
+        {selectedCategory &&
+          (selectedCategory.structureHeaderLabel?.trim() ||
+            selectedCategory.structureFields.length > 0) && (
+            <div
+              className="rounded-xl border p-5 space-y-4"
+              style={{ borderColor: "#E2E8F0", backgroundColor: "#F7F8FA" }}
             >
-              <Plus className="w-4 h-4" /> Add {structureConfig.subUnitLabel}
-            </button>
-
-            {structureEntries.length > 0 && (
-              <div
-                className="rounded-lg p-3 border text-sm"
-                style={{ borderColor: "#E2E8F0", backgroundColor: "white" }}
-              >
-                <p className="font-medium text-gray-900">
-                  {totalSubUnits} {structureConfig.subUnitLabel}(s) &middot;{" "}
-                  {totalInnerUnits} Total {structureConfig.innerUnitLabel}s
+              <div>
+                <h3 className="text-base font-bold" style={{ color: "#1A202C" }}>
+                  Level 4 — Physical Structure Breakdown
+                </h3>
+                <p className="text-sm mt-1" style={{ color: "#718096" }}>
+                  {selectedCategory.structureDescription?.trim() ||
+                    `Define the ${blockLabel}s that make up this project.`}
                 </p>
               </div>
-            )}
-          </div>
-        )}
+
+              {structureEntries.length === 0 ? (
+                <div className="text-center py-6 text-gray-400">
+                  <Building2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">
+                    No {blockLabel.toLowerCase()}s defined yet
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {structureEntries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="border rounded-lg p-4"
+                      style={{ borderColor: "#E2E8F0", backgroundColor: "white" }}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <span
+                          className="text-sm font-semibold"
+                          style={{ color: "#1A202C" }}
+                        >
+                          {entry.name}
+                        </span>
+                        <button
+                          onClick={() => removeStructureEntry(entry.id)}
+                          className="text-red-400 hover:text-red-600 p-1 rounded transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {selectedCategory.structureFields.length === 0 ? (
+                        <p className="text-xs text-gray-400">
+                          No fields configured for this category yet.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                          {selectedCategory.structureFields.map((f) => (
+                            <div key={f.id}>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">
+                                {f.label}
+                              </label>
+                              {f.type === "select" ? (
+                                <div className="relative">
+                                  <select
+                                    value={entry.attributes[f.key] ?? ""}
+                                    onChange={(e) =>
+                                      updateStructureEntryAttr(
+                                        entry.id,
+                                        f.key,
+                                        e.target.value,
+                                      )
+                                    }
+                                    className="w-full px-3 py-2 rounded-lg border text-sm appearance-none"
+                                    style={{
+                                      borderColor: "#E2E8F0",
+                                      backgroundColor: "#F7F8FA",
+                                    }}
+                                  >
+                                    {(f.options ?? []).map((o) => (
+                                      <option key={o} value={o}>
+                                        {o}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                                </div>
+                              ) : (
+                                <input
+                                  type={f.type === "number" ? "number" : "text"}
+                                  value={entry.attributes[f.key] ?? ""}
+                                  onChange={(e) =>
+                                    updateStructureEntryAttr(
+                                      entry.id,
+                                      f.key,
+                                      f.type === "number"
+                                        ? e.target.value === ""
+                                          ? ""
+                                          : Number(e.target.value)
+                                        : e.target.value,
+                                    )
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border text-sm"
+                                  style={{
+                                    borderColor: "#E2E8F0",
+                                    backgroundColor: "#F7F8FA",
+                                  }}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={addStructureEntry}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium w-fit"
+                style={{
+                  color: "#E8973A",
+                  border: "1px dashed #E8973A",
+                  backgroundColor: "#FFF8F0",
+                }}
+              >
+                <Plus className="w-4 h-4" /> Add {blockLabel}
+              </button>
+
+              {structureEntries.length > 0 && (
+                <div
+                  className="rounded-lg p-3 border text-sm"
+                  style={{ borderColor: "#E2E8F0", backgroundColor: "white" }}
+                >
+                  <p className="font-medium text-gray-900">
+                    {totalStructureEntries} {blockLabel}(s)
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
       </div>
     );
   };

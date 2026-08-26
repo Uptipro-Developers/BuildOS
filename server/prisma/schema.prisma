@@ -1884,6 +1884,45 @@ model NotificationTemplate {
   updatedAt DateTime @updatedAt
 }
 
+// ─────────────── PROJECT TYPES (Construction Settings) ───────────────
+// The taxonomy an admin builds under Settings → Project Types, consumed by
+// the Project Setup wizard's Project Classification step. Unlike ProjectSetup
+// below, this is real reference data an admin curates and other projects will
+// share/reuse — the same reasoning that gave MaterialCategory/MaterialType
+// their own tables instead of a JSON blob.
+
+model ProjectSector {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories ProjectCategory[]
+}
+
+model ProjectCategory {
+  id       String        @id @default(cuid())
+  sectorId String
+  sector   ProjectSector @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  name     String
+
+  /// Level 3 — Specific Descriptors. "dropdown" | "free_text".
+  descriptorMode String @default("free_text")
+  /// Array of option strings, used when descriptorMode is "dropdown".
+  descriptorOptions Json @default("[]")
+
+  /// Level 4 — Physical Structure Breakdown.
+  structureHeaderLabel String?
+  structureDescription String?
+  /// Array of { id, key, label, type: "text" | "number" | "select", options?: string[] }.
+  structureFields Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sectorId])
+}
+
 // ─────────────── CONSTRUCTION PROJECT SETUP WIZARD ───────────────
 // Persists the multi-step "Project Setup" wizard payload for a construction
 // project. Each step's data is stored as a JSON column to avoid coupling the
