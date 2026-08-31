@@ -9,9 +9,9 @@ import {
   createMaterialRequest,
   updateMaterialRequest,
   getStores,
-  searchMaterialTypes,
+  searchMaterials,
   MaterialRequest as ApiMR,
-  MaterialTypeSearchResult,
+  Material as MaterialSearchHit,
 } from "../../api/materials";
 import {
   formatDateByGeneralSettings,
@@ -216,11 +216,11 @@ function MaterialTypeSearchField({
 }: {
   selectedName: string;
   excludeNames: Set<string>;
-  onPick: (hit: MaterialTypeSearchResult) => void;
+  onPick: (hit: MaterialSearchHit) => void;
   onClear: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [results, setResults] = useState<MaterialSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
@@ -232,7 +232,7 @@ function MaterialTypeSearchField({
     }
     setSearching(true);
     const handle = setTimeout(() => {
-      searchMaterialTypes(q)
+      searchMaterials(q)
         .then((hits) => setResults(hits.filter((h) => !excludeNames.has(h.name))))
         .catch(() => setResults([]))
         .finally(() => setSearching(false));
@@ -293,7 +293,7 @@ function MaterialTypeSearchField({
               >
                 <span className="font-medium text-gray-900">{hit.name}</span>{" "}
                 <span className="text-xs text-gray-400">
-                  {hit.material.name} · {hit.material.category}
+                  {hit.category}
                   {hit.sku ? ` · ${hit.sku}` : ""}
                 </span>
               </button>

@@ -66,45 +66,60 @@ export interface UnitOfMeasurement {
     conversionFactor?: number;
 }
 
-export interface MaterialCatalogDimensionRecord {
-    /** Weight | Length | Width | Breadth | Thickness | Area | Volume | Custom */
+export interface MaterialCatalogDimensionInput {
     kind: string;
-    value: number | null;
-    unit: string | null;
+    value?: number | string | null;
+    unit?: string | null;
 }
 
 /**
- * A Type is its own row (MaterialType) — the thing that actually carries
- * stock. Its dimensions live inline as a JSON array, not a nested table.
+ * A material item under a Material — e.g. "Deformed Bar" under "Iron Rod".
+ * There is no row of its own any more: on save, each of its dimensions
+ * becomes its own flat Material row (see MaterialCatalogRowRecord below), so
+ * an item needs at least one dimension or it has nothing to save.
  */
-export interface MaterialCatalogTypeRecord {
-    id: string;
+export interface MaterialCatalogItemInput {
     name: string;
-    sku: string | null;
-    unit: string;
-    totalQty: number;
-    availableQty: number;
-    reservedQty: number;
-    unitCost: number;
-    dimensions: MaterialCatalogDimensionRecord[];
+    sku?: string | null;
+    dimensions: MaterialCatalogDimensionInput[];
+}
+
+export interface MaterialCatalogMaterialInput {
+    name: string;
+    classification: 'Consumable' | 'Reusable';
+    items: MaterialCatalogItemInput[];
+}
+
+export interface MaterialCategoryInput {
+    name: string;
+    description?: string;
+    color?: string;
+    materials?: MaterialCatalogMaterialInput[];
 }
 
 /**
- * A Material is the same row Goods Receipt/Stock Movement use elsewhere in
- * the app — real inventory, not disposable catalog-only data. Its
- * totalQty/availableQty/reservedQty (sums) and unitCost (quantity-weighted
- * average) are a rollup computed from its Types.
+ * One flat Material row produced by the catalogue builder — a specific
+ * dimension of a specific item under a Material Name. This is a real
+ * Material row (the same table Goods Receipt/Stock Movement use), not a
+ * disposable catalog-only record; `materialGroupName`/`itemName` are the
+ * pre-concatenation names, kept only so the builder can regroup flat rows
+ * back into a Material -> item -> dimension tree when reopened for edit.
  */
-export interface MaterialCatalogItemRecord {
+export interface MaterialCatalogRowRecord {
     id: string;
     name: string;
     classification: 'Consumable' | 'Reusable';
+    materialGroupName: string | null;
+    itemName: string | null;
+    sku: string | null;
+    /** Weight | Length | Width | Breadth | Thickness | Area | Volume | Custom */
+    kind: string | null;
+    value: number | null;
     unit: string | null;
     totalQty: number;
     availableQty: number;
     reservedQty: number;
     unitCost: number;
-    types: MaterialCatalogTypeRecord[];
 }
 
 export interface MaterialCategoryRecord {
@@ -112,33 +127,7 @@ export interface MaterialCategoryRecord {
     name: string;
     description: string | null;
     color: string;
-    materials: MaterialCatalogItemRecord[];
-}
-
-export interface MaterialCatalogDimensionInput {
-    kind: string;
-    value?: number | string | null;
-    unit?: string | null;
-}
-
-export interface MaterialCatalogTypeInput {
-    name: string;
-    sku?: string | null;
-    unit: string;
-    dimensions: MaterialCatalogDimensionInput[];
-}
-
-export interface MaterialCatalogItemInput {
-    name: string;
-    classification: 'Consumable' | 'Reusable';
-    types: MaterialCatalogTypeInput[];
-}
-
-export interface MaterialCategoryInput {
-    name: string;
-    description?: string;
-    color?: string;
-    materials?: MaterialCatalogItemInput[];
+    materials: MaterialCatalogRowRecord[];
 }
 
 export interface EmailTemplateConfig {

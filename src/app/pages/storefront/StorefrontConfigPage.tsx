@@ -1553,8 +1553,6 @@ function UnitsOfMeasurementPanel() {
 
 // ─── Material Categories Panel ────────────────────────────────────────────────
 
-type MaterialCategory = MaterialCategoryRecord;
-
 const CATEGORY_COLORS = [
   { label: "Teal", value: "teal" },
   { label: "Blue", value: "blue" },
@@ -1605,49 +1603,102 @@ interface DimensionFormRow {
   value: string;
   unit: string;
 }
-interface TypeFormRow {
+interface ItemFormRow {
   key: string;
   name: string;
   sku: string;
-  /** Stocking unit — required, since each Type is its own stocked row. */
-  unit: string;
+  /** No unit of its own any more — every dimension carries its own unit, since that's what a saved row's own unit comes from. Needs at least one dimension to save anything. */
   dimensions: DimensionFormRow[];
 }
 interface MaterialFormRow {
   key: string;
   name: string;
   classification: "Consumable" | "Reusable";
-  types: TypeFormRow[];
+  items: ItemFormRow[];
 }
 
 function blankDimension(): DimensionFormRow {
   return { key: nextCatalogFormKey(), kind: "Length", value: "", unit: "" };
 }
-function blankType(): TypeFormRow {
-  return { key: nextCatalogFormKey(), name: "", sku: "", unit: "", dimensions: [blankDimension()] };
+function blankItem(): ItemFormRow {
+  return { key: nextCatalogFormKey(), name: "", sku: "", dimensions: [blankDimension()] };
 }
 function blankMaterial(): MaterialFormRow {
-  return { key: nextCatalogFormKey(), name: "", classification: "Consumable", types: [blankType()] };
+  return { key: nextCatalogFormKey(), name: "", classification: "Consumable", items: [blankItem()] };
+}
+
+/** One dimension of one material item, as displayed/edited — the real Material row backing it is `id`. */
+interface GroupedDimension {
+  id: string;
+  kind: string;
+  value: number | null;
+  unit: string | null;
+  totalQty: number;
+  availableQty: number;
+  reservedQty: number;
+  unitCost: number;
+}
+interface GroupedItem {
+  name: string;
+  sku: string | null;
+  dimensions: GroupedDimension[];
+}
+interface GroupedMaterial {
+  name: string;
+  classification: "Consumable" | "Reusable";
+  items: GroupedItem[];
+}
+interface MaterialCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  materials: GroupedMaterial[];
 }
 
 /**
- * Guards against a category record missing its nested materials/types/
- * dimensions arrays — e.g. a backend still on the old flat
- * {name, description, color} shape — so the page degrades to "no materials
- * yet" instead of crashing on `.reduce`/`.map` over undefined.
+ * The backend stores every dimension of every material item as its own flat
+ * Material row (no Type table underneath a Material any more) — this
+ * regroups that flat list back into the Material -> item -> dimension tree
+ * the builder and the read-only category view both work with, using
+ * `materialGroupName`/`itemName` to know which rows belong together.
  */
-function normalizeCategoryRecord(c: MaterialCategory): MaterialCategory {
-  return {
-    ...c,
-    materials: (c.materials ?? []).map((m) => ({
-      ...m,
-      classification: m.classification === "Reusable" ? "Reusable" : "Consumable",
-      types: (m.types ?? []).map((t) => ({
-        ...t,
-        dimensions: t.dimensions ?? [],
-      })),
-    })),
-  };
+function normalizeCategoryRecord(c: MaterialCategoryRecord): MaterialCategory {
+  const materials: GroupedMaterial[] = [];
+  const materialIndex = new Map<string, GroupedMaterial>();
+  const itemIndex = new Map<string, GroupedItem>();
+  for (const row of c.materials ?? []) {
+    const materialName = row.materialGroupName ?? row.name;
+    const classification = row.classification === "Reusable" ? "Reusable" : "Consumable";
+    const materialKey = `${materialName}::${classification}`;
+    let material = materialIndex.get(materialKey);
+    if (!material) {
+      material = { name: materialName, classification, items: [] };
+      materialIndex.set(materialKey, material);
+      materials.push(material);
+    }
+
+    const itemName = row.itemName ?? row.name;
+    const itemKey = `${materialKey}::${itemName}`;
+    let item = itemIndex.get(itemKey);
+    if (!item) {
+      item = { name: itemName, sku: row.sku ?? null, dimensions: [] };
+      itemIndex.set(itemKey, item);
+      material.items.push(item);
+    }
+
+    item.dimensions.push({
+      id: row.id,
+      kind: row.kind ?? "",
+      value: row.value ?? null,
+      unit: row.unit ?? null,
+      totalQty: row.totalQty,
+      availableQty: row.availableQty,
+      reservedQty: row.reservedQty,
+      unitCost: row.unitCost,
+    });
+  }
+  return { id: c.id, name: c.name, description: c.description, color: c.color, materials };
 }
 
 function MaterialCategoriesPanel() {
@@ -1689,14 +1740,13 @@ function MaterialCategoriesPanel() {
           key: nextCatalogFormKey(),
           name: m.name,
           classification: m.classification,
-          types: m.types.length
-            ? m.types.map((t) => ({
+          items: m.items.length
+            ? m.items.map((it) => ({
               key: nextCatalogFormKey(),
-              name: t.name,
-              sku: t.sku || "",
-              unit: t.unit || "",
-              dimensions: t.dimensions.length
-                ? t.dimensions.map((d) => ({
+              name: it.name,
+              sku: it.sku || "",
+              dimensions: it.dimensions.length
+                ? it.dimensions.map((d) => ({
                   key: nextCatalogFormKey(),
                   kind: d.kind,
                   value: d.value == null ? "" : String(d.value),
@@ -1704,7 +1754,7 @@ function MaterialCategoriesPanel() {
                 }))
                 : [blankDimension()],
             }))
-            : [blankType()],
+            : [blankItem()],
         }))
         : [blankMaterial()],
     );
@@ -1720,51 +1770,51 @@ function MaterialCategoriesPanel() {
   function updateMaterialRow(key: string, patch: Partial<MaterialFormRow>) {
     setMaterials((prev) => prev.map((m) => (m.key === key ? { ...m, ...patch } : m)));
   }
-  function addType(materialKey: string) {
+  function addItem(materialKey: string) {
     setMaterials((prev) =>
-      prev.map((m) => (m.key === materialKey ? { ...m, types: [...m.types, blankType()] } : m)),
+      prev.map((m) => (m.key === materialKey ? { ...m, items: [...m.items, blankItem()] } : m)),
     );
   }
-  function removeType(materialKey: string, typeKey: string) {
+  function removeItem(materialKey: string, itemKey: string) {
     setMaterials((prev) =>
       prev.map((m) =>
-        m.key === materialKey ? { ...m, types: m.types.filter((t) => t.key !== typeKey) } : m,
+        m.key === materialKey ? { ...m, items: m.items.filter((it) => it.key !== itemKey) } : m,
       ),
     );
   }
-  function updateTypeRow(materialKey: string, typeKey: string, patch: Partial<TypeFormRow>) {
+  function updateItemRow(materialKey: string, itemKey: string, patch: Partial<ItemFormRow>) {
     setMaterials((prev) =>
       prev.map((m) =>
         m.key === materialKey
-          ? { ...m, types: m.types.map((t) => (t.key === typeKey ? { ...t, ...patch } : t)) }
+          ? { ...m, items: m.items.map((it) => (it.key === itemKey ? { ...it, ...patch } : it)) }
           : m,
       ),
     );
   }
-  function addDimension(materialKey: string, typeKey: string) {
+  function addDimension(materialKey: string, itemKey: string) {
     setMaterials((prev) =>
       prev.map((m) =>
         m.key === materialKey
           ? {
             ...m,
-            types: m.types.map((t) =>
-              t.key === typeKey ? { ...t, dimensions: [...t.dimensions, blankDimension()] } : t,
+            items: m.items.map((it) =>
+              it.key === itemKey ? { ...it, dimensions: [...it.dimensions, blankDimension()] } : it,
             ),
           }
           : m,
       ),
     );
   }
-  function removeDimension(materialKey: string, typeKey: string, dimensionKey: string) {
+  function removeDimension(materialKey: string, itemKey: string, dimensionKey: string) {
     setMaterials((prev) =>
       prev.map((m) =>
         m.key === materialKey
           ? {
             ...m,
-            types: m.types.map((t) =>
-              t.key === typeKey
-                ? { ...t, dimensions: t.dimensions.filter((d) => d.key !== dimensionKey) }
-                : t,
+            items: m.items.map((it) =>
+              it.key === itemKey
+                ? { ...it, dimensions: it.dimensions.filter((d) => d.key !== dimensionKey) }
+                : it,
             ),
           }
           : m,
@@ -1773,7 +1823,7 @@ function MaterialCategoriesPanel() {
   }
   function updateDimensionRow(
     materialKey: string,
-    typeKey: string,
+    itemKey: string,
     dimensionKey: string,
     patch: Partial<DimensionFormRow>,
   ) {
@@ -1782,15 +1832,15 @@ function MaterialCategoriesPanel() {
         m.key === materialKey
           ? {
             ...m,
-            types: m.types.map((t) =>
-              t.key === typeKey
+            items: m.items.map((it) =>
+              it.key === itemKey
                 ? {
-                  ...t,
-                  dimensions: t.dimensions.map((d) =>
+                  ...it,
+                  dimensions: it.dimensions.map((d) =>
                     d.key === dimensionKey ? { ...d, ...patch } : d,
                   ),
                 }
-                : t,
+                : it,
             ),
           }
           : m,
@@ -1801,21 +1851,23 @@ function MaterialCategoriesPanel() {
   /**
    * A blank pre-seeded row is silently dropped on save (that's fine — it's
    * how "leave it empty if you don't need it" works). But a row that's
-   * *partly* filled in — a Type named with no Unit picked, or a Type under
+   * *partly* filled in — an item named with no dimension, or an item under
    * a Material whose own name was never filled in — would be silently
    * dropped too, with no sign anything was lost. Catch that before saving.
+   * An item needs at least one dimension, since a saved row's identity
+   * (and stock) comes from its dimension — there's nothing to save without one.
    */
   function findIncompleteRow(): string | null {
     for (const m of materials) {
       const materialName = m.name.trim();
-      for (const t of m.types) {
-        const typeName = t.name.trim();
-        if (!typeName) continue;
+      for (const it of m.items) {
+        const itemName = it.name.trim();
+        if (!itemName) continue;
         if (!materialName) {
-          return `"${typeName}" needs its material's name filled in before it can be saved.`;
+          return `"${itemName}" needs its material's name filled in before it can be saved.`;
         }
-        if (!t.unit.trim()) {
-          return `"${typeName}" under "${materialName}" needs a stocking unit before it can be saved.`;
+        if (it.dimensions.length === 0) {
+          return `"${itemName}" under "${materialName}" needs at least one dimension before it can be saved.`;
         }
       }
     }
@@ -1840,13 +1892,12 @@ function MaterialCategoriesPanel() {
           .map((m) => ({
             name: m.name.trim(),
             classification: m.classification,
-            types: m.types
-              .filter((t) => t.name.trim())
-              .map((t) => ({
-                name: t.name.trim(),
-                sku: t.sku.trim() || undefined,
-                unit: t.unit.trim(),
-                dimensions: t.dimensions
+            items: m.items
+              .filter((it) => it.name.trim())
+              .map((it) => ({
+                name: it.name.trim(),
+                sku: it.sku.trim() || undefined,
+                dimensions: it.dimensions
                   .filter((d) => d.kind)
                   .map((d) => ({
                     kind: d.kind,
@@ -1898,7 +1949,7 @@ function MaterialCategoriesPanel() {
   }
 
   const totalTypes = categories.reduce(
-    (sum, c) => sum + c.materials.reduce((s, m) => s + m.types.length, 0),
+    (sum, c) => sum + c.materials.reduce((s, m) => s + m.items.length, 0),
     0,
   );
   const totalMaterials = categories.reduce((sum, c) => sum + c.materials.length, 0);
@@ -1952,7 +2003,7 @@ function MaterialCategoriesPanel() {
           <tbody className="divide-y divide-gray-50">
             {categories.map((c) => {
               const cls = COLOR_CLASSES[c.color] ?? COLOR_CLASSES.gray;
-              const typeCount = c.materials.reduce((s, m) => s + m.types.length, 0);
+              const typeCount = c.materials.reduce((s, m) => s + m.items.length, 0);
               const isExpanded = expanded === c.id;
               return (
                 <Fragment key={c.id}>
@@ -2012,7 +2063,7 @@ function MaterialCategoriesPanel() {
                         ) : (
                           <div className="space-y-2">
                             {c.materials.map((m) => (
-                              <div key={m.id} className="bg-white border border-gray-200 rounded-lg p-3">
+                              <div key={`${m.name}::${m.classification}`} className="bg-white border border-gray-200 rounded-lg p-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-semibold text-gray-900">{m.name}</span>
@@ -2023,25 +2074,25 @@ function MaterialCategoriesPanel() {
                                     </span>
                                   </div>
                                   <span className="text-xs text-gray-400 flex-shrink-0">
-                                    {m.types.length} type{m.types.length === 1 ? "" : "s"}
+                                    {m.items.length} item{m.items.length === 1 ? "" : "s"}
                                   </span>
                                 </div>
-                                {m.types.length > 0 && (
+                                {m.items.length > 0 && (
                                   <div className="mt-2 flex flex-wrap gap-2">
-                                    {m.types.map((t) => (
+                                    {m.items.map((it) => (
                                       <span
-                                        key={t.id}
+                                        key={it.name}
                                         className="inline-flex items-center gap-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1"
                                       >
                                         <Package className="w-3 h-3 text-teal-600" />
-                                        <span className="font-medium text-gray-700">{t.name}</span>
-                                        {t.dimensions.map((d, di) => (
-                                          <span key={di} className="text-gray-400">
+                                        <span className="font-medium text-gray-700">{it.name}</span>
+                                        {it.dimensions.map((d) => (
+                                          <span key={d.id} className="text-gray-400">
                                             {[d.value, d.unit, d.kind].filter(Boolean).join(" ")}
                                           </span>
                                         ))}
-                                        {t.sku && (
-                                          <span className="text-[10px] tracking-wide text-gray-400">{t.sku}</span>
+                                        {it.sku && (
+                                          <span className="text-[10px] tracking-wide text-gray-400">{it.sku}</span>
                                         )}
                                       </span>
                                     ))}
@@ -2140,8 +2191,9 @@ function MaterialCategoriesPanel() {
                 </div>
                 <p className="text-xs text-gray-500 mb-3">
                   Each material is classified Consumable (used up) or Reusable
-                  (returned to store), and can have as many types (variants)
-                  as needed — each type carries measurable dimensions.
+                  (returned to store), and can have as many items (variants)
+                  as needed — each item needs at least one dimension, since
+                  that's what its stock is tracked against.
                 </p>
 
                 <div className="space-y-3">
@@ -2178,10 +2230,10 @@ function MaterialCategoriesPanel() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => addType(m.key)}
+                          onClick={() => addItem(m.key)}
                           className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap py-2"
                         >
-                          <Plus className="w-3.5 h-3.5" /> Type
+                          <Plus className="w-3.5 h-3.5" /> Item
                         </button>
                         <button
                           type="button"
@@ -2193,63 +2245,55 @@ function MaterialCategoriesPanel() {
                         </button>
                       </div>
 
-                      {m.types.length > 0 && (
+                      {m.items.length > 0 && (
                         <div className="space-y-2 pl-3 border-l-2 border-gray-200">
-                          {m.types.map((t) => (
-                            <div key={t.key} className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                          {m.items.map((it) => (
+                            <div key={it.key} className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
                                 <input
-                                  value={t.name}
+                                  value={it.name}
                                   onChange={(e) =>
-                                    updateTypeRow(m.key, t.key, { name: e.target.value })
+                                    updateItemRow(m.key, it.key, { name: e.target.value })
                                   }
-                                  placeholder="Type name (e.g. Wall)"
+                                  placeholder="Item name (e.g. Wall)"
                                   className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                 />
                                 <input
-                                  value={t.sku}
+                                  value={it.sku}
                                   onChange={(e) =>
-                                    updateTypeRow(m.key, t.key, { sku: e.target.value })
+                                    updateItemRow(m.key, it.key, { sku: e.target.value })
                                   }
                                   placeholder="SKU (e.g. GT-W-600600)"
                                   className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                 />
-                                <select
-                                  value={t.unit}
-                                  onChange={(e) =>
-                                    updateTypeRow(m.key, t.key, { unit: e.target.value })
-                                  }
-                                  title="Stocking unit"
-                                  className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                                >
-                                  <option value="">Unit*</option>
-                                  {DIMENSION_UNITS.map((u) => (
-                                    <option key={u} value={u}>{u}</option>
-                                  ))}
-                                </select>
                                 <button
                                   type="button"
-                                  onClick={() => addDimension(m.key, t.key)}
+                                  onClick={() => addDimension(m.key, it.key)}
                                   className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap shrink-0"
                                 >
                                   <Plus className="w-3.5 h-3.5" /> Dimension
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => removeType(m.key, t.key)}
-                                  title="Remove type"
+                                  onClick={() => removeItem(m.key, it.key)}
+                                  title="Remove item"
                                   className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
                                 >
                                   <X className="w-4 h-4" />
                                 </button>
                               </div>
 
-                              {t.dimensions.map((d) => (
+                              {it.dimensions.length === 0 && (
+                                <p className="text-[11px] text-red-500">
+                                  Needs at least one dimension.
+                                </p>
+                              )}
+                              {it.dimensions.map((d) => (
                                 <div key={d.key} className="flex flex-wrap items-center gap-2">
                                   <select
                                     value={d.kind}
                                     onChange={(e) =>
-                                      updateDimensionRow(m.key, t.key, d.key, { kind: e.target.value })
+                                      updateDimensionRow(m.key, it.key, d.key, { kind: e.target.value })
                                     }
                                     className="w-32 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                   >
@@ -2261,7 +2305,7 @@ function MaterialCategoriesPanel() {
                                     type="number"
                                     value={d.value}
                                     onChange={(e) =>
-                                      updateDimensionRow(m.key, t.key, d.key, { value: e.target.value })
+                                      updateDimensionRow(m.key, it.key, d.key, { value: e.target.value })
                                     }
                                     placeholder="Value"
                                     className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
@@ -2269,7 +2313,7 @@ function MaterialCategoriesPanel() {
                                   <select
                                     value={d.unit}
                                     onChange={(e) =>
-                                      updateDimensionRow(m.key, t.key, d.key, { unit: e.target.value })
+                                      updateDimensionRow(m.key, it.key, d.key, { unit: e.target.value })
                                     }
                                     className="w-28 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                   >
@@ -2280,7 +2324,7 @@ function MaterialCategoriesPanel() {
                                   </select>
                                   <button
                                     type="button"
-                                    onClick={() => removeDimension(m.key, t.key, d.key)}
+                                    onClick={() => removeDimension(m.key, it.key, d.key)}
                                     title="Remove dimension"
                                     className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
                                   >
@@ -2335,7 +2379,7 @@ function MaterialCategoriesPanel() {
               Remove <span className="font-semibold">{deleteTarget.name}</span>?
               Its {deleteTarget.materials.length} material
               {deleteTarget.materials.length === 1 ? "" : "s"} and all their
-              types will be removed too.
+              items will be removed too.
             </p>
             <div className="flex justify-end gap-3">
               <button

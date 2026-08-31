@@ -713,33 +713,31 @@ export class GoodsReceiptsService {
 
     /**
      * Adds the delivery to the material catalogue, which is what Inventory,
-     * Stock Levels and the Storefront all read.
+     * Stock Levels and the Storefront all read. The material must already
+     * exist there — it's meant to be created once, up front, via Storefront
+     * Category — so a receipt referencing one that isn't found is a data
+     * problem to fix, not something to paper over by inventing a new
+     * catalogue row with none of its proper category/sku/classification
+     * set. Throwing here aborts the whole `accept()` transaction, so nothing
+     * from this receipt (stock movement, store shelf) is posted either.
      */
     private async postToCatalogue(
         tx: any,
         line: { material: string; unit: string; qty: number; unitCost: number },
     ) {
         const existing = await tx.material.findFirst({ where: { name: line.material } });
-        if (existing) {
-            await tx.material.update({
-                where: { id: existing.id },
-                data: {
-                    totalQty: existing.totalQty + line.qty,
-                    availableQty: existing.availableQty + line.qty,
-                    unitCost: line.unitCost || existing.unitCost,
-                    allocationStatus: 'Available',
-                },
-            });
-            return;
+        if (!existing) {
+            throw new BadRequestException(
+                `"${line.material}" was not found in the material catalogue — add it under Storefront → Config before accepting this receipt.`,
+            );
         }
-        await tx.material.create({
+        await tx.material.update({
+            where: { id: existing.id },
             data: {
-                name: line.material,
-                category: 'General',
-                unit: line.unit,
-                totalQty: line.qty,
-                availableQty: line.qty,
-                unitCost: line.unitCost,
+                totalQty: existing.totalQty + line.qty,
+                availableQty: existing.availableQty + line.qty,
+                unitCost: line.unitCost || existing.unitCost,
+                allocationStatus: 'Available',
             },
         });
     }

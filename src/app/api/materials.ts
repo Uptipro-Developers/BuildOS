@@ -6,6 +6,13 @@ export interface Material {
     unitCost: number; reorderLevel: number; materialType?: string;
     allocationStatus?: string; allocatedTo?: string; allocatedProject?: string;
     condition?: string; createdAt: string;
+    /** Catalog-created rows only — see MaterialType kind/value/unit; sku is the material item's. */
+    sku?: string | null;
+    kind?: string | null;
+    value?: number | null;
+    /** Pre-concatenation names (Storefront Config builder bookkeeping) — not usually shown directly. */
+    materialGroupName?: string | null;
+    itemName?: string | null;
 }
 export interface Store {
     id: string; name: string; type: string; projectId?: string;
@@ -67,31 +74,19 @@ export interface MaterialTypeRow {
     dimensions: MaterialTypeDimension[];
 }
 
-/** A catalogue search hit — a Type plus enough of its parent Material to auto-fill the Add Material form. */
-export interface MaterialTypeSearchResult extends MaterialTypeRow {
-    material: {
-        id: string;
-        name: string;
-        category: string;
-        materialType: string;
-        reorderLevel: number;
-    };
-}
-
 export interface MaterialWithTypes extends Material {
     types: MaterialTypeRow[];
 }
 
 export interface MaterialStockUpdateInput {
-    materialId: string;
-    /** Omit to leave the Material's reorder level untouched. */
-    reorderLevel?: number;
-    types: {
-        typeId: string;
+    materials: {
+        id: string;
         totalQty: number;
         availableQty: number;
         reservedQty: number;
         unitCost: number;
+        /** Omit to leave this row's reorder level untouched. */
+        reorderLevel?: number;
     }[];
 }
 
@@ -105,13 +100,13 @@ export const updateMaterial = (id: string, data: Partial<Material>) =>
 export const deleteMaterial = (id: string) =>
     apiFetch<void>(`/materials/${id}`, { method: 'DELETE' });
 
-/** Catalogue search for the "Add Material" flow — matches by Type name. */
-export const searchMaterialTypes = (q: string) =>
-    apiFetch<MaterialTypeSearchResult[]>(`/materials/type-search?q=${encodeURIComponent(q)}`);
+/** Catalogue search for the "Add Material" flow — matches a Material row directly by name, group name or item name. */
+export const searchMaterials = (q: string) =>
+    apiFetch<Material[]>(`/materials/search?q=${encodeURIComponent(q)}`);
 
-/** Applies stock quantities/cost onto one or more existing MaterialType rows under one Material, and rolls the Material's totals up. */
+/** Applies stock quantities/cost directly onto one or more existing Material rows picked from the catalogue. */
 export const applyMaterialStockUpdate = (data: MaterialStockUpdateInput) =>
-    apiFetch<MaterialWithTypes>('/materials/type-stock', { method: 'POST', body: JSON.stringify(data) });
+    apiFetch<Material[]>('/materials/stock', { method: 'POST', body: JSON.stringify(data) });
 
 // Stores
 export const getStores = () => apiFetch<Store[]>('/stores');

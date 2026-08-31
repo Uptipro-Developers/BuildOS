@@ -23,7 +23,7 @@ import {
   Wrench,
   Edit2,
 } from "lucide-react";
-import { searchMaterialTypes, MaterialTypeSearchResult } from "../../api/materials";
+import { searchMaterials, Material as MaterialSearchHit } from "../../api/materials";
 import { getUnits } from "../../api/admin-extras";
 import { IssueForm } from "../../components/IssueForm";
 import { ChangeRequestForm } from "../../components/ChangeRequestForm";
@@ -65,11 +65,11 @@ const STOCK_BADGE: Record<StockLevel, string> = {
   out_of_stock: "bg-red-100 text-red-700",
 };
 
-/** Stock level for a MaterialType hit, using its parent Material's reorder level. */
-function stockLevelOfType(hit: MaterialTypeSearchResult): StockLevel {
+/** Stock level for a catalogue Material hit, using its own reorder level. */
+function stockLevelOfType(hit: MaterialSearchHit): StockLevel {
   return stockLevelOf({
     availableQty: hit.availableQty,
-    reorderLevel: hit.material.reorderLevel,
+    reorderLevel: hit.reorderLevel,
   });
 }
 
@@ -89,7 +89,7 @@ function MaterialCombobox({
 }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
-  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [results, setResults] = useState<MaterialSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -102,9 +102,8 @@ function MaterialCombobox({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  // Searches the MaterialType catalogue as the requester types — mirrors the
-  // Material Request and Project Setup pickers, which search the specific
-  // stock type rather than the coarser Material name.
+  // Searches the Material catalogue as the requester types — mirrors the
+  // Material Request and Project Setup pickers.
   useEffect(() => {
     const q = query.trim();
     if (!q) {
@@ -114,7 +113,7 @@ function MaterialCombobox({
     }
     setSearching(true);
     const handle = setTimeout(() => {
-      searchMaterialTypes(q)
+      searchMaterials(q)
         .then(setResults)
         .catch(() => setResults([]))
         .finally(() => setSearching(false));
@@ -122,7 +121,7 @@ function MaterialCombobox({
     return () => clearTimeout(handle);
   }, [query]);
 
-  function select(hit: MaterialTypeSearchResult) {
+  function select(hit: MaterialSearchHit) {
     setQuery(hit.name);
     onChange(hit.name);
     onStockChange(stockLevelOfType(hit));
@@ -182,7 +181,7 @@ function MaterialCombobox({
                     <span>
                       {hit.name}
                       <span className="block text-xs text-gray-400 font-normal">
-                        {hit.material.name} · {hit.material.category}
+                        {hit.category}
                       </span>
                     </span>
                     <span
@@ -672,8 +671,8 @@ function MaterialForm({
               field("material", "");
             }}
             className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${requestKind === "material"
-                ? "bg-white text-teal-700 shadow-sm border border-gray-200"
-                : "text-gray-500 hover:text-gray-700"
+              ? "bg-white text-teal-700 shadow-sm border border-gray-200"
+              : "text-gray-500 hover:text-gray-700"
               }`}
           >
             <Package className="w-4 h-4" />
@@ -687,8 +686,8 @@ function MaterialForm({
               setSelectedStock(null);
             }}
             className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${requestKind === "service"
-                ? "bg-white text-teal-700 shadow-sm border border-gray-200"
-                : "text-gray-500 hover:text-gray-700"
+              ? "bg-white text-teal-700 shadow-sm border border-gray-200"
+              : "text-gray-500 hover:text-gray-700"
               }`}
           >
             <Wrench className="w-4 h-4" />
@@ -1605,8 +1604,8 @@ export function SubmitRequestPage() {
             <button
               onClick={() => setTab("material")}
               className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "material"
-                  ? "border-teal-600 text-teal-700 bg-teal-50/50"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
             >
               <Package className="w-4 h-4" /> Material
@@ -1614,8 +1613,8 @@ export function SubmitRequestPage() {
             <button
               onClick={() => setTab("finance")}
               className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "finance"
-                  ? "border-teal-600 text-teal-700 bg-teal-50/50"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
             >
               <DollarSign className="w-4 h-4" /> Finance
@@ -1623,8 +1622,8 @@ export function SubmitRequestPage() {
             <button
               onClick={() => setTab("leave")}
               className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "leave"
-                  ? "border-teal-600 text-teal-700 bg-teal-50/50"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
             >
               <FileText className="w-4 h-4" /> Leave
@@ -1632,8 +1631,8 @@ export function SubmitRequestPage() {
             <button
               onClick={() => setTab("issue")}
               className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "issue"
-                  ? "border-teal-600 text-teal-700 bg-teal-50/50"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
             >
               <AlertTriangle className="w-4 h-4" /> Issues
@@ -1641,8 +1640,8 @@ export function SubmitRequestPage() {
             <button
               onClick={() => setTab("change")}
               className={`flex items-center justify-center gap-2 py-4 text-sm font-medium transition-colors border-b-2 ${tab === "change"
-                  ? "border-teal-600 text-teal-700 bg-teal-50/50"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-teal-600 text-teal-700 bg-teal-50/50"
+                : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
             >
               <Edit2 className="w-4 h-4" /> Changes

@@ -5,10 +5,9 @@ import {
   createMaterial,
   updateMaterial,
   deleteMaterial,
-  searchMaterialTypes,
+  searchMaterials,
   applyMaterialStockUpdate,
-  MaterialTypeSearchResult,
-  MaterialWithTypes,
+  Material as MaterialSearchHit,
   MaterialTypeRow,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
@@ -252,21 +251,24 @@ function TrackModal({
 }
 
 // ── Add Material (catalogue-aware stock entry) ────────────────────────────────
-// Updates Total Qty/Available/Reserved/Unit Cost on existing MaterialType rows
-// picked from the catalogue (Storefront Config → Material Categories) — it
-// never creates a new Material or Type. Material Name/Category/Material Type/
-// Unit auto-fill from whichever catalogue Type is picked first; every further
-// Type added must belong to that same Material.
+// Updates Total Qty/Available/Reserved/Unit Cost/Reorder Level directly on
+// existing Material rows picked from the catalogue (Storefront Config →
+// Material Categories) — it never creates a new Material. Each catalogue hit
+// is already a specific, independent row (Material Name — item (dimension)),
+// so picking several unrelated hits in one go and saving them together is
+// fine; there is no shared parent to lock onto any more.
 interface StockRow {
-  key: string;
-  typeId: string;
+  id: string;
   name: string;
+  category: string;
+  classification: string;
   sku: string | null;
   unit: string;
   totalQty: string;
   availableQty: string;
   reservedQty: string;
   unitCost: string;
+  reorderLevel: string;
 }
 
 function AddMaterialModal({
@@ -274,17 +276,12 @@ function AddMaterialModal({
   onSaved,
 }: {
   onClose: () => void;
-  onSaved: (material: MaterialWithTypes) => void;
+  onSaved: (materials: MaterialSearchHit[]) => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [results, setResults] = useState<MaterialSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
-  const [materialId, setMaterialId] = useState<string | null>(null);
-  const [materialName, setMaterialName] = useState("");
-  const [category, setCategory] = useState("");
-  const [classification, setClassification] = useState("");
-  const [reorderLevel, setReorderLevel] = useState("0");
   const [rows, setRows] = useState<StockRow[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -297,84 +294,65 @@ function AddMaterialModal({
     }
     setSearching(true);
     const handle = setTimeout(() => {
-      searchMaterialTypes(q)
-        .then((hits) => {
-          // Once a Material is locked in, only offer Types from that same
-          // Material — every row in one submission has to share it.
-          setResults(materialId ? hits.filter((h) => h.material.id === materialId) : hits);
-        })
+      searchMaterials(q)
+        .then((hits) => setResults(hits))
         .catch(() => setResults([]))
         .finally(() => setSearching(false));
     }, 250);
     return () => clearTimeout(handle);
-  }, [query, materialId]);
+  }, [query]);
 
-  function pickResult(hit: MaterialTypeSearchResult) {
-    if (rows.some((r) => r.typeId === hit.id)) {
+  function pickResult(hit: MaterialSearchHit) {
+    if (rows.some((r) => r.id === hit.id)) {
       toast.error(`"${hit.name}" has already been added.`);
       return;
-    }
-    if (!materialId) {
-      setMaterialId(hit.material.id);
-      setMaterialName(hit.material.name);
-      setCategory(hit.material.category);
-      setClassification(hit.material.materialType);
-      setReorderLevel(String(hit.material.reorderLevel ?? 0));
     }
     setRows((prev) => [
       ...prev,
       {
-        key: `${hit.id}-${prev.length}`,
-        typeId: hit.id,
+        id: hit.id,
         name: hit.name,
-        sku: hit.sku,
-        unit: hit.unit,
+        category: hit.category,
+        classification: hit.materialType ?? "",
+        sku: hit.sku ?? null,
+        unit: hit.unit ?? "",
         totalQty: String(hit.totalQty ?? 0),
         availableQty: String(hit.availableQty ?? 0),
         reservedQty: String(hit.reservedQty ?? 0),
         unitCost: String(hit.unitCost ?? 0),
+        reorderLevel: String(hit.reorderLevel ?? 0),
       },
     ]);
     setQuery("");
     setResults([]);
   }
 
-  function removeRow(key: string) {
-    setRows((prev) => {
-      const next = prev.filter((r) => r.key !== key);
-      if (next.length === 0) {
-        setMaterialId(null);
-        setMaterialName("");
-        setCategory("");
-        setClassification("");
-      }
-      return next;
-    });
+  function removeRow(id: string) {
+    setRows((prev) => prev.filter((r) => r.id !== id));
   }
 
-  function updateRow(key: string, patch: Partial<StockRow>) {
-    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  function updateRow(id: string, patch: Partial<StockRow>) {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
-  const canSave = Boolean(materialId) && rows.length > 0 && !saving;
+  const canSave = rows.length > 0 && !saving;
 
   async function save() {
-    if (!materialId || rows.length === 0) return;
+    if (rows.length === 0) return;
     setSaving(true);
     try {
       const result = await applyMaterialStockUpdate({
-        materialId,
-        reorderLevel: Number(reorderLevel) || 0,
-        types: rows.map((r) => ({
-          typeId: r.typeId,
+        materials: rows.map((r) => ({
+          id: r.id,
           totalQty: Number(r.totalQty) || 0,
           availableQty: Number(r.availableQty) || 0,
           reservedQty: Number(r.reservedQty) || 0,
           unitCost: Number(r.unitCost) || 0,
+          reorderLevel: Number(r.reorderLevel) || 0,
         })),
       });
       onSaved(result);
-      toast.success(`"${materialName}" updated.`);
+      toast.success(`Updated stock for ${rows.length} material${rows.length > 1 ? "s" : ""}.`);
       onClose();
     } catch (err: any) {
       toast.error(err?.message || "Failed to update material stock.");
@@ -417,7 +395,7 @@ function AddMaterialModal({
               />
             </div>
             <p className="text-[11px] text-gray-400 mt-1">
-              Search matches material types; name, category and unit auto-fill from the chosen type.
+              Search matches the catalogue directly — pick as many independent materials as you need.
             </p>
             {query.trim() && (
               <div className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
@@ -425,8 +403,7 @@ function AddMaterialModal({
                   <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>
                 ) : results.length === 0 ? (
                   <p className="px-3 py-2 text-xs text-red-500">
-                    No matching material type found for "{query.trim()}"
-                    {materialId ? ` under ${materialName}` : ""}.
+                    No matching material found for "{query.trim()}".
                   </p>
                 ) : (
                   results.map((hit) => (
@@ -438,7 +415,7 @@ function AddMaterialModal({
                     >
                       <span className="font-medium text-gray-900">{hit.name}</span>{" "}
                       <span className="text-xs text-gray-400">
-                        {hit.material.name} · {hit.material.category}
+                        {hit.category}
                         {hit.sku ? ` · ${hit.sku}` : ""}
                       </span>
                     </button>
@@ -448,117 +425,68 @@ function AddMaterialModal({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Material Name
-              </label>
-              <input
-                value={materialName}
-                disabled
-                placeholder="Pick a type above"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Category
-              </label>
-              <input
-                value={category}
-                disabled
-                placeholder="—"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Material Type
-              </label>
-              <input
-                value={classification}
-                disabled
-                placeholder="—"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-gray-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Reorder Level
-              </label>
-              <input
-                type="number"
-                value={reorderLevel}
-                onChange={(e) => setReorderLevel(e.target.value)}
-                disabled={!materialId}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-gray-50 disabled:text-gray-400"
-              />
-            </div>
-          </div>
-
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="block text-xs font-medium text-gray-600">
-                Stock Types
+                Stock Entries
               </label>
               <button
                 type="button"
                 onClick={() => searchRef.current?.focus()}
                 className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800"
               >
-                <Plus className="w-3.5 h-3.5" /> Add Type
+                <Plus className="w-3.5 h-3.5" /> Add Material
               </button>
             </div>
             {rows.length === 0 ? (
               <p className="text-xs text-gray-400 italic">
-                Search the catalogue above and pick a type to add it here.
+                Search the catalogue above and pick a material to add it here.
               </p>
             ) : (
               <div className="space-y-3">
                 {rows.map((r) => (
-                  <div key={r.key} className="border border-gray-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
-                          Type Name
-                        </label>
-                        <input
-                          value={r.name}
-                          disabled
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
-                        />
+                  <div key={r.id} className="border border-gray-200 rounded-xl p-3 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900 text-sm">{r.name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {r.category}
+                          {r.classification ? ` · ${r.classification}` : ""}
+                          {r.sku ? ` · ${r.sku}` : ""}
+                        </p>
                       </div>
-                      <div className="flex-1">
-                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
-                          SKU
-                        </label>
-                        <input
-                          value={r.sku ?? ""}
-                          disabled
-                          placeholder="—"
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
-                        />
-                      </div>
-                      <div className="w-16">
+                      <button
+                        type="button"
+                        onClick={() => removeRow(r.id)}
+                        title="Remove material"
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
                         <label className="block text-[10px] font-medium text-gray-500 mb-1">
                           Unit
                         </label>
                         <input
                           value={r.unit}
-                          disabled
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-gray-50 text-gray-700"
+                          onChange={(e) => updateRow(r.id, { unit: e.target.value })}
+                          placeholder="e.g. bags"
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                         />
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeRow(r.key)}
-                        title="Remove type"
-                        className="self-end mb-1.5 p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div>
+                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
+                          Reorder Level
+                        </label>
+                        <input
+                          type="number"
+                          value={r.reorderLevel}
+                          onChange={(e) => updateRow(r.id, { reorderLevel: e.target.value })}
+                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                        />
+                      </div>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
                       {(
@@ -576,7 +504,7 @@ function AddMaterialModal({
                           <input
                             type="number"
                             value={r[key]}
-                            onChange={(e) => updateRow(r.key, { [key]: e.target.value })}
+                            onChange={(e) => updateRow(r.id, { [key]: e.target.value })}
                             className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                           />
                         </div>
@@ -588,7 +516,7 @@ function AddMaterialModal({
             )}
             {rows.length === 0 && (
               <p className="text-xs text-red-500 mt-2">
-                Search and select at least one material type from the catalogue to continue.
+                Search and select at least one material from the catalogue to continue.
               </p>
             )}
           </div>
@@ -604,7 +532,7 @@ function AddMaterialModal({
           <button
             onClick={() => void save()}
             disabled={!canSave}
-            title={canSave ? undefined : "Select at least one material type from the catalogue"}
+            title={canSave ? undefined : "Select at least one material from the catalogue"}
             className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {saving ? "Saving…" : "Add Material"}
@@ -1439,12 +1367,13 @@ export function AllMaterialsPage() {
       {showAddModal && (
         <AddMaterialModal
           onClose={() => setShowAddModal(false)}
-          onSaved={(updated) => {
+          onSaved={(updatedList) => {
             setMaterials((prev) => {
-              const idx = prev.findIndex((m) => m.id === updated.id);
-              if (idx === -1) return [...prev, toMaterial(updated)];
-              const next = [...prev];
-              next[idx] = toMaterial(updated);
+              let next = prev;
+              for (const updated of updatedList) {
+                const idx = next.findIndex((m) => m.id === updated.id);
+                next = idx === -1 ? [...next, toMaterial(updated)] : next.map((m, i) => (i === idx ? toMaterial(updated) : m));
+              }
               return next;
             });
           }}
