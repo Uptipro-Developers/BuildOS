@@ -262,6 +262,51 @@ describe('material categories', () => {
         prisma.materialCategory.delete.mockRejectedValueOnce(new Error('Record to delete does not exist.'));
         await expect(service.deleteMaterialCategory('missing')).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('adds new materials under an existing category without touching what is already there', async () => {
+        const { service, prisma } = makeService();
+        await service.addMaterialsToCategory('cat-1', {
+            materials: [
+                {
+                    name: 'Iron Rod',
+                    classification: 'Consumable',
+                    items: [{ name: 'Deformed Bar', sku: 'IR-DB', dimensions: [{ kind: 'Length', value: 12, unit: 'mm' }] }],
+                },
+            ],
+        });
+
+        expect(prisma.material.deleteMany).not.toHaveBeenCalled();
+        expect(prisma.material.create).toHaveBeenCalledTimes(1);
+        expect(prisma.material.create).toHaveBeenCalledWith({
+            data: {
+                categoryId: 'cat-1',
+                category: 'Concrete & Cement',
+                materialType: 'Consumable',
+                name: 'Iron Rod — Deformed Bar (12mm)',
+                materialGroupName: 'Iron Rod',
+                itemName: 'Deformed Bar',
+                sku: 'IR-DB',
+                kind: 'Length',
+                value: 12,
+                unit: 'mm',
+            },
+        });
+    });
+
+    it('refuses to add materials to a category that does not exist', async () => {
+        const { service, prisma } = makeService();
+        prisma.materialCategory.findUnique.mockResolvedValueOnce(null);
+        await expect(
+            service.addMaterialsToCategory('missing', {
+                materials: [{ name: 'Iron Rod', items: [{ name: 'Bar', dimensions: [{ kind: 'Length', value: 1, unit: 'm' }] }] }],
+            }),
+        ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('refuses when no valid material rows are submitted', async () => {
+        const { service } = makeService();
+        await expect(service.addMaterialsToCategory('cat-1', { materials: [] })).rejects.toBeInstanceOf(BadRequestException);
+    });
 });
 
 describe('All Materials — catalogue-aware stock entry', () => {

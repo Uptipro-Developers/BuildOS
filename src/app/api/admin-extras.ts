@@ -405,6 +405,9 @@ export const updateMaterialCategory = (id: string, data: Partial<MaterialCategor
     apiFetch<MaterialCategoryRecord>(`/admin/material-categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteMaterialCategory = (id: string) =>
     apiFetch<{ ok: boolean }>(`/admin/material-categories/${id}`, { method: 'DELETE' });
+/** Adds new materials under an existing category — everything already there is left untouched. */
+export const addMaterialsToCategory = (id: string, data: { materials: MaterialCatalogMaterialInput[] }) =>
+    apiFetch<MaterialCategoryRecord>(`/admin/material-categories/${id}/materials`, { method: 'POST', body: JSON.stringify(data) });
 
 // Notifications & Templates
 export const getEmailTemplates = () =>

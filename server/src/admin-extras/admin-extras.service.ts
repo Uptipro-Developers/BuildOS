@@ -3163,6 +3163,42 @@ export class AdminExtrasService {
     }
 
     /** Deleting a category orphans its materials (categoryId → null) rather than deleting them — they may carry real stock. */
+    /**
+     * All Materials → Add Material now searches by category rather than by
+     * catalogue item, then lets you add new materials under whichever
+     * category was picked. This only ever adds rows — every material
+     * already under the category (which may carry real stock) is left
+     * completely untouched.
+     */
+    async addMaterialsToCategory(categoryId: string, data: any) {
+        const category = await this.prisma.materialCategory.findUnique({ where: { id: categoryId } });
+        if (!category) throw new NotFoundException('Material category not found');
+
+        const rows = this.buildMaterialCreateInput(data?.materials);
+        if (rows.length === 0) {
+            throw new BadRequestException('At least one material with a name and a dimension is required');
+        }
+        this.logger.log(
+            `[MaterialCategory:addMaterials] adding ${rows.length} row(s) to categoryId=${categoryId} — ` +
+            rows.map((r) => r.name).join(', '),
+        );
+
+        await this.prisma.$transaction(async (tx) => {
+            for (const row of rows) {
+                await this.createCatalogueMaterialRow(tx, categoryId, category.name, row);
+            }
+        });
+
+        const result = await this.prisma.materialCategory.findUniqueOrThrow({
+            where: { id: categoryId },
+            include: this.materialCatalogInclude,
+        });
+        this.logger.log(
+            `[MaterialCategory:addMaterials] committed — categoryId=${categoryId} now has ${result.materials?.length ?? 0} material row(s)`,
+        );
+        return this.toPublicCategory(result);
+    }
+
     async deleteMaterialCategory(id: string) {
         this.logger.log(`[MaterialCategory:delete] request for id=${id}`);
         try {

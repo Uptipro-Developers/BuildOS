@@ -5,15 +5,24 @@ import {
   createMaterial,
   updateMaterial,
   deleteMaterial,
-  searchMaterials,
-  applyMaterialStockUpdate,
   getStores,
-  Material as MaterialSearchHit,
   Store,
   DIMENSION_UNITS,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
-import { getMaterialCategories } from "../../api/admin-extras";
+import {
+  getMaterialCategories,
+  addMaterialsToCategory,
+  MaterialCategoryRecord,
+  MaterialCatalogRowRecord,
+} from "../../api/admin-extras";
+import {
+  MaterialsBuilder,
+  findIncompleteMaterialRow,
+  materialsToPayload,
+  blankMaterial,
+  type MaterialFormRow,
+} from "../../components/MaterialsBuilder";
 import { toast } from "sonner";
 import {
   getCurrencySymbol,
@@ -249,111 +258,69 @@ function TrackModal({
 }
 
 // ── Add Material (catalogue-aware stock entry) ────────────────────────────────
-// Updates Total Qty/Available/Reserved/Unit Cost/Reorder Level directly on
-// existing Material rows picked from the catalogue (Storefront Config →
-// Material Categories) — it never creates a new Material. Each catalogue hit
-// is already a specific, independent row (Material Name — item (dimension)),
-// so picking several unrelated hits in one go and saving them together is
-// fine; there is no shared parent to lock onto any more.
-interface StockRow {
-  id: string;
-  name: string;
-  category: string;
-  classification: string;
-  sku: string | null;
-  unit: string;
-  totalQty: string;
-  availableQty: string;
-  reservedQty: string;
-  unitCost: string;
-  reorderLevel: string;
-}
-
+// Searches by category rather than by catalogue item — pick a category to
+// see the materials already under it (read-only; editing their stock lives
+// on the main table's per-row Edit action), then add new materials to that
+// same category using the same builder Storefront Config uses. This only
+// ever adds rows; every material already under the category (which may
+// carry real stock) is left completely untouched.
 function AddMaterialModal({
   onClose,
   onSaved,
 }: {
   onClose: () => void;
-  onSaved: (materials: MaterialSearchHit[]) => void;
+  onSaved: (materials: MaterialCatalogRowRecord[]) => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<MaterialSearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [rows, setRows] = useState<StockRow[]>([]);
+  const [categories, setCategories] = useState<MaterialCategoryRecord[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<MaterialCategoryRecord | null>(null);
+  const [materials, setMaterials] = useState<MaterialFormRow[]>([blankMaterial()]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const q = query.trim();
-    if (!q) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const handle = setTimeout(() => {
-      searchMaterials(q)
-        .then((hits) => setResults(hits))
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [query]);
+    getMaterialCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]))
+      .finally(() => setLoadingCategories(false));
+  }, []);
 
-  function pickResult(hit: MaterialSearchHit) {
-    if (rows.some((r) => r.id === hit.id)) {
-      toast.error(`"${hit.name}" has already been added.`);
-      return;
-    }
-    setRows((prev) => [
-      ...prev,
-      {
-        id: hit.id,
-        name: hit.name,
-        category: hit.category,
-        classification: hit.materialType ?? "",
-        sku: hit.sku ?? null,
-        unit: hit.unit ?? "",
-        totalQty: String(hit.totalQty ?? 0),
-        availableQty: String(hit.availableQty ?? 0),
-        reservedQty: String(hit.reservedQty ?? 0),
-        unitCost: String(hit.unitCost ?? 0),
-        reorderLevel: String(hit.reorderLevel ?? 0),
-      },
-    ]);
+  const q = query.trim().toLowerCase();
+  const results = q ? categories.filter((c) => c.name.toLowerCase().includes(q)) : [];
+
+  function pickCategory(c: MaterialCategoryRecord) {
+    setSelectedCategory(c);
     setQuery("");
-    setResults([]);
   }
 
-  function removeRow(id: string) {
-    setRows((prev) => prev.filter((r) => r.id !== id));
+  function changeCategory() {
+    setSelectedCategory(null);
+    setMaterials([blankMaterial()]);
   }
 
-  function updateRow(id: string, patch: Partial<StockRow>) {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  }
-
-  const canSave = rows.length > 0 && !saving;
+  const canSave = Boolean(selectedCategory) && !saving;
 
   async function save() {
-    if (rows.length === 0) return;
+    if (!selectedCategory) return;
+    const incomplete = findIncompleteMaterialRow(materials);
+    if (incomplete) {
+      toast.error(incomplete);
+      return;
+    }
+    const payload = materialsToPayload(materials);
+    if (payload.length === 0) {
+      toast.error("Add at least one material before saving.");
+      return;
+    }
     setSaving(true);
     try {
-      const result = await applyMaterialStockUpdate({
-        materials: rows.map((r) => ({
-          id: r.id,
-          totalQty: Number(r.totalQty) || 0,
-          availableQty: Number(r.availableQty) || 0,
-          reservedQty: Number(r.reservedQty) || 0,
-          unitCost: Number(r.unitCost) || 0,
-          reorderLevel: Number(r.reorderLevel) || 0,
-        })),
-      });
-      onSaved(result);
-      toast.success(`Updated stock for ${rows.length} material${rows.length > 1 ? "s" : ""}.`);
+      const updated = await addMaterialsToCategory(selectedCategory.id, { materials: payload });
+      onSaved(updated.materials);
+      toast.success(`Added new materials to "${selectedCategory.name}".`);
       onClose();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to update material stock.");
+      toast.error(err?.message || "Failed to add materials.");
     } finally {
       setSaving(false);
     }
@@ -361,12 +328,12 @@ function AddMaterialModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         <div className="px-6 py-5 border-b border-gray-100 flex items-start justify-between flex-shrink-0">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Add Material</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Pick a type from the catalogue to update its stock.
+              Search a category, then add new materials under it.
             </p>
           </div>
           <button
@@ -377,147 +344,126 @@ function AddMaterialModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Add from Catalogue
-            </label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by material type (e.g. Ordinary Portland Cement)…"
-                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500"
-              />
+        <div className="p-6 space-y-5 overflow-y-auto">
+          {!selectedCategory ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Search Category
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by category name…"
+                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              {query.trim() ? (
+                <div className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                  {loadingCategories ? (
+                    <p className="px-3 py-2 text-xs text-gray-400">Loading categories…</p>
+                  ) : results.length === 0 ? (
+                    <p className="px-3 py-2 text-xs text-red-500">
+                      No matching category found for "{query.trim()}".
+                    </p>
+                  ) : (
+                    results.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => pickCategory(c)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-teal-50 border-b border-gray-100 last:border-0"
+                      >
+                        <span className="font-medium text-gray-900">{c.name}</span>{" "}
+                        <span className="text-xs text-gray-400">
+                          {c.materials.length} material{c.materials.length === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic mt-2">
+                  Search and pick a category to see its materials and add new ones.
+                </p>
+              )}
             </div>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Search matches the catalogue directly — pick as many independent materials as you need.
-            </p>
-            {query.trim() && (
-              <div className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
-                {searching ? (
-                  <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>
-                ) : results.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-red-500">
-                    No matching material found for "{query.trim()}".
-                  </p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-gray-500">Category</p>
+                  <p className="text-sm font-semibold text-gray-900">{selectedCategory.name}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={changeCategory}
+                  className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800"
+                >
+                  Change category
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-2">
+                  Materials under {selectedCategory.name}
+                </label>
+                {selectedCategory.materials.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">No materials added yet.</p>
                 ) : (
-                  results.map((hit) => (
-                    <button
-                      key={hit.id}
-                      type="button"
-                      onClick={() => pickResult(hit)}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-teal-50 border-b border-gray-100 last:border-0"
-                    >
-                      <span className="font-medium text-gray-900">{hit.name}</span>{" "}
-                      <span className="text-xs text-gray-400">
-                        {hit.category}
-                        {hit.sku ? ` · ${hit.sku}` : ""}
-                      </span>
-                    </button>
-                  ))
+                  <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 text-gray-400 uppercase tracking-wide">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Name</th>
+                          <th className="px-3 py-2 text-left font-medium">Classification</th>
+                          <th className="px-3 py-2 text-left font-medium">SKU</th>
+                          <th className="px-3 py-2 text-left font-medium">Dimension</th>
+                          <th className="px-3 py-2 text-right font-medium">Total Qty</th>
+                          <th className="px-3 py-2 text-right font-medium">Available</th>
+                          <th className="px-3 py-2 text-right font-medium">Reserved</th>
+                          <th className="px-3 py-2 text-right font-medium">Unit Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {selectedCategory.materials.map((row) => (
+                          <tr key={row.id}>
+                            <td className="px-3 py-2 text-gray-900 font-medium">{row.name}</td>
+                            <td className="px-3 py-2 text-gray-600">{row.classification}</td>
+                            <td className="px-3 py-2 text-gray-600">{row.sku || "—"}</td>
+                            <td className="px-3 py-2 text-gray-600">
+                              {[row.value, row.unit, row.kind].filter(Boolean).join(" ") || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.totalQty)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.availableQty)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.reservedQty)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {getCurrencySymbol()}
+                              {formatNumberByGeneralSettings(row.unitCost)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
-            )}
-          </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-medium text-gray-600">
-                Stock Entries
-              </label>
-              <button
-                type="button"
-                onClick={() => searchRef.current?.focus()}
-                className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800"
-              >
-                <Plus className="w-3.5 h-3.5" /> Add Material
-              </button>
-            </div>
-            {rows.length === 0 ? (
-              <p className="text-xs text-gray-400 italic">
-                Search the catalogue above and pick a material to add it here.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {rows.map((r) => (
-                  <div key={r.id} className="border border-gray-200 rounded-xl p-3 space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium text-gray-900 text-sm">{r.name}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {r.category}
-                          {r.classification ? ` · ${r.classification}` : ""}
-                          {r.sku ? ` · ${r.sku}` : ""}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeRow(r.id)}
-                        title="Remove material"
-                        className="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
-                          Unit
-                        </label>
-                        <input
-                          value={r.unit}
-                          onChange={(e) => updateRow(r.id, { unit: e.target.value })}
-                          placeholder="e.g. bags"
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-medium text-gray-500 mb-1">
-                          Reorder Level
-                        </label>
-                        <input
-                          type="number"
-                          value={r.reorderLevel}
-                          onChange={(e) => updateRow(r.id, { reorderLevel: e.target.value })}
-                          className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      {(
-                        [
-                          ["totalQty", "Total Qty"],
-                          ["availableQty", "Available"],
-                          ["reservedQty", "Reserved"],
-                          ["unitCost", `Unit Cost ${getCurrencySymbol()}`],
-                        ] as const
-                      ).map(([key, label]) => (
-                        <div key={key}>
-                          <label className="block text-[10px] font-medium text-gray-500 mb-1">
-                            {label}
-                          </label>
-                          <input
-                            type="number"
-                            value={r[key]}
-                            onChange={(e) => updateRow(r.id, { [key]: e.target.value })}
-                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {rows.length === 0 && (
-              <p className="text-xs text-red-500 mt-2">
-                Search and select at least one material from the catalogue to continue.
-              </p>
-            )}
-          </div>
+              <MaterialsBuilder
+                materials={materials}
+                onChange={setMaterials}
+                title={`Add materials to ${selectedCategory.name}`}
+              />
+            </>
+          )}
         </div>
 
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
@@ -530,7 +476,7 @@ function AddMaterialModal({
           <button
             onClick={() => void save()}
             disabled={!canSave}
-            title={canSave ? undefined : "Select at least one material from the catalogue"}
+            title={canSave ? undefined : "Search and pick a category first"}
             className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {saving ? "Saving…" : "Add Material"}
