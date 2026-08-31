@@ -201,14 +201,14 @@ interface MRItem {
 }
 
 /**
- * Searches the MaterialType catalogue (the same rows the Storefront "Add
+ * Searches the Material catalogue (the same rows the Storefront "Add
  * Material" flow searches) and, once one is picked, hands its name and
  * stocking unit back to the caller. A free-text field let requesters type a
  * material that did not exist, or a spelling of one that did, and nothing
  * downstream could match it to stock — this constrains the request to the
  * real catalogue instead.
  */
-function MaterialTypeSearchField({
+function MaterialSearchField({
   selectedName,
   excludeNames,
   onPick,
@@ -548,7 +548,7 @@ function NewMRModal({
                   key={i}
                   className="grid grid-cols-[1fr_60px_80px_1fr_28px] gap-1.5 items-start"
                 >
-                  <MaterialTypeSearchField
+                  <MaterialSearchField
                     selectedName={item.material}
                     excludeNames={materialsOnOtherLines(i)}
                     onPick={(hit) => {

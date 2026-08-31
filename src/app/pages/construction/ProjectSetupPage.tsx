@@ -130,7 +130,7 @@ export function ProjectSetupPage() {
   // reference lookups there is no fixed list to hold in state; this just
   // remembers enough of what was seen to resolve a selected id back into a
   // full record when "Add Selected" is clicked.
-  const [materialTypeCache, setMaterialTypeCache] = useState<
+  const [materialSearchCache, setMaterialSearchCache] = useState<
     Record<string, MaterialSearchHit>
   >({});
   const [allTasks, setAllTasks] = useState<any[]>([]);
@@ -1285,7 +1285,7 @@ export function ProjectSetupPage() {
   /** Searches the Material catalogue for the "Select Materials" picker. */
   async function searchMaterialsForProject(query: string) {
     const hits = await searchMaterials(query);
-    setMaterialTypeCache((prev) => {
+    setMaterialSearchCache((prev) => {
       const next = { ...prev };
       for (const hit of hits) next[hit.id] = hit;
       return next;
@@ -1303,7 +1303,7 @@ export function ProjectSetupPage() {
     // server now, and a plain .map callback cannot await.
     const newMats: MaterialResource[] = await Promise.all(
       selectedMaterialIds.map(async (id) => {
-        const t = materialTypeCache[id];
+        const t = materialSearchCache[id];
         return {
           id: await allocate("Material"),
           projectId: projectId!,

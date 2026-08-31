@@ -880,12 +880,17 @@ model Material {
   /// for edit; not shown anywhere as its own field.
   materialGroupName String?
   itemName          String?
+  /// Which store this material is attached to — optional, set from the Edit
+  /// Material modal on the All Materials page. storeName is denormalised the
+  /// same way category/categoryId are, for display without a join.
+  storeId          String?
+  store            Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  storeName        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  types MaterialType[]
-
   @@index([categoryId])
+  @@index([storeId])
 }
 
 model MaterialCategory {
@@ -899,26 +904,6 @@ model MaterialCategory {
   materials Material[]
 }
 
-model MaterialType {
-  id           String   @id @default(cuid())
-  materialId   String
-  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
-  name         String
-  sku          String?
-  unit         String
-  totalQty     Float    @default(0)
-  availableQty Float    @default(0)
-  reservedQty  Float    @default(0)
-  unitCost     Float    @default(0)
-  /// Array of { kind, value, unit } — kind is one of Weight | Length | Width |
-  /// Breadth | Thickness | Area | Volume | Custom.
-  dimensions   Json     @default("[]")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@index([materialId])
-}
-
 model Store {
   id          String      @id @default(cuid())
   name        String
@@ -930,6 +915,7 @@ model Store {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   storeItems  StoreItem[]
+  materials   Material[]
 }
 
 model StoreItem {

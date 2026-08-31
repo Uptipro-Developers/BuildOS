@@ -1,18 +1,27 @@
 import { apiFetch } from './client';
 
+/** Shared stocking/dimension unit options — used by both the Storefront Config dimension builder and the All Materials Add/Edit modal, so a unit picked in one place reads the same way everywhere else. */
+export const DIMENSION_UNITS = [
+    'kg', 'g', 'tonne', 'mm', 'cm', 'm', 'inch', 'ft',
+    'm²', 'ft²', 'm³', 'L', 'bag', 'box', 'roll', 'sheet', 'pcs', 'set',
+];
+
 export interface Material {
     id: string; name: string; category: string; unit: string;
     totalQty: number; availableQty: number; reservedQty: number;
     unitCost: number; reorderLevel: number; materialType?: string;
     allocationStatus?: string; allocatedTo?: string; allocatedProject?: string;
     condition?: string; createdAt: string;
-    /** Catalog-created rows only — see MaterialType kind/value/unit; sku is the material item's. */
+    /** Catalog-created rows only — kind/value/unit are the dimension that produced this row; sku is the material item's. */
     sku?: string | null;
     kind?: string | null;
     value?: number | null;
     /** Pre-concatenation names (Storefront Config builder bookkeeping) — not usually shown directly. */
     materialGroupName?: string | null;
     itemName?: string | null;
+    /** Which store this material is attached to, set from the Edit Material modal. */
+    storeId?: string | null;
+    storeName?: string | null;
 }
 export interface Store {
     id: string; name: string; type: string; projectId?: string;
@@ -52,30 +61,6 @@ export interface MaterialReturn {
     fromStoreName: string; toStoreName: string; condition?: string;
     reason?: string; status: string; requestedBy?: string; approvedBy?: string;
     requestDate: string; approvedAt?: string;
-}
-
-/** One dimension entry stored on a MaterialType, e.g. { kind: "Weight", value: 50, unit: "kg" }. */
-export interface MaterialTypeDimension {
-    kind: string;
-    value: number | null;
-    unit: string | null;
-}
-
-/** A Type row as it lives on a Material — the thing that actually carries stock. */
-export interface MaterialTypeRow {
-    id: string;
-    name: string;
-    sku: string | null;
-    unit: string;
-    totalQty: number;
-    availableQty: number;
-    reservedQty: number;
-    unitCost: number;
-    dimensions: MaterialTypeDimension[];
-}
-
-export interface MaterialWithTypes extends Material {
-    types: MaterialTypeRow[];
 }
 
 export interface MaterialStockUpdateInput {

@@ -24,6 +24,7 @@ import {
   updateStore,
   deleteStore,
   Store as ApiStore,
+  DIMENSION_UNITS,
 } from "../../api/materials";
 import {
   getStoreLevels,
@@ -39,6 +40,7 @@ import {
   updateMaterialCategory,
   deleteMaterialCategory,
   MaterialCategoryRecord,
+  MaterialCatalogRowRecord,
 } from "../../api/admin-extras";
 import { getReferenceData } from "../../api/reference-data";
 import { useSearchParams } from "react-router";
@@ -1586,11 +1588,6 @@ const DIMENSION_KINDS = [
   "Custom",
 ];
 
-const DIMENSION_UNITS = [
-  "kg", "g", "tonne", "mm", "cm", "m", "inch", "ft",
-  "m²", "ft²", "m³", "L", "bag", "box", "roll", "sheet", "pcs", "set",
-];
-
 let catalogFormKeySeed = 0;
 function nextCatalogFormKey() {
   catalogFormKeySeed += 1;
@@ -1627,53 +1624,27 @@ function blankMaterial(): MaterialFormRow {
   return { key: nextCatalogFormKey(), name: "", classification: "Consumable", items: [blankItem()] };
 }
 
-/** One dimension of one material item, as displayed/edited — the real Material row backing it is `id`. */
-interface GroupedDimension {
-  id: string;
-  kind: string;
-  value: number | null;
-  unit: string | null;
-  totalQty: number;
-  availableQty: number;
-  reservedQty: number;
-  unitCost: number;
-}
-interface GroupedItem {
-  name: string;
-  sku: string | null;
-  dimensions: GroupedDimension[];
-}
-interface GroupedMaterial {
-  name: string;
-  classification: "Consumable" | "Reusable";
-  items: GroupedItem[];
-}
-interface MaterialCategory {
-  id: string;
-  name: string;
-  description: string | null;
-  color: string;
-  materials: GroupedMaterial[];
-}
-
 /**
  * The backend stores every dimension of every material item as its own flat
- * Material row (no Type table underneath a Material any more) — this
- * regroups that flat list back into the Material -> item -> dimension tree
- * the builder and the read-only category view both work with, using
- * `materialGroupName`/`itemName` to know which rows belong together.
+ * Material row (no Type table underneath a Material any more) — the category
+ * list and its expanded view show that flat list directly, one card per row,
+ * using each row's own (already-concatenated) name. Only the builder, when
+ * reopening a category to edit it, needs the original Material Name -> item
+ * -> dimension tree back — this regroups the flat rows into that shape for
+ * that one purpose, using `materialGroupName`/`itemName` to know which rows
+ * belong together.
  */
-function normalizeCategoryRecord(c: MaterialCategoryRecord): MaterialCategory {
-  const materials: GroupedMaterial[] = [];
-  const materialIndex = new Map<string, GroupedMaterial>();
-  const itemIndex = new Map<string, GroupedItem>();
-  for (const row of c.materials ?? []) {
+function buildEditMaterials(rows: MaterialCatalogRowRecord[]): MaterialFormRow[] {
+  const materials: MaterialFormRow[] = [];
+  const materialIndex = new Map<string, MaterialFormRow>();
+  const itemIndex = new Map<string, ItemFormRow>();
+  for (const row of rows) {
     const materialName = row.materialGroupName ?? row.name;
     const classification = row.classification === "Reusable" ? "Reusable" : "Consumable";
     const materialKey = `${materialName}::${classification}`;
     let material = materialIndex.get(materialKey);
     if (!material) {
-      material = { name: materialName, classification, items: [] };
+      material = { key: nextCatalogFormKey(), name: materialName, classification, items: [] };
       materialIndex.set(materialKey, material);
       materials.push(material);
     }
@@ -1682,30 +1653,26 @@ function normalizeCategoryRecord(c: MaterialCategoryRecord): MaterialCategory {
     const itemKey = `${materialKey}::${itemName}`;
     let item = itemIndex.get(itemKey);
     if (!item) {
-      item = { name: itemName, sku: row.sku ?? null, dimensions: [] };
+      item = { key: nextCatalogFormKey(), name: itemName, sku: row.sku || "", dimensions: [] };
       itemIndex.set(itemKey, item);
       material.items.push(item);
     }
 
     item.dimensions.push({
-      id: row.id,
+      key: nextCatalogFormKey(),
       kind: row.kind ?? "",
-      value: row.value ?? null,
-      unit: row.unit ?? null,
-      totalQty: row.totalQty,
-      availableQty: row.availableQty,
-      reservedQty: row.reservedQty,
-      unitCost: row.unitCost,
+      value: row.value == null ? "" : String(row.value),
+      unit: row.unit || "",
     });
   }
-  return { id: c.id, name: c.name, description: c.description, color: c.color, materials };
+  return materials;
 }
 
 function MaterialCategoriesPanel() {
-  const [categories, setCategories] = useState<MaterialCategory[]>([]);
+  const [categories, setCategories] = useState<MaterialCategoryRecord[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<MaterialCategory | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<MaterialCategory | null>(null);
+  const [editing, setEditing] = useState<MaterialCategoryRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MaterialCategoryRecord | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", description: "", color: "teal" });
   const [materials, setMaterials] = useState<MaterialFormRow[]>([]);
@@ -1716,7 +1683,7 @@ function MaterialCategoriesPanel() {
     getMaterialCategories()
       .then((data) => {
         console.log("[MaterialCategory:load] server returned", data);
-        setCategories((data ?? []).map(normalizeCategoryRecord));
+        setCategories(data ?? []);
       })
       .catch((err) => {
         console.error("[MaterialCategory:load] failed", err);
@@ -1731,33 +1698,11 @@ function MaterialCategoriesPanel() {
     setShowModal(true);
   }
 
-  function openEdit(c: MaterialCategory) {
+  function openEdit(c: MaterialCategoryRecord) {
     setEditing(c);
     setForm({ name: c.name, description: c.description || "", color: c.color });
-    setMaterials(
-      c.materials.length
-        ? c.materials.map((m) => ({
-          key: nextCatalogFormKey(),
-          name: m.name,
-          classification: m.classification,
-          items: m.items.length
-            ? m.items.map((it) => ({
-              key: nextCatalogFormKey(),
-              name: it.name,
-              sku: it.sku || "",
-              dimensions: it.dimensions.length
-                ? it.dimensions.map((d) => ({
-                  key: nextCatalogFormKey(),
-                  kind: d.kind,
-                  value: d.value == null ? "" : String(d.value),
-                  unit: d.unit || "",
-                }))
-                : [blankDimension()],
-            }))
-            : [blankItem()],
-        }))
-        : [blankMaterial()],
-    );
+    const built = buildEditMaterials(c.materials ?? []);
+    setMaterials(built.length ? built : [blankMaterial()]);
     setShowModal(true);
   }
 
@@ -1912,12 +1857,12 @@ function MaterialCategoriesPanel() {
         payload,
       );
       if (editing) {
-        const updated = normalizeCategoryRecord(await updateMaterialCategory(editing.id, payload));
+        const updated = await updateMaterialCategory(editing.id, payload);
         console.log("[MaterialCategory:save] server responded (update)", updated);
         setCategories((prev) => prev.map((c) => (c.id === editing.id ? updated : c)));
         toast.success("Category updated");
       } else {
-        const created = normalizeCategoryRecord(await createMaterialCategory(payload));
+        const created = await createMaterialCategory(payload);
         console.log("[MaterialCategory:save] server responded (create)", created);
         setCategories((prev) => [...prev, created]);
         toast.success("Category added");
@@ -1948,10 +1893,6 @@ function MaterialCategoriesPanel() {
     }
   }
 
-  const totalTypes = categories.reduce(
-    (sum, c) => sum + c.materials.reduce((s, m) => s + m.items.length, 0),
-    0,
-  );
   const totalMaterials = categories.reduce((sum, c) => sum + c.materials.length, 0);
   const totalReusable = categories.reduce(
     (sum, c) => sum + c.materials.filter((m) => m.classification === "Reusable").length,
@@ -1961,7 +1902,7 @@ function MaterialCategoriesPanel() {
   return (
     <div className="space-y-4">
       {/* Summary tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center">
           <p className="text-2xl font-bold text-teal-700">{categories.length}</p>
           <p className="text-xs text-gray-500 mt-0.5">Total Categories</p>
@@ -1973,10 +1914,6 @@ function MaterialCategoriesPanel() {
         <div className="bg-purple-50 border border-transparent rounded-xl p-4 text-center">
           <p className="text-2xl font-bold text-purple-700">{totalReusable}</p>
           <p className="text-xs text-purple-700/80 mt-0.5">Reusable</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4 text-center">
-          <p className="text-2xl font-bold text-teal-700">{totalTypes}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Total Types</p>
         </div>
       </div>
 
@@ -2003,7 +1940,6 @@ function MaterialCategoriesPanel() {
           <tbody className="divide-y divide-gray-50">
             {categories.map((c) => {
               const cls = COLOR_CLASSES[c.color] ?? COLOR_CLASSES.gray;
-              const typeCount = c.materials.reduce((s, m) => s + m.items.length, 0);
               const isExpanded = expanded === c.id;
               return (
                 <Fragment key={c.id}>
@@ -2024,8 +1960,7 @@ function MaterialCategoriesPanel() {
                         ) : (
                           <ChevronRight className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
                         )}
-                        {c.materials.length} material{c.materials.length === 1 ? "" : "s"} ·{" "}
-                        {typeCount} type{typeCount === 1 ? "" : "s"}
+                        {c.materials.length} material{c.materials.length === 1 ? "" : "s"}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -2062,42 +1997,26 @@ function MaterialCategoriesPanel() {
                           <p className="text-xs text-gray-400 italic">No materials added yet.</p>
                         ) : (
                           <div className="space-y-2">
-                            {c.materials.map((m) => (
-                              <div key={`${m.name}::${m.classification}`} className="bg-white border border-gray-200 rounded-lg p-3">
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-semibold text-gray-900">{m.name}</span>
-                                    <span
-                                      className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${m.classification === "Reusable" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}
-                                    >
-                                      {m.classification}
-                                    </span>
-                                  </div>
-                                  <span className="text-xs text-gray-400 flex-shrink-0">
-                                    {m.items.length} item{m.items.length === 1 ? "" : "s"}
+                            {c.materials.map((row) => (
+                              <div
+                                key={row.id}
+                                className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-2 flex-wrap"
+                              >
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Package className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+                                  <span className="text-sm font-medium text-gray-900">{row.name}</span>
+                                  <span
+                                    className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${row.classification === "Reusable" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}
+                                  >
+                                    {row.classification}
                                   </span>
+                                  {row.sku && (
+                                    <span className="text-[10px] tracking-wide text-gray-400">{row.sku}</span>
+                                  )}
                                 </div>
-                                {m.items.length > 0 && (
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    {m.items.map((it) => (
-                                      <span
-                                        key={it.name}
-                                        className="inline-flex items-center gap-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1"
-                                      >
-                                        <Package className="w-3 h-3 text-teal-600" />
-                                        <span className="font-medium text-gray-700">{it.name}</span>
-                                        {it.dimensions.map((d) => (
-                                          <span key={d.id} className="text-gray-400">
-                                            {[d.value, d.unit, d.kind].filter(Boolean).join(" ")}
-                                          </span>
-                                        ))}
-                                        {it.sku && (
-                                          <span className="text-[10px] tracking-wide text-gray-400">{it.sku}</span>
-                                        )}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
+                                <span className="text-xs text-gray-400 flex-shrink-0">
+                                  {[row.value, row.unit, row.kind].filter(Boolean).join(" ")}
+                                </span>
                               </div>
                             ))}
                           </div>
@@ -2378,8 +2297,8 @@ function MaterialCategoriesPanel() {
             <p className="text-sm text-gray-600">
               Remove <span className="font-semibold">{deleteTarget.name}</span>?
               Its {deleteTarget.materials.length} material
-              {deleteTarget.materials.length === 1 ? "" : "s"} and all their
-              items will be removed too.
+              {deleteTarget.materials.length === 1 ? "" : "s"} will no longer
+              be linked to a category.
             </p>
             <div className="flex justify-end gap-3">
               <button
