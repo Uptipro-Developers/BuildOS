@@ -418,6 +418,11 @@ export class AdminExtrasController {
     @Patch('material-categories/:id')
     updateMaterialCategory(@Param('id') id: string, @Body() body: any) { return this.svc.updateMaterialCategory(id, body); }
 
+    // All Materials → Add Material: adds new materials under an existing
+    // category without touching what's already there.
+    @Post('material-categories/:id/materials')
+    addMaterialsToCategory(@Param('id') id: string, @Body() body: any) { return this.svc.addMaterialsToCategory(id, body); }
+
     @Delete('material-categories/:id')
     deleteMaterialCategory(@Param('id') id: string) { return this.svc.deleteMaterialCategory(id); }
 

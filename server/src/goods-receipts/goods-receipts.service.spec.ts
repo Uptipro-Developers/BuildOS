@@ -88,7 +88,17 @@ function makeService(fx: Fixtures = {}) {
             }),
         },
         material: {
-            findFirst: jest.fn(() => Promise.resolve(fx.material ?? null)),
+            // A material must already exist in the catalogue for accept() to post
+            // to it — defaults to one matching the fixture GRN's line so most
+            // tests exercise the update path; pass fx.material: null to test the
+            // no-match rejection.
+            findFirst: jest.fn(() =>
+                Promise.resolve(
+                    fx.material !== undefined
+                        ? fx.material
+                        : { id: 'mat-1', name: 'OPC Cement', category: 'Cement', totalQty: 0, availableQty: 0, unitCost: 8000 },
+                ),
+            ),
             update: jest.fn(({ data }: any) => {
                 writes.materialUpdate.push(data);
                 return Promise.resolve(data);
@@ -327,6 +337,12 @@ describe('accepting a record', () => {
     it('refuses to accept a record with no decision pending', async () => {
         const { service } = makeService({ grn: { status: 'pending' } });
         await expect(service.accept('grn-1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses to post a line whose material is not already in the catalogue, rather than inventing a new one', async () => {
+        const { service, writes } = makeService({ grn: pendingGrn(), material: null });
+        await expect(service.accept('grn-1')).rejects.toBeInstanceOf(BadRequestException);
+        expect(writes.materialCreate).toHaveLength(0);
     });
 
     it('posts the newly accepted quantity to stock and folds it into the cumulative totals', async () => {

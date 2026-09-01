@@ -50,8 +50,8 @@ import { fetchEmployees } from "../../api/employees";
 import { fetchSuppliers } from "../../api/suppliers";
 import {
   createMaterialRequest,
-  searchMaterialTypes,
-  MaterialTypeSearchResult,
+  searchMaterials,
+  Material as MaterialSearchHit,
 } from "../../api/materials";
 import { getProjectSectors, type ProjectSector } from "../../api/construction-settings";
 import { useConstructionSettings } from "../../utils/useConstructionSettings";
@@ -125,13 +125,13 @@ export function ProjectSetupPage() {
   const [staffList, setStaffList] = useState<string[]>([]);
   const [hrEmployees, setHrEmployees] = useState<any[]>([]);
   const [allVendors, setAllVendors] = useState<any[]>([]);
-  // Every MaterialType hit ever returned by the Materials search, keyed by
-  // id — the search itself is server-side (searchMaterialTypes), so unlike
-  // the other reference lookups there is no fixed list to hold in state;
-  // this just remembers enough of what was seen to resolve a selected id
-  // back into a full record when "Add Selected" is clicked.
-  const [materialTypeCache, setMaterialTypeCache] = useState<
-    Record<string, MaterialTypeSearchResult>
+  // Every Material hit ever returned by the Materials search, keyed by id —
+  // the search itself is server-side (searchMaterials), so unlike the other
+  // reference lookups there is no fixed list to hold in state; this just
+  // remembers enough of what was seen to resolve a selected id back into a
+  // full record when "Add Selected" is clicked.
+  const [materialSearchCache, setMaterialSearchCache] = useState<
+    Record<string, MaterialSearchHit>
   >({});
   const [allTasks, setAllTasks] = useState<any[]>([]);
   const [clusters, setClusters] = useState<string[]>([]);
@@ -1282,10 +1282,10 @@ export function ProjectSetupPage() {
     setProjectContractors((prev) => prev.filter((c) => c.id !== id));
 
   // Material helpers
-  /** Searches the MaterialType catalogue for the "Select Materials" picker. */
+  /** Searches the Material catalogue for the "Select Materials" picker. */
   async function searchMaterialsForProject(query: string) {
-    const hits = await searchMaterialTypes(query);
-    setMaterialTypeCache((prev) => {
+    const hits = await searchMaterials(query);
+    setMaterialSearchCache((prev) => {
       const next = { ...prev };
       for (const hit of hits) next[hit.id] = hit;
       return next;
@@ -1293,7 +1293,7 @@ export function ProjectSetupPage() {
     return hits.map((hit) => ({
       label: `${hit.name} (${hit.availableQty} ${hit.unit} in stock) — ${getCurrencySymbol()}${formatNumberByGeneralSettings(hit.unitCost)}/${hit.unit}`,
       value: hit.id,
-      group: hit.material.category,
+      group: hit.category,
     }));
   }
 
@@ -1303,12 +1303,12 @@ export function ProjectSetupPage() {
     // server now, and a plain .map callback cannot await.
     const newMats: MaterialResource[] = await Promise.all(
       selectedMaterialIds.map(async (id) => {
-        const t = materialTypeCache[id];
+        const t = materialSearchCache[id];
         return {
           id: await allocate("Material"),
           projectId: projectId!,
           name: t?.name || "Unknown",
-          category: t?.material.category || "",
+          category: t?.category || "",
           unit: t?.unit || "",
           estimatedQty: 1,
           estimatedUnitCost: t?.unitCost || 0,
@@ -1410,10 +1410,10 @@ export function ProjectSetupPage() {
               >
                 <div
                   className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${isCompleted
-                      ? "bg-green-500 text-white"
-                      : isCurrent
-                        ? "text-white"
-                        : "bg-gray-200 text-gray-500"
+                    ? "bg-green-500 text-white"
+                    : isCurrent
+                      ? "text-white"
+                      : "bg-gray-200 text-gray-500"
                     }`}
                   style={
                     isCurrent && !isCompleted
@@ -1429,10 +1429,10 @@ export function ProjectSetupPage() {
                 </div>
                 <span
                   className={`text-xs font-medium whitespace-nowrap ${isCompleted
-                      ? "text-green-600"
-                      : isCurrent
-                        ? "font-semibold"
-                        : "text-gray-400"
+                    ? "text-green-600"
+                    : isCurrent
+                      ? "font-semibold"
+                      : "text-gray-400"
                     }`}
                   style={isCurrent && !isCompleted ? { color: "#E8973A" } : {}}
                 >
@@ -1489,8 +1489,8 @@ export function ProjectSetupPage() {
                     setProjectCategory("");
                   }}
                   className={`text-left px-4 py-3 rounded-xl border text-sm font-medium transition-all ${selected
-                      ? "text-white border-transparent"
-                      : "hover:border-gray-300"
+                    ? "text-white border-transparent"
+                    : "hover:border-gray-300"
                     }`}
                   style={{
                     backgroundColor: selected ? "#E8973A" : "white",
@@ -1522,8 +1522,8 @@ export function ProjectSetupPage() {
                     key={c}
                     onClick={() => setProjectCategory(c)}
                     className={`text-left px-4 py-2.5 rounded-lg border text-sm transition-all ${selected
-                        ? "text-white border-transparent"
-                        : "hover:bg-gray-50"
+                      ? "text-white border-transparent"
+                      : "hover:bg-gray-50"
                       }`}
                     style={{
                       backgroundColor: selected ? "#E8973A" : "white",
@@ -1853,8 +1853,8 @@ export function ProjectSetupPage() {
                   setBasicInfo({ ...basicInfo, contractingModel: opt.value })
                 }
                 className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium text-left transition-colors ${basicInfo.contractingModel === opt.value
-                    ? "bg-amber-50 border-amber-400 text-amber-700"
-                    : "hover:bg-gray-50 text-gray-600"
+                  ? "bg-amber-50 border-amber-400 text-amber-700"
+                  : "hover:bg-gray-50 text-gray-600"
                   }`}
               >
                 <span className="block font-semibold">{opt.label}</span>
@@ -2267,8 +2267,8 @@ export function ProjectSetupPage() {
                     key={id || "all"}
                     onClick={() => setStructureFilter(id)}
                     className={`px-2 py-1 rounded text-[10px] font-medium border transition-colors ${(id ? structureFilter === id : !structureFilter)
-                        ? "bg-gray-100 text-gray-700 border-gray-200"
-                        : "bg-white text-gray-600 hover:bg-gray-50"
+                      ? "bg-gray-100 text-gray-700 border-gray-200"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
                       }`}
                     style={{ borderColor: "#E2E8F0" }}
                   >
@@ -2820,12 +2820,12 @@ export function ProjectSetupPage() {
                               })
                             }
                             className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${assignForm.resourceType === rt
-                                ? rt === "human"
-                                  ? "bg-blue-50 border-blue-400 text-blue-700"
-                                  : rt === "material"
-                                    ? "bg-green-50 border-green-400 text-green-700"
-                                    : "bg-amber-50 border-amber-400 text-amber-700"
-                                : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
+                              ? rt === "human"
+                                ? "bg-blue-50 border-blue-400 text-blue-700"
+                                : rt === "material"
+                                  ? "bg-green-50 border-green-400 text-green-700"
+                                  : "bg-amber-50 border-amber-400 text-amber-700"
+                              : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
                               }`}
                           >
                             {rt === "human"
@@ -3111,8 +3111,8 @@ export function ProjectSetupPage() {
       <button
         onClick={() => setHumanSubType(value)}
         className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${humanSubType === value
-            ? "bg-white text-gray-900 shadow-sm border"
-            : "text-gray-500 hover:text-gray-700 border border-transparent"
+          ? "bg-white text-gray-900 shadow-sm border"
+          : "text-gray-500 hover:text-gray-700 border border-transparent"
           }`}
       >
         {label}
@@ -3772,8 +3772,8 @@ export function ProjectSetupPage() {
                                     <button
                                       onClick={() => assignMainContractor(v.id)}
                                       className={`px-2 py-1 rounded text-[10px] font-medium border hover:bg-blue-50 ${v.isMainContractor
-                                          ? "bg-blue-100 text-blue-700 border-blue-200"
-                                          : "text-blue-600"
+                                        ? "bg-blue-100 text-blue-700 border-blue-200"
+                                        : "text-blue-600"
                                         }`}
                                       style={{
                                         borderColor: v.isMainContractor
@@ -4527,8 +4527,8 @@ export function ProjectSetupPage() {
                           key={opt}
                           onClick={() => setExternalEquipType(opt)}
                           className={`px-3 py-2 rounded-lg border text-sm font-medium text-left transition-colors ${externalEquipType === opt
-                              ? "bg-amber-50 border-amber-400 text-amber-700"
-                              : "hover:bg-gray-50"
+                            ? "bg-amber-50 border-amber-400 text-amber-700"
+                            : "hover:bg-gray-50"
                             }`}
                         >
                           {opt === "client-supplied"
@@ -4715,8 +4715,8 @@ export function ProjectSetupPage() {
                   key={mode}
                   onClick={() => setReportContributorMode(mode)}
                   className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${reportContributorMode === mode
-                      ? "bg-amber-50 border-amber-400 text-amber-700"
-                      : "hover:bg-gray-50 text-gray-600"
+                    ? "bg-amber-50 border-amber-400 text-amber-700"
+                    : "hover:bg-gray-50 text-gray-600"
                     }`}
                 >
                   {mode === "employees-only"
@@ -4751,8 +4751,8 @@ export function ProjectSetupPage() {
                         )
                       }
                       className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-colors ${selected
-                          ? "bg-blue-50 border-blue-300 text-blue-700"
-                          : "hover:bg-gray-50 text-gray-600"
+                        ? "bg-blue-50 border-blue-300 text-blue-700"
+                        : "hover:bg-gray-50 text-gray-600"
                         }`}
                     >
                       {s.name}
@@ -4796,8 +4796,8 @@ export function ProjectSetupPage() {
                           )
                         }
                         className={`px-2 py-1 rounded-lg text-[10px] font-medium border transition-colors ${selected
-                            ? "bg-orange-50 border-orange-300 text-orange-700"
-                            : "hover:bg-gray-50 text-gray-600"
+                          ? "bg-orange-50 border-orange-300 text-orange-700"
+                          : "hover:bg-gray-50 text-gray-600"
                           }`}
                       >
                         {r.fullName} ({r.vendorName})
@@ -4956,8 +4956,8 @@ export function ProjectSetupPage() {
                   key={label}
                   onClick={() => toggleDay(dayIdx)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${active
-                      ? "text-white border-transparent"
-                      : "text-gray-500 bg-white"
+                    ? "text-white border-transparent"
+                    : "text-gray-500 bg-white"
                     }`}
                   style={{
                     backgroundColor: active ? "#E8973A" : undefined,

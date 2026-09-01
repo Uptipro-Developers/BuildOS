@@ -1,0 +1,11 @@
+-- Material.unit has been nullable at the database level since
+-- 20260821100000_material_type_catalog, and the schema has agreed ever
+-- since -- but some rows already sitting in the table (the older
+-- Category -> Material -> Type flow never set a unit on the parent
+-- Material row, and some legacy rows may not have one either) still carry
+-- NULL there. If the currently-running Prisma Client's generated types
+-- disagree with the schema about that column's nullability, reading any
+-- one of those NULL rows back fails the whole list query. Backfilling to
+-- an empty string removes every NULL from the column, so retrieval works
+-- regardless of that mismatch.
+UPDATE "Material" SET "unit" = '' WHERE "unit" IS NULL;

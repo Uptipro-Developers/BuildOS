@@ -9,9 +9,9 @@ import {
   createMaterialRequest,
   updateMaterialRequest,
   getStores,
-  searchMaterialTypes,
+  searchMaterials,
   MaterialRequest as ApiMR,
-  MaterialTypeSearchResult,
+  Material as MaterialSearchHit,
 } from "../../api/materials";
 import {
   formatDateByGeneralSettings,
@@ -201,14 +201,14 @@ interface MRItem {
 }
 
 /**
- * Searches the MaterialType catalogue (the same rows the Storefront "Add
+ * Searches the Material catalogue (the same rows the Storefront "Add
  * Material" flow searches) and, once one is picked, hands its name and
  * stocking unit back to the caller. A free-text field let requesters type a
  * material that did not exist, or a spelling of one that did, and nothing
  * downstream could match it to stock — this constrains the request to the
  * real catalogue instead.
  */
-function MaterialTypeSearchField({
+function MaterialSearchField({
   selectedName,
   excludeNames,
   onPick,
@@ -216,11 +216,11 @@ function MaterialTypeSearchField({
 }: {
   selectedName: string;
   excludeNames: Set<string>;
-  onPick: (hit: MaterialTypeSearchResult) => void;
+  onPick: (hit: MaterialSearchHit) => void;
   onClear: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<MaterialTypeSearchResult[]>([]);
+  const [results, setResults] = useState<MaterialSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
@@ -232,7 +232,7 @@ function MaterialTypeSearchField({
     }
     setSearching(true);
     const handle = setTimeout(() => {
-      searchMaterialTypes(q)
+      searchMaterials(q)
         .then((hits) => setResults(hits.filter((h) => !excludeNames.has(h.name))))
         .catch(() => setResults([]))
         .finally(() => setSearching(false));
@@ -293,7 +293,7 @@ function MaterialTypeSearchField({
               >
                 <span className="font-medium text-gray-900">{hit.name}</span>{" "}
                 <span className="text-xs text-gray-400">
-                  {hit.material.name} · {hit.material.category}
+                  {hit.category}
                   {hit.sku ? ` · ${hit.sku}` : ""}
                 </span>
               </button>
@@ -548,7 +548,7 @@ function NewMRModal({
                   key={i}
                   className="grid grid-cols-[1fr_60px_80px_1fr_28px] gap-1.5 items-start"
                 >
-                  <MaterialTypeSearchField
+                  <MaterialSearchField
                     selectedName={item.material}
                     excludeNames={materialsOnOtherLines(i)}
                     onPick={(hit) => {
