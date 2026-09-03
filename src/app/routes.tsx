@@ -13,6 +13,7 @@ import { ActivateInvitePage } from "./pages/auth/ActivateInvitePage";
 import { ResetPasswordPage } from "./pages/auth/ResetPasswordPage";
 
 // App Launcher
+import { LandingPage } from "./pages/LandingPage";
 import { AppLauncherPage } from "./pages/AppLauncherPage";
 
 /**
@@ -482,7 +483,7 @@ export const router = createBrowserRouter([
           },
         ],
       },
-      { index: true, Component: LoginPage },
+      { index: true, Component: LandingPage },
     ],
   },
 ]);
