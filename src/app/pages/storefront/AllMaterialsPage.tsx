@@ -19,6 +19,7 @@ import {
 import {
   MaterialsBuilder,
   findIncompleteMaterialRow,
+  isMaterialsComplete,
   materialsToPayload,
   blankMaterial,
   type MaterialFormRow,
@@ -299,7 +300,10 @@ function AddMaterialModal({
     setMaterials([blankMaterial()]);
   }
 
-  const canSave = Boolean(selectedCategory) && !saving;
+  const materialsComplete = isMaterialsComplete(materials);
+  const hasAtLeastOneMaterial = materials.some((m) => m.name.trim());
+  const canSave =
+    Boolean(selectedCategory) && !saving && materialsComplete && hasAtLeastOneMaterial;
 
   async function save() {
     if (!selectedCategory) return;
@@ -476,7 +480,15 @@ function AddMaterialModal({
           <button
             onClick={() => void save()}
             disabled={!canSave}
-            title={canSave ? undefined : "Search and pick a category first"}
+            title={
+              !selectedCategory
+                ? "Search and pick a category first"
+                : !hasAtLeastOneMaterial
+                  ? "Add at least one material before saving"
+                  : !materialsComplete
+                    ? "Fill in or remove every incomplete material, item and dimension"
+                    : undefined
+            }
             className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {saving ? "Saving…" : "Add Material"}
