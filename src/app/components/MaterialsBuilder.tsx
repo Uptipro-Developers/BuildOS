@@ -80,9 +80,35 @@ export function findIncompleteMaterialRow(materials: MaterialFormRow[]): string 
             if (it.dimensions.length === 0) {
                 return `"${itemName}" under "${materialName}" needs at least one dimension before it can be saved.`;
             }
+            for (const d of it.dimensions) {
+                if (!d.kind || d.value.trim() === "" || !d.unit) {
+                    return `"${itemName}" under "${materialName}" has a dimension missing a value or a unit.`;
+                }
+            }
         }
     }
     return null;
+}
+
+/**
+ * True only when every material/item/dimension row currently sitting in the
+ * builder is fully filled in — a material with no name, an item with no
+ * name, an item with no dimension, or a dimension missing a value or unit
+ * all make this false. Drives the save button's disabled state so a half
+ * -finished row can never be left in place: it must be completed or
+ * removed with its trash/X button before saving is possible. An empty
+ * builder (no materials at all) is complete — materials are optional.
+ */
+export function isMaterialsComplete(materials: MaterialFormRow[]): boolean {
+    return materials.every((m) => {
+        if (!m.name.trim()) return false;
+        if (m.items.length === 0) return false;
+        return m.items.every((it) => {
+            if (!it.name.trim()) return false;
+            if (it.dimensions.length === 0) return false;
+            return it.dimensions.every((d) => d.kind && d.value.trim() !== "" && Boolean(d.unit));
+        });
+    });
 }
 
 /** Trims and drops blank rows, shaping the builder's state into the wire payload the backend expects. */
@@ -240,6 +266,9 @@ export function MaterialsBuilder({
                                     placeholder="e.g. Granite Tiles"
                                     className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                 />
+                                {!m.name.trim() && (
+                                    <p className="text-[11px] text-red-500 mt-1">Material name is required.</p>
+                                )}
                             </div>
                             <div className="w-40">
                                 <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -313,11 +342,20 @@ export function MaterialsBuilder({
                                             </button>
                                         </div>
 
+                                        {!it.name.trim() && (
+                                            <p className="text-[11px] text-red-500">Item name is required.</p>
+                                        )}
                                         {it.dimensions.length === 0 && (
                                             <p className="text-[11px] text-red-500">
                                                 Needs at least one dimension.
                                             </p>
                                         )}
+                                        {it.dimensions.length > 0 &&
+                                            it.dimensions.some((d) => !d.kind || d.value.trim() === "" || !d.unit) && (
+                                                <p className="text-[11px] text-red-500">
+                                                    Every dimension needs a value and a unit.
+                                                </p>
+                                            )}
                                         {it.dimensions.map((d) => (
                                             <div key={d.key} className="flex flex-wrap items-center gap-2">
                                                 <select
