@@ -64,6 +64,8 @@ export default function App() {
         appId="cmth0cb3n0000o82r1vcvr0b9"
         apiKey="woUvBjTDgWGtckTEBcYtR6q_g1pWW30u"
         apiBaseUrl="https://thebridgeserver-production-fc18.up.railway.app"
+        draggable={true}        // set false to lock it in the corner like before
+        persistPosition={true}  // set false to always reset to the corner on reload
       />
     </>
   );
