@@ -2882,12 +2882,15 @@ export class AdminExtrasService {
     }
 
     /**
-     * Normalises a submitted materials/items/dimensions tree, dropping blank
-     * rows, and flattens it into one Material-create input per dimension —
-     * an item is no longer a row of its own; each of its dimensions is. A
-     * named item needs at least one dimension, since that's what a
-     * resulting row's identity comes from — unlike a blank name, that's
-     * rejected outright rather than silently dropped.
+     * Normalises a submitted materials/items/dimensions tree and flattens it
+     * into one Material-create input per dimension — an item is no longer a
+     * row of its own; each of its dimensions is. Only a material with no
+     * name AND no items is a genuine no-op and silently skipped (the blank
+     * placeholder row the builder starts with); anything else half-filled —
+     * a named material with no items, an item with no name, an item with no
+     * dimension, or a dimension missing a value or unit — is rejected
+     * outright rather than silently dropped, so nothing typed in is ever
+     * lost without the caller knowing.
      */
     private buildMaterialCreateInput(materials: any) {
         const list = Array.isArray(materials) ? materials : [];
@@ -2897,12 +2900,22 @@ export class AdminExtrasService {
         }[] = [];
         for (const m of list) {
             const materialName = String(m?.name ?? '').trim();
-            if (!materialName) continue;
-            const classification = m?.classification === 'Reusable' ? 'Reusable' : 'Consumable';
             const items = Array.isArray(m?.items) ? m.items : [];
+            if (!materialName) {
+                if (items.length > 0) {
+                    throw new BadRequestException('Every material needs a name before its items can be saved.');
+                }
+                continue;
+            }
+            const classification = m?.classification === 'Reusable' ? 'Reusable' : 'Consumable';
+            if (items.length === 0) {
+                throw new BadRequestException(`"${materialName}" needs at least one item before it can be saved.`);
+            }
             for (const it of items) {
                 const itemName = String(it?.name ?? '').trim();
-                if (!itemName) continue;
+                if (!itemName) {
+                    throw new BadRequestException(`"${materialName}" has an item with no name.`);
+                }
                 const sku = String(it?.sku ?? '').trim() || null;
                 const dims = (Array.isArray(it?.dimensions) ? it.dimensions : [])
                     .map((d: any) => ({
@@ -2915,6 +2928,13 @@ export class AdminExtrasService {
                     throw new BadRequestException(
                         `"${itemName}" under "${materialName}" needs at least one dimension before it can be saved.`,
                     );
+                }
+                for (const d of dims) {
+                    if (d.value === null || Number.isNaN(d.value) || !d.unit) {
+                        throw new BadRequestException(
+                            `"${itemName}" under "${materialName}" has a dimension missing a value or a unit.`,
+                        );
+                    }
                 }
                 for (const d of dims) {
                     rows.push({
@@ -3064,6 +3084,12 @@ export class AdminExtrasService {
         );
         const name = String(data?.name ?? '').trim();
         if (!name) throw new BadRequestException('Category name is required');
+        const duplicate = await this.prisma.materialCategory.findFirst({
+            where: { name: { equals: name, mode: 'insensitive' } },
+        });
+        if (duplicate) {
+            throw new ConflictException(`A category named "${name}" already exists`);
+        }
         const rows = this.buildMaterialCreateInput(data?.materials);
         this.logger.log(
             `[MaterialCategory:create] after filtering blanks: ${rows.length} row(s) — ` +
@@ -3113,6 +3139,14 @@ export class AdminExtrasService {
         if (data?.name !== undefined) {
             const name = String(data.name).trim();
             if (!name) throw new BadRequestException('Category name is required');
+            if (name.toLowerCase() !== existing.name.toLowerCase()) {
+                const duplicate = await this.prisma.materialCategory.findFirst({
+                    where: { name: { equals: name, mode: 'insensitive' }, id: { not: id } },
+                });
+                if (duplicate) {
+                    throw new ConflictException(`A category named "${name}" already exists`);
+                }
+            }
             patch.name = name;
         }
         if (data?.description !== undefined) patch.description = String(data.description ?? '').trim() || null;

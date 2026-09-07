@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { AdminExtrasService } from './admin-extras.service';
 
 /**
@@ -25,6 +25,7 @@ function makeService() {
             findMany: jest.fn(() => Promise.resolve([category])),
             findUnique: jest.fn(() => Promise.resolve(category)),
             findUniqueOrThrow: jest.fn(() => Promise.resolve(category)),
+            findFirst: jest.fn(() => Promise.resolve(null)),
             create: jest.fn(({ data }: any) => Promise.resolve({ id: 'cat-new', ...data })),
             update: jest.fn(({ data }: any) => Promise.resolve({ ...category, ...data })),
             delete: jest.fn(() => Promise.resolve(category)),
@@ -140,17 +141,53 @@ describe('material categories', () => {
         ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('drops an item with no name without complaint, even if it has dimensions', async () => {
+    it('refuses an item with no name, even if it has dimensions', async () => {
+        const { service } = makeService();
+        await expect(
+            service.createMaterialCategory({
+                name: 'Timber',
+                materials: [
+                    {
+                        name: 'Plywood',
+                        classification: 'Consumable',
+                        items: [{ name: '  ', dimensions: [{ kind: 'Length', value: 8, unit: 'ft' }] }],
+                    },
+                ],
+            }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses a named material with no items', async () => {
+        const { service } = makeService();
+        await expect(
+            service.createMaterialCategory({
+                name: 'Timber',
+                materials: [{ name: 'Plywood', classification: 'Consumable', items: [] }],
+            }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses a material with items but no name', async () => {
+        const { service } = makeService();
+        await expect(
+            service.createMaterialCategory({
+                name: 'Timber',
+                materials: [
+                    {
+                        name: '  ',
+                        classification: 'Consumable',
+                        items: [{ name: 'Sheet', dimensions: [{ kind: 'Length', value: 8, unit: 'ft' }] }],
+                    },
+                ],
+            }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('silently skips a fully blank material row (no name, no items)', async () => {
         const { service, prisma } = makeService();
         await service.createMaterialCategory({
             name: 'Timber',
-            materials: [
-                {
-                    name: 'Plywood',
-                    classification: 'Consumable',
-                    items: [{ name: '  ', dimensions: [{ kind: 'Length', value: 8, unit: 'ft' }] }],
-                },
-            ],
+            materials: [{ name: '   ', classification: 'Reusable', items: [] }],
         });
         expect(prisma.material.create).not.toHaveBeenCalled();
     });
@@ -165,19 +202,45 @@ describe('material categories', () => {
         expect(data.materialType).toBe('Consumable');
     });
 
-    it('falls back to the dimension\'s kind for the name suffix when it has neither a value nor a unit', async () => {
+    it('refuses a dimension that has neither a value nor a unit', async () => {
+        const { service } = makeService();
+        await expect(
+            service.createMaterialCategory({
+                name: 'Fixings',
+                materials: [
+                    {
+                        name: 'Bolt',
+                        items: [{ name: 'Hex Bolt', dimensions: [{ kind: 'Custom', value: null, unit: null }] }],
+                    },
+                ],
+            }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('refuses to create a category with a name that already exists (case-insensitive)', async () => {
         const { service, prisma } = makeService();
-        await service.createMaterialCategory({
-            name: 'Fixings',
-            materials: [
-                {
-                    name: 'Bolt',
-                    items: [{ name: 'Hex Bolt', dimensions: [{ kind: 'Custom', value: null, unit: null }] }],
-                },
-            ],
+        prisma.materialCategory.findFirst.mockResolvedValueOnce({ id: 'cat-1', name: 'Concrete & Cement' });
+        await expect(
+            service.createMaterialCategory({ name: 'concrete & cement' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('refuses to update a category to a name that already exists on another category', async () => {
+        const { service, prisma } = makeService();
+        prisma.materialCategory.findFirst.mockResolvedValueOnce({ id: 'cat-2', name: 'Timber' });
+        await expect(
+            service.updateMaterialCategory('cat-1', { name: 'Timber' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('allows updating a category while keeping its own name (case-insensitive, no self-conflict)', async () => {
+        const { service, prisma } = makeService();
+        await service.updateMaterialCategory('cat-1', { name: 'concrete & cement', color: 'blue' });
+        expect(prisma.materialCategory.findFirst).not.toHaveBeenCalled();
+        expect(prisma.materialCategory.update).toHaveBeenCalledWith({
+            where: { id: 'cat-1' },
+            data: { name: 'concrete & cement', color: 'blue' },
         });
-        const data = prisma.material.create.mock.calls[0][0].data;
-        expect(data.name).toBe('Bolt — Hex Bolt (Custom)');
     });
 
     it('refuses to update a category that does not exist', async () => {

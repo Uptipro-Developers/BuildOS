@@ -44,6 +44,7 @@ import { getReferenceData } from "../../api/reference-data";
 import {
   MaterialsBuilder,
   findIncompleteMaterialRow,
+  isMaterialsComplete,
   materialsToPayload,
   blankMaterial,
   nextCatalogFormKey,
@@ -1667,8 +1668,19 @@ function MaterialCategoriesPanel() {
   }
 
 
+  const trimmedName = form.name.trim();
+  const nameTaken = categories.some(
+    (c) => c.id !== editing?.id && c.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+  );
+  const materialsComplete = isMaterialsComplete(materials);
+  const canSave = Boolean(trimmedName) && !nameTaken && materialsComplete && !saving;
+
   async function save() {
-    if (!form.name.trim()) return;
+    if (!trimmedName) return;
+    if (nameTaken) {
+      toast.error(`A category named "${trimmedName}" already exists`);
+      return;
+    }
     const incomplete = findIncompleteMaterialRow(materials);
     if (incomplete) {
       toast.error(incomplete);
@@ -1677,7 +1689,7 @@ function MaterialCategoriesPanel() {
     setSaving(true);
     try {
       const payload = {
-        name: form.name.trim(),
+        name: trimmedName,
         description: form.description.trim(),
         color: form.color,
         materials: materialsToPayload(materials),
@@ -1888,6 +1900,11 @@ function MaterialCategoriesPanel() {
                   placeholder="e.g. Electrical"
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                 />
+                {nameTaken && (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    A category named "{trimmedName}" already exists.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1935,8 +1952,17 @@ function MaterialCategoriesPanel() {
               </button>
               <button
                 onClick={save}
-                disabled={saving}
-                className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60"
+                disabled={!canSave}
+                title={
+                  !trimmedName
+                    ? "Category name is required"
+                    : nameTaken
+                      ? `A category named "${trimmedName}" already exists`
+                      : !materialsComplete
+                        ? "Fill in or remove every incomplete material, item and dimension"
+                        : undefined
+                }
+                className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {saving ? "Saving…" : editing ? "Save Changes" : "Add Category"}
               </button>

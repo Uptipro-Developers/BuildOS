@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router";
 import { router } from "./routes";
 import { Toaster } from "sonner";
 import { getPublicGeneralSettings } from "./api/admin-extras";
+import { TruebridgeAdminButton } from "./components/TruebridgeAdminButton";
 import {
   applyLanguageToDocument,
   hydrateGeneralSettings,
@@ -59,6 +60,7 @@ export default function App() {
     <>
       <RouterProvider key={settingsVersion} router={router} />
       <Toaster position="top-right" richColors />
+      <TruebridgeAdminButton />
     </>
   );
 }
