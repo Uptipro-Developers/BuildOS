@@ -3,7 +3,6 @@ import { listConstructionSettings } from "../api/construction-settings";
 import {
   defaultScheduleLevels,
   defaultWeatherConfig,
-  defaultProjectTypes,
   tradeTypes as defaultTradeTypes,
 } from "../pages/construction/mockData";
 import type {
@@ -26,7 +25,6 @@ import type {
 export interface ConstructionConfig {
   scheduleLevels: ScheduleLevelConfig[];
   weatherConfig: WeatherConfig[];
-  projectTypes: { sector: string; categories: string[] }[];
   tradeTypes: string[];
   /**
    * Report content switches from Settings › Reports, keyed by their setting key
@@ -50,7 +48,6 @@ export function useConstructionSettings(): ConstructionConfig {
   const [config, setConfig] = useState<ConstructionConfig>({
     scheduleLevels: defaultScheduleLevels,
     weatherConfig: defaultWeatherConfig,
-    projectTypes: defaultProjectTypes as ConstructionConfig["projectTypes"],
     tradeTypes: defaultTradeTypes as string[],
     reportSettings: {},
     loaded: false,
@@ -72,9 +69,6 @@ export function useConstructionSettings(): ConstructionConfig {
           weatherConfig: s?.weatherConfig?.length
             ? s.weatherConfig
             : prev.weatherConfig,
-          projectTypes: s?.projectTypes?.length
-            ? s.projectTypes
-            : prev.projectTypes,
           tradeTypes: s?.tradeTypes?.length ? s.tradeTypes : prev.tradeTypes,
           reportSettings: Object.fromEntries(
             (s?.reportSettings ?? []).map((rs) => [rs.key, rs.enabled]),

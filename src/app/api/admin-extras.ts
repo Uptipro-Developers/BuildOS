@@ -66,11 +66,68 @@ export interface UnitOfMeasurement {
     conversionFactor?: number;
 }
 
+export interface MaterialCatalogDimensionInput {
+    kind: string;
+    value?: number | string | null;
+    unit?: string | null;
+}
+
+/**
+ * A material item under a Material — e.g. "Deformed Bar" under "Iron Rod".
+ * There is no row of its own any more: on save, each of its dimensions
+ * becomes its own flat Material row (see MaterialCatalogRowRecord below), so
+ * an item needs at least one dimension or it has nothing to save.
+ */
+export interface MaterialCatalogItemInput {
+    name: string;
+    sku?: string | null;
+    dimensions: MaterialCatalogDimensionInput[];
+}
+
+export interface MaterialCatalogMaterialInput {
+    name: string;
+    classification: 'Consumable' | 'Reusable';
+    items: MaterialCatalogItemInput[];
+}
+
+export interface MaterialCategoryInput {
+    name: string;
+    description?: string;
+    color?: string;
+    materials?: MaterialCatalogMaterialInput[];
+}
+
+/**
+ * One flat Material row produced by the catalogue builder — a specific
+ * dimension of a specific item under a Material Name. This is a real
+ * Material row (the same table Goods Receipt/Stock Movement use), not a
+ * disposable catalog-only record; `materialGroupName`/`itemName` are the
+ * pre-concatenation names, kept only so the builder can regroup flat rows
+ * back into a Material -> item -> dimension tree when reopened for edit.
+ */
+export interface MaterialCatalogRowRecord {
+    id: string;
+    name: string;
+    classification: 'Consumable' | 'Reusable';
+    materialGroupName: string | null;
+    itemName: string | null;
+    sku: string | null;
+    /** Weight | Length | Width | Breadth | Thickness | Area | Volume | Custom */
+    kind: string | null;
+    value: number | null;
+    unit: string | null;
+    totalQty: number;
+    availableQty: number;
+    reservedQty: number;
+    unitCost: number;
+}
+
 export interface MaterialCategoryRecord {
     id: string;
     name: string;
-    description: string;
+    description: string | null;
     color: string;
+    materials: MaterialCatalogRowRecord[];
 }
 
 export interface EmailTemplateConfig {
@@ -329,15 +386,18 @@ export const updateUnit = (id: string, data: Partial<Omit<UnitOfMeasurement, 'id
 export const deleteUnit = (id: string) =>
     apiFetch<{ ok: boolean }>(`/admin/units/${id}`, { method: 'DELETE' });
 
-// Material Categories
+// Material Categories — Category → Material → Type → Dimension
 export const getMaterialCategories = () =>
     apiFetch<MaterialCategoryRecord[]>('/admin/material-categories');
-export const createMaterialCategory = (data: Omit<MaterialCategoryRecord, 'id'>) =>
+export const createMaterialCategory = (data: MaterialCategoryInput) =>
     apiFetch<MaterialCategoryRecord>('/admin/material-categories', { method: 'POST', body: JSON.stringify(data) });
-export const updateMaterialCategory = (id: string, data: Partial<Omit<MaterialCategoryRecord, 'id'>>) =>
+export const updateMaterialCategory = (id: string, data: Partial<MaterialCategoryInput>) =>
     apiFetch<MaterialCategoryRecord>(`/admin/material-categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteMaterialCategory = (id: string) =>
     apiFetch<{ ok: boolean }>(`/admin/material-categories/${id}`, { method: 'DELETE' });
+/** Adds new materials under an existing category — everything already there is left untouched. */
+export const addMaterialsToCategory = (id: string, data: { materials: MaterialCatalogMaterialInput[] }) =>
+    apiFetch<MaterialCategoryRecord>(`/admin/material-categories/${id}/materials`, { method: 'POST', body: JSON.stringify(data) });
 
 // Notifications & Templates
 export const getEmailTemplates = () =>

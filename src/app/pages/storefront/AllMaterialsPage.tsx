@@ -1,13 +1,29 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { exportCSV } from "../../utils/exportCSV";
 import {
   getMaterials,
   createMaterial,
   updateMaterial,
   deleteMaterial,
+  getStores,
+  Store,
+  DIMENSION_UNITS,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
-import { getMaterialCategories } from "../../api/admin-extras";
+import {
+  getMaterialCategories,
+  addMaterialsToCategory,
+  MaterialCategoryRecord,
+  MaterialCatalogRowRecord,
+} from "../../api/admin-extras";
+import {
+  MaterialsBuilder,
+  findIncompleteMaterialRow,
+  isMaterialsComplete,
+  materialsToPayload,
+  blankMaterial,
+  type MaterialFormRow,
+} from "../../components/MaterialsBuilder";
 import { toast } from "sonner";
 import {
   getCurrencySymbol,
@@ -49,6 +65,9 @@ interface Material {
   allocatedTo?: string;
   allocatedProject?: string;
   condition?: string;
+  storeId?: string | null;
+  storeName?: string | null;
+  createdAt?: string;
 }
 
 const BLANK: Omit<Material, "id"> = {
@@ -60,6 +79,8 @@ const BLANK: Omit<Material, "id"> = {
   reservedQty: 0,
   unitCost: 0,
   reorderLevel: 0,
+  storeId: null,
+  storeName: null,
   materialType: "Consumable",
 };
 
@@ -227,9 +248,250 @@ function TrackModal({
             className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
           >
             {allocationStatus === "Available" &&
-            material.allocationStatus === "Allocated"
+              material.allocationStatus === "Allocated"
               ? "Confirm Return"
               : "Save Status"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Add Material (catalogue-aware stock entry) ────────────────────────────────
+// Searches by category rather than by catalogue item — pick a category to
+// see the materials already under it (read-only; editing their stock lives
+// on the main table's per-row Edit action), then add new materials to that
+// same category using the same builder Storefront Config uses. This only
+// ever adds rows; every material already under the category (which may
+// carry real stock) is left completely untouched.
+function AddMaterialModal({
+  onClose,
+  onSaved,
+}: {
+  onClose: () => void;
+  onSaved: (materials: MaterialCatalogRowRecord[]) => void;
+}) {
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [categories, setCategories] = useState<MaterialCategoryRecord[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<MaterialCategoryRecord | null>(null);
+  const [materials, setMaterials] = useState<MaterialFormRow[]>([blankMaterial()]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getMaterialCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]))
+      .finally(() => setLoadingCategories(false));
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const results = q ? categories.filter((c) => c.name.toLowerCase().includes(q)) : [];
+
+  function pickCategory(c: MaterialCategoryRecord) {
+    setSelectedCategory(c);
+    setQuery("");
+  }
+
+  function changeCategory() {
+    setSelectedCategory(null);
+    setMaterials([blankMaterial()]);
+  }
+
+  const materialsComplete = isMaterialsComplete(materials);
+  const hasAtLeastOneMaterial = materials.some((m) => m.name.trim());
+  const canSave =
+    Boolean(selectedCategory) && !saving && materialsComplete && hasAtLeastOneMaterial;
+
+  async function save() {
+    if (!selectedCategory) return;
+    const incomplete = findIncompleteMaterialRow(materials);
+    if (incomplete) {
+      toast.error(incomplete);
+      return;
+    }
+    const payload = materialsToPayload(materials);
+    if (payload.length === 0) {
+      toast.error("Add at least one material before saving.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await addMaterialsToCategory(selectedCategory.id, { materials: payload });
+      onSaved(updated.materials);
+      toast.success(`Added new materials to "${selectedCategory.name}".`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to add materials.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-5 border-b border-gray-100 flex items-start justify-between flex-shrink-0">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Add Material</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Search a category, then add new materials under it.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5 overflow-y-auto">
+          {!selectedCategory ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Search Category
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by category name…"
+                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              {query.trim() ? (
+                <div className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                  {loadingCategories ? (
+                    <p className="px-3 py-2 text-xs text-gray-400">Loading categories…</p>
+                  ) : results.length === 0 ? (
+                    <p className="px-3 py-2 text-xs text-red-500">
+                      No matching category found for "{query.trim()}".
+                    </p>
+                  ) : (
+                    results.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => pickCategory(c)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-teal-50 border-b border-gray-100 last:border-0"
+                      >
+                        <span className="font-medium text-gray-900">{c.name}</span>{" "}
+                        <span className="text-xs text-gray-400">
+                          {c.materials.length} material{c.materials.length === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic mt-2">
+                  Search and pick a category to see its materials and add new ones.
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-gray-500">Category</p>
+                  <p className="text-sm font-semibold text-gray-900">{selectedCategory.name}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={changeCategory}
+                  className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800"
+                >
+                  Change category
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-2">
+                  Materials under {selectedCategory.name}
+                </label>
+                {selectedCategory.materials.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">No materials added yet.</p>
+                ) : (
+                  <div className="border border-gray-200 rounded-xl overflow-hidden overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 text-gray-400 uppercase tracking-wide">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Name</th>
+                          <th className="px-3 py-2 text-left font-medium">Classification</th>
+                          <th className="px-3 py-2 text-left font-medium">SKU</th>
+                          <th className="px-3 py-2 text-left font-medium">Dimension</th>
+                          <th className="px-3 py-2 text-right font-medium">Total Qty</th>
+                          <th className="px-3 py-2 text-right font-medium">Available</th>
+                          <th className="px-3 py-2 text-right font-medium">Reserved</th>
+                          <th className="px-3 py-2 text-right font-medium">Unit Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {selectedCategory.materials.map((row) => (
+                          <tr key={row.id}>
+                            <td className="px-3 py-2 text-gray-900 font-medium">{row.name}</td>
+                            <td className="px-3 py-2 text-gray-600">{row.classification}</td>
+                            <td className="px-3 py-2 text-gray-600">{row.sku || "—"}</td>
+                            <td className="px-3 py-2 text-gray-600">
+                              {[row.value, row.unit, row.kind].filter(Boolean).join(" ") || "—"}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.totalQty)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.availableQty)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.reservedQty)}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {getCurrencySymbol()}
+                              {formatNumberByGeneralSettings(row.unitCost)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <MaterialsBuilder
+                materials={materials}
+                onChange={setMaterials}
+                title={`Add materials to ${selectedCategory.name}`}
+              />
+            </>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void save()}
+            disabled={!canSave}
+            title={
+              !selectedCategory
+                ? "Search and pick a category first"
+                : !hasAtLeastOneMaterial
+                  ? "Add at least one material before saving"
+                  : !materialsComplete
+                    ? "Fill in or remove every incomplete material, item and dimension"
+                    : undefined
+            }
+            className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? "Saving…" : "Add Material"}
           </button>
         </div>
       </div>
@@ -247,6 +509,7 @@ export function AllMaterialsPage() {
   );
   const [typeFilter, setTypeFilter] = useState<MaterialType | "All">("All");
   const [showModal, setShowModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [editTarget, setEditTarget] = useState<Material | null>(null);
   const [form, setForm] = useState<Omit<Material, "id">>({ ...BLANK });
   const [deleteTarget, setDeleteTarget] = useState<Material | null>(null);
@@ -268,6 +531,7 @@ export function AllMaterialsPage() {
   const [configuredCategories, setConfiguredCategories] = useState<string[]>(
     [],
   );
+  const [stores, setStores] = useState<Store[]>([]);
 
   const toMaterial = (m: any): Material => ({
     id: m.id,
@@ -282,12 +546,15 @@ export function AllMaterialsPage() {
     materialType: m.materialType === "Reusable" ? "Reusable" : "Consumable",
     allocationStatus:
       m.allocationStatus === "Allocated" ||
-      m.allocationStatus === "Under Maintenance"
+        m.allocationStatus === "Under Maintenance"
         ? m.allocationStatus
         : "Available",
     allocatedTo: m.allocatedTo,
     allocatedProject: m.allocatedProject,
     condition: m.condition,
+    storeId: m.storeId ?? null,
+    storeName: m.storeName ?? null,
+    createdAt: m.createdAt,
   });
 
   useEffect(() => {
@@ -298,6 +565,9 @@ export function AllMaterialsPage() {
         ),
       )
       .catch(() => setConfiguredCategories([]));
+    getStores()
+      .then(setStores)
+      .catch(() => setStores([]));
   }, []);
 
   useEffect(() => {
@@ -306,7 +576,7 @@ export function AllMaterialsPage() {
         setMaterials(materialData.map(toMaterial));
         setProjectOptions(refs.projects.map((p) => p.name));
       })
-            .catch((err: unknown) =>
+      .catch((err: unknown) =>
         toast.error(
           err instanceof Error ? err.message : "Failed to load materials.",
         ),
@@ -317,23 +587,22 @@ export function AllMaterialsPage() {
   if (loading)
     return <div className="p-8 text-center text-gray-400">Loading...</div>;
 
-  const filtered = materials.filter((m) => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      m.name.toLowerCase().includes(q) ||
-      m.id.toLowerCase().includes(q) ||
-      m.category.toLowerCase().includes(q);
-    const matchCat = catFilter === "All" || m.category === catFilter;
-    const matchStatus = statusFilter === "All" || getStatus(m) === statusFilter;
-    const matchType = typeFilter === "All" || m.materialType === typeFilter;
-    return matchSearch && matchCat && matchStatus && matchType;
-  });
+  const filtered = materials
+    .filter((m) => {
+      const q = search.toLowerCase();
+      const matchSearch =
+        m.name.toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q) ||
+        m.category.toLowerCase().includes(q);
+      const matchCat = catFilter === "All" || m.category === catFilter;
+      const matchStatus = statusFilter === "All" || getStatus(m) === statusFilter;
+      const matchType = typeFilter === "All" || m.materialType === typeFilter;
+      return matchSearch && matchCat && matchStatus && matchType;
+    })
+    // Newest first — the sequential display number below (001, 002, …)
+    // reads top-to-bottom against this order, not the raw database id.
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
 
-  function openAdd() {
-    setEditTarget(null);
-    setForm({ ...BLANK });
-    setShowModal(true);
-  }
   function openEdit(m: Material) {
     setEditTarget(m);
     const { id: _id, ...rest } = m;
@@ -345,15 +614,16 @@ export function AllMaterialsPage() {
   // silently reappeared unchanged on the next load.
   async function save() {
     const name = form.name;
+    const payload = form;
     try {
       if (editTarget) {
-        const updated = await updateMaterial(editTarget.id, form);
+        const updated = await updateMaterial(editTarget.id, payload);
         setMaterials((prev) =>
           prev.map((m) => (m.id === updated.id ? toMaterial(updated) : m)),
         );
         toast.success(`"${name}" updated.`);
       } else {
-        const newMat = await createMaterial(form);
+        const newMat = await createMaterial(payload);
         setMaterials((prev) => [...prev, toMaterial(newMat)]);
         toast.success(`"${name}" added.`);
       }
@@ -447,7 +717,7 @@ export function AllMaterialsPage() {
             <Download className="w-4 h-4" /> Export
           </button>
           <button
-            onClick={openAdd}
+            onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm px-4 py-2 rounded-xl"
           >
             <Plus className="w-4 h-4" /> Add Material
@@ -555,9 +825,12 @@ export function AllMaterialsPage() {
               <th className="px-4 py-3 text-left font-medium">Material Name</th>
               <th className="px-4 py-3 text-left font-medium">Type</th>
               <th className="px-4 py-3 text-left font-medium">Category</th>
+              <th className="px-4 py-3 text-left font-medium">Store</th>
               <th className="px-4 py-3 text-left font-medium">Unit</th>
-              <th className="px-4 py-3 text-left font-medium">Available</th>
-              <th className="px-4 py-3 text-left font-medium">Unit Cost</th>
+              <th className="px-4 py-3 text-right font-medium">Total Qty</th>
+              <th className="px-4 py-3 text-right font-medium">Available</th>
+              <th className="px-4 py-3 text-right font-medium">Reserved</th>
+              <th className="px-4 py-3 text-right font-medium">Unit Cost</th>
               <th className="px-4 py-3 text-left font-medium">Stock Status</th>
               <th className="px-4 py-3 text-left font-medium">Allocation</th>
               <th className="px-4 py-3 w-28"></th>
@@ -567,119 +840,127 @@ export function AllMaterialsPage() {
             {filtered.length === 0 && (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={13}
                   className="px-4 py-8 text-center text-gray-400 text-sm"
                 >
                   No materials found.
                 </td>
               </tr>
             )}
-            {filtered.map((m) => {
+            {filtered.map((m, index) => {
               const status = getStatus(m);
+              const displayId = String(index + 1).padStart(3, "0");
               return (
-                <tr
-                  key={m.id}
-                  className="hover:bg-gray-50 transition-colors group"
-                >
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                    {m.id}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-gray-900">
-                    {m.name}
-                    {m.allocatedTo && (
-                      <p className="text-xs text-blue-500 mt-0.5">
-                        → {m.allocatedTo}
-                        {m.allocatedProject ? ` · ${m.allocatedProject}` : ""}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 w-fit ${m.materialType === "Reusable" ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-600"}`}
-                    >
-                      {m.materialType === "Reusable" ? (
-                        <RefreshCw className="w-2.5 h-2.5" />
-                      ) : (
-                        <Package className="w-2.5 h-2.5" />
+                <Fragment key={m.id}>
+                  <tr className="hover:bg-gray-50 transition-colors group">
+                    <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                      {displayId}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      <span>{m.name}</span>
+                      {m.allocatedTo && (
+                        <p className="text-xs text-blue-500 mt-0.5">
+                          → {m.allocatedTo}
+                          {m.allocatedProject ? ` · ${m.allocatedProject}` : ""}
+                        </p>
                       )}
-                      {m.materialType}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{m.category}</td>
-                  <td className="px-4 py-3 text-gray-600">{m.unit}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">
-                    {formatNumberByGeneralSettings(m.availableQty)}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">
-                    {formatNumberByGeneralSettings(m.unitCost)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[status]}`}
-                    >
-                      {status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {m.materialType === "Reusable" && m.allocationStatus ? (
+                    </td>
+                    <td className="px-4 py-3">
                       <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${ALLOC_STYLE[m.allocationStatus]}`}
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 w-fit ${m.materialType === "Reusable" ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-600"}`}
                       >
-                        {m.allocationStatus}
+                        {m.materialType === "Reusable" ? (
+                          <RefreshCw className="w-2.5 h-2.5" />
+                        ) : (
+                          <Package className="w-2.5 h-2.5" />
+                        )}
+                        {m.materialType}
                       </span>
-                    ) : (
-                      <span className="text-gray-300 text-xs">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      {m.materialType === "Reusable" && (
-                        <button
-                          onClick={() => setTrackTarget(m)}
-                          className="p-1 text-indigo-400 hover:text-indigo-600 rounded hover:bg-indigo-50"
-                          title="Track / Return"
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{m.category}</td>
+                    <td className="px-4 py-3 text-gray-600">{m.storeName || "—"}</td>
+                    <td className="px-4 py-3 text-gray-600">{m.unit}</td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-900">
+                      {formatNumberByGeneralSettings(m.totalQty)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-medium text-gray-900">
+                      {formatNumberByGeneralSettings(m.availableQty)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {formatNumberByGeneralSettings(m.reservedQty)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {getCurrencySymbol()}
+                      {formatNumberByGeneralSettings(m.unitCost)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[status]}`}
+                      >
+                        {status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {m.materialType === "Reusable" && m.allocationStatus ? (
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${ALLOC_STYLE[m.allocationStatus]}`}
                         >
-                          <ArrowRightLeft className="w-3.5 h-3.5" />
-                        </button>
+                          {m.allocationStatus}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300 text-xs">—</span>
                       )}
-                      {(status === "Low Stock" ||
-                        status === "Out of Stock") && (
-                        <button
-                          onClick={() => {
-                            setProcurementTarget(m);
-                            setProcurementQty("");
-                          }}
-                          className={`p-1 rounded ${sentToProcurement.has(m.id) ? "text-green-500" : "text-amber-500 hover:text-amber-700 hover:bg-amber-50"}`}
-                          title={
-                            sentToProcurement.has(m.id)
-                              ? "Sent to Procurement"
-                              : "Send for Procurement"
-                          }
-                        >
-                          {sentToProcurement.has(m.id) ? (
-                            <CheckCircle className="w-3.5 h-3.5" />
-                          ) : (
-                            <ShoppingCart className="w-3.5 h-3.5" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        {m.materialType === "Reusable" && (
+                          <button
+                            onClick={() => setTrackTarget(m)}
+                            className="p-1 text-indigo-400 hover:text-indigo-600 rounded hover:bg-indigo-50"
+                            title="Track / Return"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {(status === "Low Stock" ||
+                          status === "Out of Stock") && (
+                            <button
+                              onClick={() => {
+                                setProcurementTarget(m);
+                                setProcurementQty("");
+                              }}
+                              className={`p-1 rounded ${sentToProcurement.has(m.id) ? "text-green-500" : "text-amber-500 hover:text-amber-700 hover:bg-amber-50"}`}
+                              title={
+                                sentToProcurement.has(m.id)
+                                  ? "Sent to Procurement"
+                                  : "Send for Procurement"
+                              }
+                            >
+                              {sentToProcurement.has(m.id) ? (
+                                <CheckCircle className="w-3.5 h-3.5" />
+                              ) : (
+                                <ShoppingCart className="w-3.5 h-3.5" />
+                              )}
+                            </button>
                           )}
+                        <button
+                          onClick={() => openEdit(m)}
+                          className="p-1 text-gray-400 hover:text-teal-600 rounded hover:bg-teal-50"
+                          title="Edit"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
-                      )}
-                      <button
-                        onClick={() => openEdit(m)}
-                        className="p-1 text-gray-400 hover:text-teal-600 rounded hover:bg-teal-50"
-                        title="Edit"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(m)}
-                        className="p-1 text-gray-400 hover:text-red-500 rounded hover:bg-red-50"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                        <button
+                          onClick={() => setDeleteTarget(m)}
+                          className="p-1 text-gray-400 hover:text-red-500 rounded hover:bg-red-50"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </Fragment>
               );
             })}
           </tbody>
@@ -742,10 +1023,62 @@ export function AllMaterialsPage() {
                   </select>
                 </div>
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Store
+                </label>
+                <select
+                  value={form.storeId ?? ""}
+                  onChange={(e) => {
+                    const store = stores.find((s) => s.id === e.target.value);
+                    setForm({
+                      ...form,
+                      storeId: store?.id ?? null,
+                      storeName: store?.name ?? null,
+                    });
+                  }}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                >
+                  <option value="">— Not attached to a store —</option>
+                  {stores.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Material Name
+                </label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Unit of Measure
+                </label>
+                <select
+                  value={form.unit}
+                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                >
+                  <option value="">— unit —</option>
+                  {/* A material saved before this list existed (or with a custom
+                      unit) still needs to show its real value — add it as its
+                      own option rather than silently rendering blank. */}
+                  {form.unit && !DIMENSION_UNITS.includes(form.unit) && (
+                    <option value={form.unit}>{form.unit}</option>
+                  )}
+                  {DIMENSION_UNITS.map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
               {(
                 [
-                  ["name", "Material Name", "text"],
-                  ["unit", "Unit of Measure", "text"],
                   ["totalQty", "Total Quantity", "number"],
                   ["availableQty", "Available Qty", "number"],
                   ["reservedQty", "Reserved Qty", "number"],
@@ -922,6 +1255,23 @@ export function AllMaterialsPage() {
               ),
             );
             setTrackTarget(null);
+          }}
+        />
+      )}
+
+      {/* Add Material (catalogue-aware stock entry) */}
+      {showAddModal && (
+        <AddMaterialModal
+          onClose={() => setShowAddModal(false)}
+          onSaved={(updatedList) => {
+            setMaterials((prev) => {
+              let next = prev;
+              for (const updated of updatedList) {
+                const idx = next.findIndex((m) => m.id === updated.id);
+                next = idx === -1 ? [...next, toMaterial(updated)] : next.map((m, i) => (i === idx ? toMaterial(updated) : m));
+              }
+              return next;
+            });
           }}
         />
       )}

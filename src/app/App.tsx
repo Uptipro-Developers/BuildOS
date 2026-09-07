@@ -9,6 +9,7 @@ import {
   GENERAL_SETTINGS_CHANGED_EVENT,
   GENERAL_SETTINGS_STORAGE_KEY,
 } from "./utils/generalSettings";
+import { FeedbackWidget } from '../thuebridge/widget/feedback-widget.es';
 
 const hasCachedSettings =
   typeof window !== "undefined" &&
@@ -59,6 +60,11 @@ export default function App() {
     <>
       <RouterProvider key={settingsVersion} router={router} />
       <Toaster position="top-right" richColors />
+      <FeedbackWidget
+        appId="cmth0cb3n0000o82r1vcvr0b9"
+        apiKey="woUvBjTDgWGtckTEBcYtR6q_g1pWW30u"
+        apiBaseUrl="https://thebridgeserver-production-fc18.up.railway.app"
+      />
     </>
   );
 }

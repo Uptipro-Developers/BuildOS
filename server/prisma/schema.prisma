@@ -754,23 +754,69 @@ model Director {
 
 // ─────────────── MATERIALS / INVENTORY ───────────────
 
+/// Category → Material → Type. A Material (e.g. "Cement (50kg bag)") is the
+/// catalog-facing row and also where actual stock has always lived.
+/// Material's totalQty/availableQty/reservedQty/unitCost are a rollup summed
+/// (unitCost: quantity-weighted average) across its Types whenever a Type
+/// is added/edited from the catalog.
 model Material {
   id               String   @id @default(cuid())
   name             String
   category         String
-  unit             String
+  /// Denormalised from MaterialCategory.name when created via the catalog —
+  /// legacy rows created directly by Goods Receipt predate categoryId and
+  /// have none.
+  categoryId       String?
+  materialCategory MaterialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  /// Optional — legacy Goods-Receipt-created rows always set this; catalog-
+  /// created rows source it from the dimension that produced the row.
+  unit             String?
+  /// Catalog-created rows only. Kind/value are the dimension that produced
+  /// this row (e.g. { kind: "Length", value: 12, unit: "mm" }) — one row per
+  /// dimension, no separate Type table underneath any more.
+  sku              String?
+  kind             String?
+  value            Float?
   totalQty         Float    @default(0)
   availableQty     Float    @default(0)
   reservedQty      Float    @default(0)
   unitCost         Float    @default(0)
   reorderLevel     Float    @default(0)
+  /// "Consumable" | "Reusable"
   materialType     String   @default("Consumable")
   allocationStatus String   @default("Available")
   allocatedTo      String?
   allocatedProject String?
   condition        String?
+  /// Catalog-created rows only — the Material Name/item name entered in the
+  /// Storefront Config builder, before they and the dimension were
+  /// concatenated into `name`. Lets the builder regroup its flat rows back
+  /// into a Material -> item -> dimension tree when a category is reopened
+  /// for edit; not shown anywhere as its own field.
+  materialGroupName String?
+  itemName          String?
+  /// Which store this material is attached to — optional, set from the Edit
+  /// Material modal on the All Materials page. storeName is denormalised the
+  /// same way category/categoryId are, for display without a join.
+  storeId          String?
+  store            Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  storeName        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([storeId])
+}
+
+model MaterialCategory {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  color       String   @default("teal")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  materials Material[]
 }
 
 model Store {
@@ -784,6 +830,7 @@ model Store {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   storeItems  StoreItem[]
+  materials   Material[]
 }
 
 model StoreItem {
@@ -1745,6 +1792,45 @@ model NotificationTemplate {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ─────────────── PROJECT TYPES (Construction Settings) ───────────────
+// The taxonomy an admin builds under Settings → Project Types, consumed by
+// the Project Setup wizard's Project Classification step. Unlike ProjectSetup
+// below, this is real reference data an admin curates and other projects will
+// share/reuse — the same reasoning that gave MaterialCategory/MaterialType
+// their own tables instead of a JSON blob.
+
+model ProjectSector {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories ProjectCategory[]
+}
+
+model ProjectCategory {
+  id       String        @id @default(cuid())
+  sectorId String
+  sector   ProjectSector @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+  name     String
+
+  /// Level 3 — Specific Descriptors. "dropdown" | "free_text".
+  descriptorMode String @default("free_text")
+  /// Array of option strings, used when descriptorMode is "dropdown".
+  descriptorOptions Json @default("[]")
+
+  /// Level 4 — Physical Structure Breakdown.
+  structureHeaderLabel String?
+  structureDescription String?
+  /// Array of { id, key, label, type: "text" | "number" | "select", options?: string[] }.
+  structureFields Json @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sectorId])
 }
 
 // ─────────────── CONSTRUCTION PROJECT SETUP WIZARD ───────────────

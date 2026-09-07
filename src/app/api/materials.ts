@@ -1,11 +1,27 @@
 import { apiFetch } from './client';
 
+/** Shared stocking/dimension unit options — used by both the Storefront Config dimension builder and the All Materials Add/Edit modal, so a unit picked in one place reads the same way everywhere else. */
+export const DIMENSION_UNITS = [
+    'kg', 'g', 'tonne', 'mm', 'cm', 'm', 'inch', 'ft',
+    'm²', 'ft²', 'm³', 'L', 'bag', 'box', 'roll', 'sheet', 'pcs', 'set',
+];
+
 export interface Material {
     id: string; name: string; category: string; unit: string;
     totalQty: number; availableQty: number; reservedQty: number;
     unitCost: number; reorderLevel: number; materialType?: string;
     allocationStatus?: string; allocatedTo?: string; allocatedProject?: string;
     condition?: string; createdAt: string;
+    /** Catalog-created rows only — kind/value/unit are the dimension that produced this row; sku is the material item's. */
+    sku?: string | null;
+    kind?: string | null;
+    value?: number | null;
+    /** Pre-concatenation names (Storefront Config builder bookkeeping) — not usually shown directly. */
+    materialGroupName?: string | null;
+    itemName?: string | null;
+    /** Which store this material is attached to, set from the Edit Material modal. */
+    storeId?: string | null;
+    storeName?: string | null;
 }
 export interface Store {
     id: string; name: string; type: string; projectId?: string;
@@ -47,6 +63,18 @@ export interface MaterialReturn {
     requestDate: string; approvedAt?: string;
 }
 
+export interface MaterialStockUpdateInput {
+    materials: {
+        id: string;
+        totalQty: number;
+        availableQty: number;
+        reservedQty: number;
+        unitCost: number;
+        /** Omit to leave this row's reorder level untouched. */
+        reorderLevel?: number;
+    }[];
+}
+
 // Materials
 export const getMaterials = () => apiFetch<Material[]>('/materials');
 export const getMaterial = (id: string) => apiFetch<Material>(`/materials/${id}`);
@@ -56,6 +84,14 @@ export const updateMaterial = (id: string, data: Partial<Material>) =>
     apiFetch<Material>(`/materials/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteMaterial = (id: string) =>
     apiFetch<void>(`/materials/${id}`, { method: 'DELETE' });
+
+/** Catalogue search for the "Add Material" flow — matches a Material row directly by name, group name or item name. */
+export const searchMaterials = (q: string) =>
+    apiFetch<Material[]>(`/materials/search?q=${encodeURIComponent(q)}`);
+
+/** Applies stock quantities/cost directly onto one or more existing Material rows picked from the catalogue. */
+export const applyMaterialStockUpdate = (data: MaterialStockUpdateInput) =>
+    apiFetch<Material[]>('/materials/stock', { method: 'POST', body: JSON.stringify(data) });
 
 // Stores
 export const getStores = () => apiFetch<Store[]>('/stores');

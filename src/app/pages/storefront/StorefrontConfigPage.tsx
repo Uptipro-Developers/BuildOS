@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
 import {
   Settings,
@@ -7,9 +7,11 @@ import {
   Trash2,
   Ruler,
   Tag,
+  Package,
   Layers,
   Store,
   ChevronRight,
+  ChevronDown,
   Link2,
   FolderOpen,
   Hash,
@@ -35,8 +37,20 @@ import {
   createMaterialCategory,
   updateMaterialCategory,
   deleteMaterialCategory,
+  MaterialCategoryRecord,
+  MaterialCatalogRowRecord,
 } from "../../api/admin-extras";
 import { getReferenceData } from "../../api/reference-data";
+import {
+  MaterialsBuilder,
+  findIncompleteMaterialRow,
+  isMaterialsComplete,
+  materialsToPayload,
+  blankMaterial,
+  nextCatalogFormKey,
+  type MaterialFormRow,
+  type ItemFormRow,
+} from "../../components/MaterialsBuilder";
 import { useSearchParams } from "react-router";
 
 // ─── Store Level Configuration ────────────────────────────────────────────────
@@ -147,11 +161,11 @@ function StoreLevelsPanel() {
     const next = levels.map((l) =>
       l.level === editingLevel.level
         ? {
-            ...l,
-            name: form.name,
-            description: form.description,
-            maxCount: form.maxCount ? Number(form.maxCount) : undefined,
-          }
+          ...l,
+          name: form.name,
+          description: form.description,
+          maxCount: form.maxCount ? Number(form.maxCount) : undefined,
+        }
         : l,
     );
     setSaving(true);
@@ -932,8 +946,8 @@ function StockThresholdsPanel() {
     }
     const next = editing
       ? thresholds.map((t) =>
-          t.id === editing.id ? { ...t, ...form } : t,
-        )
+        t.id === editing.id ? { ...t, ...form } : t,
+      )
       : [...thresholds, { id: String(Date.now()), ...form }];
     const ok = await persist(
       next,
@@ -1323,11 +1337,11 @@ function UnitsOfMeasurementPanel() {
           prev.map((u) =>
             u.id === editing.id
               ? {
-                  id: updated.id,
-                  name: updated.name,
-                  abbreviation: updated.abbreviation,
-                  category: updated.category,
-                }
+                id: updated.id,
+                name: updated.name,
+                abbreviation: updated.abbreviation,
+                category: updated.category,
+              }
               : u,
           ),
         );
@@ -1549,13 +1563,6 @@ function UnitsOfMeasurementPanel() {
 
 // ─── Material Categories Panel ────────────────────────────────────────────────
 
-interface MaterialCategory {
-  id: string;
-  name: string;
-  description: string;
-  color: string;
-}
-
 const CATEGORY_COLORS = [
   { label: "Teal", value: "teal" },
   { label: "Blue", value: "blue" },
@@ -1578,89 +1585,133 @@ const COLOR_CLASSES: Record<string, { bg: string; text: string }> = {
   gray: { bg: "bg-gray-100", text: "text-gray-600" },
 };
 
+/**
+ * The backend stores every dimension of every material item as its own flat
+ * Material row (no Type table underneath a Material any more) — the category
+ * list and its expanded view show that flat list directly, one card per row,
+ * using each row's own (already-concatenated) name. Only the builder, when
+ * reopening a category to edit it, needs the original Material Name -> item
+ * -> dimension tree back — this regroups the flat rows into that shape for
+ * that one purpose, using `materialGroupName`/`itemName` to know which rows
+ * belong together.
+ */
+function buildEditMaterials(rows: MaterialCatalogRowRecord[]): MaterialFormRow[] {
+  const materials: MaterialFormRow[] = [];
+  const materialIndex = new Map<string, MaterialFormRow>();
+  const itemIndex = new Map<string, ItemFormRow>();
+  for (const row of rows) {
+    const materialName = row.materialGroupName ?? row.name;
+    const classification = row.classification === "Reusable" ? "Reusable" : "Consumable";
+    const materialKey = `${materialName}::${classification}`;
+    let material = materialIndex.get(materialKey);
+    if (!material) {
+      material = { key: nextCatalogFormKey(), name: materialName, classification, items: [] };
+      materialIndex.set(materialKey, material);
+      materials.push(material);
+    }
+
+    const itemName = row.itemName ?? row.name;
+    const itemKey = `${materialKey}::${itemName}`;
+    let item = itemIndex.get(itemKey);
+    if (!item) {
+      item = { key: nextCatalogFormKey(), name: itemName, sku: row.sku || "", dimensions: [] };
+      itemIndex.set(itemKey, item);
+      material.items.push(item);
+    }
+
+    item.dimensions.push({
+      key: nextCatalogFormKey(),
+      kind: row.kind ?? "",
+      value: row.value == null ? "" : String(row.value),
+      unit: row.unit || "",
+    });
+  }
+  return materials;
+}
 
 function MaterialCategoriesPanel() {
-  const [categories, setCategories] =
-    useState<MaterialCategory[]>([]);
+  const [categories, setCategories] = useState<MaterialCategoryRecord[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState<MaterialCategory | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<MaterialCategory | null>(
-    null,
-  );
-  const [form, setForm] = useState({
-    name: "",
-    description: "",
-    color: "teal",
-  });
+  const [editing, setEditing] = useState<MaterialCategoryRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MaterialCategoryRecord | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", description: "", color: "teal" });
+  const [materials, setMaterials] = useState<MaterialFormRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     getMaterialCategories()
-      .then((data) =>
-        setCategories(
-          (data ?? []).map((c) => ({
-            id: c.id,
-            name: c.name,
-            description: c.description || "",
-            color: c.color || "teal",
-          })),
-        ),
-      )
-      .catch((err) =>
-        toast.error(err?.message || "Failed to load categories"),
-      );
+      .then((data) => {
+        console.log("[MaterialCategory:load] server returned", data);
+        setCategories(data ?? []);
+      })
+      .catch((err) => {
+        console.error("[MaterialCategory:load] failed", err);
+        toast.error(err?.message || "Failed to load categories");
+      });
   }, []);
 
   function openAdd() {
     setEditing(null);
     setForm({ name: "", description: "", color: "teal" });
+    setMaterials([blankMaterial()]);
     setShowModal(true);
   }
-  function openEdit(c: MaterialCategory) {
+
+  function openEdit(c: MaterialCategoryRecord) {
     setEditing(c);
-    setForm({ name: c.name, description: c.description, color: c.color });
+    setForm({ name: c.name, description: c.description || "", color: c.color });
+    const built = buildEditMaterials(c.materials ?? []);
+    setMaterials(built.length ? built : [blankMaterial()]);
     setShowModal(true);
   }
+
+
+  const trimmedName = form.name.trim();
+  const nameTaken = categories.some(
+    (c) => c.id !== editing?.id && c.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+  );
+  const materialsComplete = isMaterialsComplete(materials);
+  const canSave = Boolean(trimmedName) && !nameTaken && materialsComplete && !saving;
+
   async function save() {
-    if (!form.name.trim()) return;
+    if (!trimmedName) return;
+    if (nameTaken) {
+      toast.error(`A category named "${trimmedName}" already exists`);
+      return;
+    }
+    const incomplete = findIncompleteMaterialRow(materials);
+    if (incomplete) {
+      toast.error(incomplete);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
-        name: form.name.trim(),
+        name: trimmedName,
         description: form.description.trim(),
         color: form.color,
+        materials: materialsToPayload(materials),
       };
+      console.log(
+        `[MaterialCategory:save] submitting ${editing ? "update" : "create"} payload`,
+        payload,
+      );
       if (editing) {
         const updated = await updateMaterialCategory(editing.id, payload);
-        setCategories((prev) =>
-          prev.map((c) =>
-            c.id === editing.id
-              ? {
-                  id: updated.id,
-                  name: updated.name,
-                  description: updated.description || "",
-                  color: updated.color || "teal",
-                }
-              : c,
-          ),
-        );
+        console.log("[MaterialCategory:save] server responded (update)", updated);
+        setCategories((prev) => prev.map((c) => (c.id === editing.id ? updated : c)));
         toast.success("Category updated");
       } else {
         const created = await createMaterialCategory(payload);
-        setCategories((prev) => [
-          ...prev,
-          {
-            id: created.id,
-            name: created.name,
-            description: created.description || "",
-            color: created.color || "teal",
-          },
-        ]);
+        console.log("[MaterialCategory:save] server responded (create)", created);
+        setCategories((prev) => [...prev, created]);
         toast.success("Category added");
       }
       setShowModal(false);
     } catch (err: any) {
+      console.error("[MaterialCategory:save] failed", err);
       toast.error(err?.message || "Failed to save category");
     } finally {
       setSaving(false);
@@ -1668,44 +1719,44 @@ function MaterialCategoriesPanel() {
   }
   async function confirmDelete() {
     if (!deleteTarget) return;
+    console.log("[MaterialCategory:delete] requesting delete for", deleteTarget.id, deleteTarget.name);
     setDeleting(true);
     try {
       await deleteMaterialCategory(deleteTarget.id);
+      console.log("[MaterialCategory:delete] server confirmed delete for", deleteTarget.id);
       setCategories((prev) => prev.filter((c) => c.id !== deleteTarget.id));
       toast.success("Category deleted");
       setDeleteTarget(null);
     } catch (err: any) {
+      console.error("[MaterialCategory:delete] failed", err);
       toast.error(err?.message || "Failed to delete category");
     } finally {
       setDeleting(false);
     }
   }
 
+  const totalMaterials = categories.reduce((sum, c) => sum + c.materials.length, 0);
+  const totalReusable = categories.reduce(
+    (sum, c) => sum + c.materials.filter((m) => m.classification === "Reusable").length,
+    0,
+  );
+
   return (
     <div className="space-y-4">
       {/* Summary tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="bg-white border border-gray-200 rounded-xl p-4 text-center">
-          <p className="text-2xl font-bold text-teal-700">
-            {categories.length}
-          </p>
+          <p className="text-2xl font-bold text-teal-700">{categories.length}</p>
           <p className="text-xs text-gray-500 mt-0.5">Total Categories</p>
         </div>
-        {["blue", "amber", "teal"].map((color) => {
-          const count = categories.filter((c) => c.color === color).length;
-          const cls = COLOR_CLASSES[color];
-          return (
-            <div
-              key={color}
-              className={`border rounded-xl p-4 text-center ${cls.bg} border-transparent`}
-            >
-              <p className={`text-2xl font-bold ${cls.text}`}>{count}</p>
-              <p className={`text-xs mt-0.5 ${cls.text} opacity-80`}>
-                {CATEGORY_COLORS.find((c) => c.value === color)?.label}
-              </p>
-            </div>
-          );
-        })}
+        <div className="bg-white border border-gray-200 rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-teal-700">{totalMaterials}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Total Materials</p>
+        </div>
+        <div className="bg-purple-50 border border-transparent rounded-xl p-4 text-center">
+          <p className="text-2xl font-bold text-purple-700">{totalReusable}</p>
+          <p className="text-xs text-purple-700/80 mt-0.5">Reusable</p>
+        </div>
       </div>
 
       <div className="flex justify-end">
@@ -1718,11 +1769,12 @@ function MaterialCategoriesPanel() {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
-        <table className="min-w-[720px] w-full text-sm">
+        <table className="min-w-[900px] w-full text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Category Name</th>
               <th className="px-4 py-3 text-left font-medium">Description</th>
+              <th className="px-4 py-3 text-left font-medium">Materials</th>
               <th className="px-4 py-3 text-left font-medium">Colour</th>
               <th className="px-4 py-3 text-left font-medium w-20"></th>
             </tr>
@@ -1730,41 +1782,91 @@ function MaterialCategoriesPanel() {
           <tbody className="divide-y divide-gray-50">
             {categories.map((c) => {
               const cls = COLOR_CLASSES[c.color] ?? COLOR_CLASSES.gray;
+              const isExpanded = expanded === c.id;
               return (
-                <tr key={c.id} className="hover:bg-gray-50 group">
-                  <td className="px-4 py-3 font-medium text-gray-900">
-                    {c.name}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
-                    {c.description}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls.bg} ${cls.text}`}
-                    >
-                      {CATEGORY_COLORS.find((x) => x.value === c.color)
-                        ?.label ?? c.color}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 transition-opacity justify-end">
-                      <button
-                        onClick={() => openEdit(c)}
-                        title="Edit category"
-                        className="p-1.5 text-gray-400 hover:text-teal-600 rounded-lg hover:bg-teal-50"
+                <Fragment key={c.id}>
+                  <tr
+                    className="group hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setExpanded(isExpanded ? null : c.id)}
+                  >
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      {c.name}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
+                      {c.description}
+                    </td>
+                    <td className="px-4 py-3 text-teal-700 whitespace-nowrap">
+                      <div className="flex items-center gap-1">
+                        {isExpanded ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+                        )}
+                        {c.materials.length} material{c.materials.length === 1 ? "" : "s"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls.bg} ${cls.text}`}
                       >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(c)}
-                        title="Delete category"
-                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                        {CATEGORY_COLORS.find((x) => x.value === c.color)
+                          ?.label ?? c.color}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => openEdit(c)}
+                          title="Edit category"
+                          className="p-1.5 text-gray-400 hover:text-teal-600 rounded-lg hover:bg-teal-50"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(c)}
+                          title="Delete category"
+                          className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={5} className="bg-gray-50 px-4 py-4">
+                        {c.materials.length === 0 ? (
+                          <p className="text-xs text-gray-400 italic">No materials added yet.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {c.materials.map((row) => (
+                              <div
+                                key={row.id}
+                                className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-2 flex-wrap"
+                              >
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Package className="w-3.5 h-3.5 text-teal-600 flex-shrink-0" />
+                                  <span className="text-sm font-medium text-gray-900">{row.name}</span>
+                                  <span
+                                    className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${row.classification === "Reusable" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-600"}`}
+                                  >
+                                    {row.classification}
+                                  </span>
+                                  {row.sku && (
+                                    <span className="text-[10px] tracking-wide text-gray-400">{row.sku}</span>
+                                  )}
+                                </div>
+                                <span className="text-xs text-gray-400 flex-shrink-0">
+                                  {[row.value, row.unit, row.kind].filter(Boolean).join(" ")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -1773,8 +1875,8 @@ function MaterialCategoriesPanel() {
 
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <h2 className="text-base font-semibold text-gray-900">
                 {editing ? "Edit" : "Add"} Material Category
               </h2>
@@ -1785,7 +1887,7 @@ function MaterialCategoriesPanel() {
                 &times;
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-5 overflow-y-auto">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Category Name<span className="text-red-500">*</span>
@@ -1798,6 +1900,11 @@ function MaterialCategoriesPanel() {
                   placeholder="e.g. Electrical"
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                 />
+                {nameTaken && (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    A category named "{trimmedName}" already exists.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1833,8 +1940,10 @@ function MaterialCategoriesPanel() {
                   })}
                 </div>
               </div>
+
+              <MaterialsBuilder materials={materials} onChange={setMaterials} />
             </div>
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
               <button
                 onClick={() => setShowModal(false)}
                 className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50"
@@ -1843,8 +1952,17 @@ function MaterialCategoriesPanel() {
               </button>
               <button
                 onClick={save}
-                disabled={saving}
-                className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60"
+                disabled={!canSave}
+                title={
+                  !trimmedName
+                    ? "Category name is required"
+                    : nameTaken
+                      ? `A category named "${trimmedName}" already exists`
+                      : !materialsComplete
+                        ? "Fill in or remove every incomplete material, item and dimension"
+                        : undefined
+                }
+                className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {saving ? "Saving…" : editing ? "Save Changes" : "Add Category"}
               </button>
@@ -1861,7 +1979,9 @@ function MaterialCategoriesPanel() {
             </h2>
             <p className="text-sm text-gray-600">
               Remove <span className="font-semibold">{deleteTarget.name}</span>?
-              Materials already assigned to this category will not be changed.
+              Its {deleteTarget.materials.length} material
+              {deleteTarget.materials.length === 1 ? "" : "s"} will no longer
+              be linked to a category.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -1920,12 +2040,12 @@ export function StorefrontConfigPage() {
 
       <div className="flex gap-1 border-b border-gray-200 flex-wrap">
         {([
-          ["levels",     "Store Levels",          <Layers  key="l" className="w-4 h-4" />],
-          ["stores",     "Stores",                <Store   key="st" className="w-4 h-4" />],
-          ["thresholds", "Stock Thresholds",      <Settings key="s" className="w-4 h-4" />],
-          ["units",      "Units of Measurement",  <Ruler   key="r" className="w-4 h-4" />],
-          ["categories", "Material Categories",   <Tag     key="t" className="w-4 h-4" />],
-          ["numbering",  "Module Numbering",      <Hash    key="n" className="w-4 h-4" />],
+          ["levels", "Store Levels", <Layers key="l" className="w-4 h-4" />],
+          ["stores", "Stores", <Store key="st" className="w-4 h-4" />],
+          ["thresholds", "Stock Thresholds", <Settings key="s" className="w-4 h-4" />],
+          ["units", "Units of Measurement", <Ruler key="r" className="w-4 h-4" />],
+          ["categories", "Material Categories", <Tag key="t" className="w-4 h-4" />],
+          ["numbering", "Module Numbering", <Hash key="n" className="w-4 h-4" />],
         ] as const).map(([key, label, icon]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === key ? "border-teal-600 text-teal-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
