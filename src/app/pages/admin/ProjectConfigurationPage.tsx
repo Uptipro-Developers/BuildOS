@@ -550,9 +550,9 @@ function ConfigureWorkflowModal({
     availableProcesses.some((p) => !configuredProcessIds.has(p.id));
   const [selectedProcess, setSelectedProcess] = useState(
     existingProcess?.label ??
-      existing?.process ??
-      firstSelectableProcess?.label ??
-      "",
+    existing?.process ??
+    firstSelectableProcess?.label ??
+    "",
   );
   const [selectedApp, setSelectedApp] = useState(
     existingProcess?.app ?? existing?.app ?? firstSelectableProcess?.app ?? "",
@@ -720,11 +720,10 @@ function ConfigureWorkflowModal({
                 <button
                   key={wt.key}
                   onClick={() => setWfType(wt.key)}
-                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-colors ${
-                    wfType === wt.key
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
+                  className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-colors ${wfType === wt.key
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                    }`}
                 >
                   <wt.icon className="w-5 h-5" />
                   <span className="text-xs font-medium">{wt.name}</span>
@@ -766,11 +765,10 @@ function ConfigureWorkflowModal({
                 <button
                   type="button"
                   onClick={() => setGroupApprovalMode("any")}
-                  className={`flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left transition-colors ${
-                    groupApprovalMode === "any"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
+                  className={`flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left transition-colors ${groupApprovalMode === "any"
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                    }`}
                 >
                   <span className="text-xs font-semibold">Any (OR)</span>
                   <span className="text-[11px] text-gray-400">
@@ -780,11 +778,10 @@ function ConfigureWorkflowModal({
                 <button
                   type="button"
                   onClick={() => setGroupApprovalMode("all")}
-                  className={`flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left transition-colors ${
-                    groupApprovalMode === "all"
-                      ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
-                  }`}
+                  className={`flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left transition-colors ${groupApprovalMode === "all"
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                    }`}
                 >
                   <span className="text-xs font-semibold">All (AND)</span>
                   <span className="text-[11px] text-gray-400">
@@ -1023,11 +1020,10 @@ export function ProjectConfigurationPage() {
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              activeTab === t.key
-                ? "border-indigo-500 text-indigo-700"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === t.key
+              ? "border-indigo-500 text-indigo-700"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
           >
             {t.label}
           </button>
@@ -1047,11 +1043,10 @@ export function ProjectConfigurationPage() {
                 <button
                   key={app}
                   onClick={() => setCatalogAppFilter(app)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors ${
-                    catalogAppFilter === app
-                      ? "bg-indigo-600 text-white"
-                      : "text-gray-600 hover:bg-gray-100"
-                  }`}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap transition-colors ${catalogAppFilter === app
+                    ? "bg-indigo-600 text-white"
+                    : "text-gray-600 hover:bg-gray-100"
+                    }`}
                 >
                   {app}
                 </button>
@@ -1236,10 +1231,9 @@ export function ProjectConfigurationPage() {
                               {wf.process}
                             </p>
                             <span
-                              className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-                                CATALOG_APP_COLORS[wf.app] ??
+                              className={`text-xs font-medium px-2 py-0.5 rounded-full border ${CATALOG_APP_COLORS[wf.app] ??
                                 "bg-gray-100 text-gray-600 border-gray-200"
-                              }`}
+                                }`}
                             >
                               {wf.app}
                             </span>

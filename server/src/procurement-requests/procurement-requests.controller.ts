@@ -94,6 +94,14 @@ export class ProcurementRequestsController {
     updateInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
     @Patch('purchase-invoices/:id')
     patchInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
+    // Moves a Pending Review invoice to Pending Approval, where the Purchase
+    // Invoices workflow (Settings › Approvals) takes over. The posting draft
+    // (date/method/GL lines) is decided here, up front.
+    @Post('purchase-invoices/:id/send-for-approval')
+    @RequiresProcess('p_purchase_invoices', 'edit')
+    sendInvoiceForApproval(@Param('id') id: string, @Body() body: any) {
+        return this.svc.sendInvoiceForApproval(id, body?.postingDraft);
+    }
     /**
      * Cancels an invoice instead of deleting it.
      *

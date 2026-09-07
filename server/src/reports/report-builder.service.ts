@@ -14,9 +14,9 @@ export interface ReportDefinition {
 
 @Injectable()
 export class ReportBuilderService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
-  /**
+  /**a
    * Create report definition
    */
   async createReportDefinition(data: any) {
@@ -185,7 +185,7 @@ export class ReportBuilderService {
     // "Pending" is everything not yet paid for and not abandoned; "completed"
     // is the end of the chain, which is the goods arriving — not a `completed`
     // status, which no longer exists because no step ever set it.
-    const OPEN: POStatus[] = ['draft', 'sent_to_finance', 'finance_accepted', 'finance_declined'];
+    const OPEN: POStatus[] = ['draft', 'po_created', 'sent_to_finance', 'finance_accepted', 'finance_declined'];
     const pendingOrders = purchaseOrders.filter((po) => OPEN.includes(po.status));
     const completedOrders = purchaseOrders.filter((po) => po.status === 'goods_received');
 

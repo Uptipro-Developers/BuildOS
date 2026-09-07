@@ -9,10 +9,13 @@ import {
   FileText,
   Landmark,
   MailOpen,
+  Package,
   PackageCheck,
   Send,
   ShoppingCart,
   ThumbsUp,
+  TrendingDown,
+  TrendingUp,
   XCircle,
 } from "lucide-react";
 
@@ -53,33 +56,33 @@ export type MaterialRequestStatus =
   | "fulfilled";
 
 export const MATERIAL_REQUEST_STATUS: Record<MaterialRequestStatus, StatusDef> =
-  {
-    pending: {
-      label: "Pending Review",
-      badge: "bg-amber-100 text-amber-700",
-      icon: <Clock className={ICON} />,
-    },
-    approved: {
-      label: "Approved",
-      badge: "bg-green-100 text-green-700",
-      icon: <CheckCircle2 className={ICON} />,
-    },
-    in_procurement: {
-      label: "In Procurement",
-      badge: "bg-blue-100 text-blue-700",
-      icon: <ShoppingCart className={ICON} />,
-    },
-    rejected: {
-      label: "Rejected",
-      badge: "bg-red-100 text-red-700",
-      icon: <XCircle className={ICON} />,
-    },
-    fulfilled: {
-      label: "Fulfilled",
-      badge: "bg-emerald-100 text-emerald-700",
-      icon: <PackageCheck className={ICON} />,
-    },
-  };
+{
+  pending: {
+    label: "Pending Review",
+    badge: "bg-amber-100 text-amber-700",
+    icon: <Clock className={ICON} />,
+  },
+  approved: {
+    label: "Approved",
+    badge: "bg-green-100 text-green-700",
+    icon: <CheckCircle2 className={ICON} />,
+  },
+  in_procurement: {
+    label: "In Procurement",
+    badge: "bg-blue-100 text-blue-700",
+    icon: <ShoppingCart className={ICON} />,
+  },
+  rejected: {
+    label: "Rejected",
+    badge: "bg-red-100 text-red-700",
+    icon: <XCircle className={ICON} />,
+  },
+  fulfilled: {
+    label: "Fulfilled",
+    badge: "bg-emerald-100 text-emerald-700",
+    icon: <PackageCheck className={ICON} />,
+  },
+};
 
 // ── Purchase Requests ────────────────────────────────────────────────────────
 
@@ -224,6 +227,7 @@ export const RECEIVED_QUOTE_STATUS: Record<ReceivedQuoteStatus, StatusDef> = {
  */
 export type PurchaseOrderStatus =
   | "draft"
+  | "po_created"
   | "sent_to_finance"
   | "finance_accepted"
   | "finance_declined"
@@ -238,6 +242,11 @@ export const PURCHASE_ORDER_STATUS: Record<PurchaseOrderStatus, StatusDef> = {
     label: "Draft",
     badge: "bg-gray-100 text-gray-600",
     icon: <FileEdit className={ICON} />,
+  },
+  po_created: {
+    label: "PO Created",
+    badge: "bg-sky-100 text-sky-700",
+    icon: <FileText className={ICON} />,
   },
   sent_to_finance: {
     label: "Sent to Finance",
@@ -284,6 +293,7 @@ export const PURCHASE_ORDER_STATUS: Record<PurchaseOrderStatus, StatusDef> = {
 /** Ordered stages, for progress display and for "has it got past X" checks. */
 export const PO_STAGE_ORDER: PurchaseOrderStatus[] = [
   "draft",
+  "po_created",
   "sent_to_finance",
   "finance_accepted",
   "paid",
@@ -298,57 +308,99 @@ export const PO_STAGE_ORDER: PurchaseOrderStatus[] = [
  * The finance side of the same order.
  *
  * `pending_review` is what a purchase order becomes the moment procurement
- * sends it to finance; the rest mirror the order's own states so the two
+ * sends it to finance. From there it goes through the Purchase Invoices
+ * approval workflow (`pending_approval` → `approved`/`rejected`) before it
+ * can be posted to the ledger, mirroring the order's own states so the two
  * modules never disagree about where the money is.
  */
 export type PurchaseInvoiceStatus =
   | "pending_review"
-  | "accepted"
-  | "declined"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
   | "paid"
   | "cancelled";
 
 export const PURCHASE_INVOICE_STATUS: Record<PurchaseInvoiceStatus, StatusDef> =
-  {
-    pending_review: {
-      label: "Pending Review",
-      badge: "bg-amber-100 text-amber-700",
-      icon: <Clock className={ICON} />,
-    },
-    accepted: {
-      label: "Accepted",
-      badge: "bg-blue-100 text-blue-700",
-      icon: <CheckCircle2 className={ICON} />,
-    },
-    declined: {
-      label: "Declined",
-      badge: "bg-red-100 text-red-700",
-      icon: <XCircle className={ICON} />,
-    },
-    paid: {
-      label: "Paid",
-      badge: "bg-emerald-100 text-emerald-700",
-      icon: <Banknote className={ICON} />,
-    },
-    cancelled: {
-      label: "Cancelled",
-      badge: "bg-gray-100 text-gray-500",
-      icon: <Ban className={ICON} />,
-    },
-  };
-
-// ── Goods Receipts ───────────────────────────────────────────────────────────
-
-export type GoodsReceiptStatus = "pending" | "received" | "rejected";
-
-export const GOODS_RECEIPT_STATUS: Record<GoodsReceiptStatus, StatusDef> = {
-  pending: {
-    label: "Awaiting Receipt",
+{
+  pending_review: {
+    label: "Pending Review",
     badge: "bg-amber-100 text-amber-700",
     icon: <Clock className={ICON} />,
   },
-  received: {
-    label: "Received",
+  pending_approval: {
+    label: "Pending Approval",
+    badge: "bg-purple-100 text-purple-700",
+    icon: <Send className={ICON} />,
+  },
+  approved: {
+    label: "Approved",
+    badge: "bg-blue-100 text-blue-700",
+    icon: <ThumbsUp className={ICON} />,
+  },
+  rejected: {
+    label: "Rejected",
+    badge: "bg-red-100 text-red-700",
+    icon: <XCircle className={ICON} />,
+  },
+  paid: {
+    label: "Paid",
+    badge: "bg-emerald-100 text-emerald-700",
+    icon: <Banknote className={ICON} />,
+  },
+  cancelled: {
+    label: "Cancelled",
+    badge: "bg-gray-100 text-gray-500",
+    icon: <Ban className={ICON} />,
+  },
+};
+
+// ── Goods Receipts ───────────────────────────────────────────────────────────
+
+/**
+ * `pending` — nothing recorded yet. `pending_approval` ("Pending Inspection")
+ * — a delivery has been keyed in and is awaiting the configured approver's
+ * decision; nothing has touched stock. The rest are what accepting one
+ * settles into: rejection outranks quantity (`partial_delivery`), then it's a
+ * straight comparison of received to ordered.
+ */
+export type GoodsReceiptStatus =
+  | "pending"
+  | "pending_approval"
+  | "partial_delivery"
+  | "over_supply"
+  | "under_supply"
+  | "fully_received"
+  | "rejected";
+
+export const GOODS_RECEIPT_STATUS: Record<GoodsReceiptStatus, StatusDef> = {
+  pending: {
+    label: "Awaiting Delivery",
+    badge: "bg-gray-100 text-gray-600",
+    icon: <Clock className={ICON} />,
+  },
+  pending_approval: {
+    label: "Pending Inspection",
+    badge: "bg-amber-100 text-amber-700",
+    icon: <MailOpen className={ICON} />,
+  },
+  partial_delivery: {
+    label: "Partial Delivery",
+    badge: "bg-blue-100 text-blue-700",
+    icon: <Package className={ICON} />,
+  },
+  over_supply: {
+    label: "Over Supply",
+    badge: "bg-purple-100 text-purple-700",
+    icon: <TrendingUp className={ICON} />,
+  },
+  under_supply: {
+    label: "Under Supply",
+    badge: "bg-orange-100 text-orange-700",
+    icon: <TrendingDown className={ICON} />,
+  },
+  fully_received: {
+    label: "Fully Received",
     badge: "bg-emerald-100 text-emerald-700",
     icon: <PackageCheck className={ICON} />,
   },

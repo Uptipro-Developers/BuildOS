@@ -43,9 +43,13 @@ export class AdminPublicController {
         return this.svc.findDeployedReportTemplates(app);
     }
 
+    /**
+     * Letterhead fields (name, address, phone, logo) — no financials, nothing
+     * admin-only. Documents like the Purchase Order preview/PDF need this for
+     * any Procurement user, not just admins, so this follows the same fix as
+     * `reference-data` above rather than gating a read on `admin`.
+     */
     @Get('company-profile')
-    @Roles('admin')
-    @RequireApp('admin')
     getCompanyProfile() {
         return this.svc.getCompanyProfile();
     }
