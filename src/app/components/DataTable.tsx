@@ -1,10 +1,20 @@
-import { Fragment, useState, useMemo, type ReactNode } from "react";
+import {
+  Fragment,
+  isValidElement,
+  useState,
+  useMemo,
+  type ReactNode,
+} from "react";
 import { ChevronUp, ChevronDown, ArrowUpDown, Search, X } from "lucide-react";
 
 export interface Column<T> {
   key: string;
   label: string;
   render: (row: T) => ReactNode;
+  /** Raw value used for sorting when it differs from `row[key]`. */
+  sortValue?: (row: T) => string | number | Date | null | undefined;
+  /** Raw value searched by the column filter when it differs from `row[key]`. */
+  filterValue?: (row: T) => string | number | null | undefined;
   sortable?: boolean;
   filterable?: boolean;
   className?: string;
@@ -40,6 +50,85 @@ interface FilterState {
   value: string;
 }
 
+const collator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
+/**
+ * Extracts the visible text from the simple JSX returned by table renderers.
+ * `String(<span>Value</span>)` is "[object Object]", which previously made
+ * most of the table's apparently sortable/filterable columns compare as equal.
+ */
+function textFromNode(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textFromNode).join(" ");
+  if (isValidElement(node)) {
+    const props = node.props as Record<string, unknown>;
+    const visibleValue =
+      props.children ?? props.label ?? props.value ?? props.status ?? props.title;
+    return textFromNode(visibleValue as ReactNode);
+  }
+  return "";
+}
+
+function rowValue<T>(row: T, key: string): unknown {
+  if (row !== null && typeof row === "object" && key in row) {
+    return (row as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
+function filterText<T>(column: Column<T>, row: T): string {
+  const explicit = column.filterValue?.(row);
+  if (explicit !== undefined && explicit !== null) return String(explicit);
+
+  const raw = rowValue(row, column.key);
+  if (
+    typeof raw === "string" ||
+    typeof raw === "number" ||
+    typeof raw === "boolean"
+  ) {
+    return String(raw);
+  }
+
+  return textFromNode(column.render(row));
+}
+
+function sortableValue<T>(column: Column<T>, row: T): string | number {
+  const explicit = column.sortValue?.(row);
+  const raw = explicit ?? rowValue(row, column.key);
+
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+  if (raw instanceof Date) return raw.getTime();
+
+  const text =
+    typeof raw === "string" || typeof raw === "boolean"
+      ? String(raw).trim()
+      : textFromNode(column.render(row)).trim();
+
+  // Currency, percentages and formatted quantities should sort numerically.
+  const numericText = text
+    .replace(/−/g, "-")
+    .replace(/\((.*)\)/, "-$1")
+    .replace(/[^0-9.+-]/g, "");
+  if (numericText && /^[-+]?\d*\.?\d+$/.test(numericText)) {
+    const number = Number(numericText);
+    if (Number.isFinite(number)) return number;
+  }
+
+  // Date-like columns should compare chronologically even when their display
+  // format is not ISO. Restrict the conversion to date-labelled columns so an
+  // identifier containing digits is never mistaken for a timestamp.
+  if (/date|time|period|created|updated|due/i.test(`${column.key} ${column.label}`)) {
+    const timestamp = Date.parse(text);
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+
+  return text;
+}
+
 export function DataTable<T>({
   columns, data, keyExtractor, searchPlaceholder = "Search...",
   searchFields, emptyMessage = "No data found",
@@ -66,8 +155,7 @@ export function DataTable<T>({
       result = result.filter(row => {
         const col = columns.find(c => c.key === cf.key);
         if (!col) return true;
-        const rendered = col.render(row);
-        return String(rendered).toLowerCase().includes(q);
+        return filterText(col, row).toLowerCase().includes(q);
       });
     }
 
@@ -75,12 +163,12 @@ export function DataTable<T>({
       const col = columns.find(c => c.key === sort.key);
       if (col) {
         result = [...result].sort((a, b) => {
-          const aVal = String(col.render(a));
-          const bVal = String(col.render(b));
-          const aNum = parseFloat(aVal.replace(/[₦,()−+]/g, ""));
-          const bNum = parseFloat(bVal.replace(/[₦,()−+]/g, ""));
-          const useNum = !isNaN(aNum) && !isNaN(bNum);
-          const cmp = useNum ? aNum - bNum : aVal.localeCompare(bVal);
+          const aVal = sortableValue(col, a);
+          const bVal = sortableValue(col, b);
+          const cmp =
+            typeof aVal === "number" && typeof bVal === "number"
+              ? aVal - bVal
+              : collator.compare(String(aVal), String(bVal));
           return sort.dir === "asc" ? cmp : -cmp;
         });
       }
@@ -92,12 +180,9 @@ export function DataTable<T>({
   const totalPages = Math.ceil(filtered.length / pageSize);
   const paged = filtered.slice(page * pageSize, (page + 1) * pageSize);
 
-  function toggleSort(key: string) {
-    setSort(prev => {
-      if (prev.key !== key) return { key, dir: "asc" };
-      if (prev.dir === "asc") return { key, dir: "desc" };
-      return { key: "", dir: null };
-    });
+  function applySort(key: string, dir: Exclude<SortDir, null>) {
+    setSort({ key, dir });
+    setPage(0);
     setOpenSortKey(null);
   }
 
@@ -165,24 +250,34 @@ export function DataTable<T>({
                     style={col.minWidth ? { minWidth: col.minWidth } : undefined}>
                     <div className="flex items-center gap-1 group">
                       <span>{col.label}</span>
-                      {col.sortable && (
+                      {(col.sortable || col.filterable) && (
                         <div className="relative">
                           <button onClick={() => setOpenSortKey(isOpen ? null : col.key)}
+                            type="button"
+                            aria-label={`Sort or filter ${col.label}`}
                             className="p-0.5 rounded text-gray-300 hover:text-gray-600 transition-colors">
-                            {isSorted ? (sort.dir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3" />}
+                            {col.sortable ? (
+                              isSorted ? (sort.dir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3" />
+                            ) : (
+                              <Search className="w-3 h-3" />
+                            )}
                           </button>
                           {isOpen && (
                             <div className="absolute top-full left-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20 p-1.5 space-y-1">
-                              <button onClick={() => { toggleSort(col.key); setOpenSortKey(null); }}
-                                className={`w-full text-left px-2 py-1 text-xs rounded ${isSorted && sort.dir === "asc" ? "bg-emerald-50 text-emerald-700" : "text-gray-600 hover:bg-gray-50"}`}>
-                                <ChevronUp className="w-3 h-3 inline mr-1" /> Sort Ascending
-                              </button>
-                              <button onClick={() => { toggleSort(col.key); setOpenSortKey(null); }}
-                                className={`w-full text-left px-2 py-1 text-xs rounded ${isSorted && sort.dir === "desc" ? "bg-emerald-50 text-emerald-700" : "text-gray-600 hover:bg-gray-50"}`}>
-                                <ChevronDown className="w-3 h-3 inline mr-1" /> Sort Descending
-                              </button>
+                              {col.sortable && (
+                                <>
+                                  <button type="button" onClick={() => applySort(col.key, "asc")}
+                                    className={`w-full text-left px-2 py-1 text-xs rounded ${isSorted && sort.dir === "asc" ? "bg-emerald-50 text-emerald-700" : "text-gray-600 hover:bg-gray-50"}`}>
+                                    <ChevronUp className="w-3 h-3 inline mr-1" /> Sort Ascending
+                                  </button>
+                                  <button type="button" onClick={() => applySort(col.key, "desc")}
+                                    className={`w-full text-left px-2 py-1 text-xs rounded ${isSorted && sort.dir === "desc" ? "bg-emerald-50 text-emerald-700" : "text-gray-600 hover:bg-gray-50"}`}>
+                                    <ChevronDown className="w-3 h-3 inline mr-1" /> Sort Descending
+                                  </button>
+                                </>
+                              )}
                               {col.filterable && (
-                                <div className="border-t border-gray-100 pt-1 mt-1">
+                                <div className={`${col.sortable ? "border-t border-gray-100 pt-1 mt-1" : ""}`}>
                                   <input value={filterVal} onChange={e => setColumnFilter(col.key, e.target.value)}
                                     placeholder={`Filter ${col.label}...`}
                                     className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500" />
