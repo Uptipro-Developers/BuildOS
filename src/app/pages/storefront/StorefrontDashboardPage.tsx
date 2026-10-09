@@ -26,7 +26,6 @@ import {
 } from "../../utils/generalSettings";
 import {
   stockStatusFor,
-  useStoreThresholds,
 } from "../../utils/stockThresholds";
 
 // Compact currency formatter to match the storefront design (e.g. $142.8M).
@@ -91,23 +90,16 @@ export function StorefrontDashboardPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
-  const { thresholdForStore } = useStoreThresholds();
-
-  /**
-   * Low-stock counts per store, against that store's configured thresholds.
-   * Computed here rather than while mapping the response so a threshold that
-   * arrives after the stores still applies.
-   */
+  /** StoreItem responses expose the matching material's reorder threshold. */
   const lowStockByStore = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const store of stores) {
-      const threshold = thresholdForStore(store.name);
       counts[store.id] = store.lines.filter(
-        (line) => stockStatusFor(line, threshold) !== "In Stock",
+        (line) => stockStatusFor(line) !== "In Stock",
       ).length;
     }
     return counts;
-  }, [stores, thresholdForStore]);
+  }, [stores]);
 
   const stats = useMemo(
     () => [

@@ -18,7 +18,6 @@ import {
   updateStoreItem,
   deleteStoreItem,
   getMaterials,
-  getStores,
   type StoreItem as ApiStoreItem,
 } from "../../api/materials";
 import {
@@ -31,7 +30,6 @@ import {
 } from "../../utils/generalSettings";
 import {
   stockStatusFor,
-  useStoreThresholds,
   type StockStatus,
 } from "../../utils/stockThresholds";
 
@@ -51,7 +49,7 @@ interface StockItem {
   unitCost: number;
   lastReceived: string;
   bin: string;
-  /** Which store holds the line, so its configured thresholds can apply. */
+  /** Which store holds the line. */
   storeId: string;
 }
 
@@ -107,13 +105,8 @@ export function GeneralStorePage() {
   >([]);
   const [configuredCategories, setConfiguredCategories] = useState<string[]>([]);
   const [configuredUnits, setConfiguredUnits] = useState<string[]>([]);
-  // Thresholds are configured against the store's name, so the id on each line
-  // has to be resolved to one before a line's status can be judged.
-  const [storeNames, setStoreNames] = useState<Record<string, string>>({});
-  const { thresholdForStore } = useStoreThresholds();
-
   const getStatus = (item: StockItem): StockStatus =>
-    stockStatusFor(item, thresholdForStore(storeNames[item.storeId]));
+    stockStatusFor(item);
 
   // One shared, de-duplicated handler: four widget loads failing on a network
   // outage should not stack four identical toasts.
@@ -140,14 +133,6 @@ export function GeneralStorePage() {
         ),
       )
       .catch(reportLoadFailure("materials"));
-
-    getStores()
-      .then((data) =>
-        setStoreNames(
-          Object.fromEntries(data.map((s) => [s.id, s.name ?? ""])),
-        ),
-      )
-      .catch(reportLoadFailure("stores"));
 
     getMaterialCategories()
       .then((data) => setConfiguredCategories(data.map((c) => c.name).filter(Boolean)))
@@ -197,7 +182,6 @@ export function GeneralStorePage() {
       category: form.category,
       unit: form.unit,
       qty: form.qty,
-      reorderLevel: form.reorderLevel,
       unitCost: form.unitCost,
       bin: form.bin,
     };
@@ -628,20 +612,6 @@ export function GeneralStorePage() {
                     value={form.qty}
                     onChange={(e) =>
                       setForm({ ...form, qty: Number(e.target.value) })
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Reorder Level
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                    value={form.reorderLevel}
-                    onChange={(e) =>
-                      setForm({ ...form, reorderLevel: Number(e.target.value) })
                     }
                   />
                 </div>

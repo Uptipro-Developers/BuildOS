@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiFetch } from "../../api/client";
+import { fetchDepartments } from "../../api/departments";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getCurrencySymbol,
@@ -48,6 +49,7 @@ interface SalaryBand {
   department: string;
   description: string;
   basicSalary: number;
+  salaryType: "Monthly" | "Annual";
   components: SalaryComponent[];
 }
 
@@ -431,6 +433,7 @@ function ComponentModal({
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function SalaryStructurePage() {
   const [bands, setBands] = useState<SalaryBand[]>([]);
+  const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     apiFetch<any[]>("/salary-bands")
@@ -443,6 +446,7 @@ export function SalaryStructurePage() {
             department: b.department ?? "",
             description: b.description ?? "",
             basicSalary: b.basicSalary ?? 0,
+            salaryType: b.salaryType === "Annual" ? "Annual" : "Monthly",
             components: Array.isArray(b.components) ? b.components : [],
           })),
         ),
@@ -451,6 +455,11 @@ export function SalaryStructurePage() {
         console.error("Failed to load salary bands:", err);
         setBands([]);
       });
+  }, []);
+  useEffect(() => {
+    fetchDepartments()
+      .then((rows) => setDepartments(rows.map((department) => ({ id: department.id, name: department.name }))))
+      .catch(() => setDepartments([]));
   }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["b1"]));
   const [modalBand, setModalBand] = useState<SalaryBand | null>(null);
@@ -466,6 +475,7 @@ export function SalaryStructurePage() {
     department: "",
     description: "",
     basicSalary: 0,
+    salaryType: "Monthly" as "Monthly" | "Annual",
   });
 
   const toggle = (id: string) =>
@@ -546,6 +556,7 @@ export function SalaryStructurePage() {
           department: newBand.department,
           description: newBand.description,
           basicSalary: newBand.basicSalary,
+          salaryType: newBand.salaryType,
           components: [],
         }),
       });
@@ -558,10 +569,11 @@ export function SalaryStructurePage() {
           department: created.department ?? newBand.department,
           description: created.description ?? newBand.description,
           basicSalary: created.basicSalary ?? newBand.basicSalary,
+          salaryType: created.salaryType === "Annual" ? "Annual" : newBand.salaryType,
           components: Array.isArray(created.components) ? created.components : [],
         },
       ]);
-      setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0 });
+      setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0, salaryType: "Monthly" });
       setAddBandOpen(false);
       toast.success(`Salary band "${gradeName}" created.`);
     } catch (err) {
@@ -684,6 +696,9 @@ export function SalaryStructurePage() {
                       </span>
                       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
                         {band.department}
+                      </span>
+                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                        {band.salaryType}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
@@ -910,16 +925,33 @@ export function SalaryStructurePage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Department
                   </label>
-                  <input
+                  <select
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. Engineering"
                     value={newBand.department}
                     onChange={(e) =>
                       setNewBand((p) => ({ ...p, department: e.target.value }))
                     }
-                  />
+                  >
+                    <option value="">Select department…</option>
+                    {departments.map((department) => (
+                      <option key={department.id} value={department.name}>{department.name}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="col-span-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Salary Type
+                  </label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={newBand.salaryType}
+                    onChange={(e) => setNewBand((p) => ({ ...p, salaryType: e.target.value as "Monthly" | "Annual" }))}
+                  >
+                    <option value="Monthly">Monthly</option>
+                    <option value="Annual">Annual</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Basic Salary ({getCurrencySymbol()})
                   </label>

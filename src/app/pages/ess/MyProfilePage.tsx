@@ -40,6 +40,7 @@ interface MeResponse {
     firstName: string;
     lastName: string;
     role: string;
+    position: string | null;
     phone: string | null;
     dateHired: string;
     employmentType: string;
@@ -186,7 +187,7 @@ export function MyProfilePage() {
 
   const name = profile?.user.name ?? "—";
   const email = profile?.user.email ?? "—";
-  const jobTitle = profile?.employee?.role ?? "—";
+  const jobTitle = profile?.employee?.position ?? profile?.employee?.role ?? "—";
   const department =
     profile?.employee?.department?.name ?? profile?.user.department ?? "—";
   const initials = profile ? getInitials(profile.user.name) : "—";
@@ -252,7 +253,7 @@ export function MyProfilePage() {
       icon: <Building2 className="w-4 h-4 text-gray-400" />,
     },
     {
-      label: "Role",
+      label: "Position",
       value: jobTitle,
       icon: <Briefcase className="w-4 h-4 text-gray-400" />,
     },

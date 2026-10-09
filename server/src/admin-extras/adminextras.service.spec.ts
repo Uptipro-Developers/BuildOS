@@ -202,6 +202,29 @@ describe('material categories', () => {
         expect(data.materialType).toBe('Consumable');
     });
 
+    it('persists a named custom dimension as the material kind', async () => {
+        const { service, prisma } = makeService();
+        await service.createMaterialCategory({
+            name: 'Pipes',
+            materials: [{
+                name: 'PVC Pipe',
+                classification: 'Consumable',
+                items: [{
+                    name: 'Pressure Pipe',
+                    dimensions: [{ kind: 'Diameter', value: 110, unit: 'mm' }],
+                }],
+            }],
+        });
+
+        expect(prisma.material.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({
+                kind: 'Diameter',
+                value: 110,
+                unit: 'mm',
+            }),
+        });
+    });
+
     it('refuses a dimension that has neither a value nor a unit', async () => {
         const { service } = makeService();
         await expect(
@@ -333,7 +356,7 @@ describe('material categories', () => {
                 {
                     name: 'Iron Rod',
                     classification: 'Consumable',
-                    items: [{ name: 'Deformed Bar', sku: 'IR-DB', dimensions: [{ kind: 'Length', value: 12, unit: 'mm' }] }],
+                    items: [{ name: 'Deformed Bar', sku: 'IR-DB', reorderLevel: 25, dimensions: [{ kind: 'Length', value: 12, unit: 'mm' }] }],
                 },
             ],
         });
@@ -349,6 +372,7 @@ describe('material categories', () => {
                 materialGroupName: 'Iron Rod',
                 itemName: 'Deformed Bar',
                 sku: 'IR-DB',
+                reorderLevel: 25,
                 kind: 'Length',
                 value: 12,
                 unit: 'mm',

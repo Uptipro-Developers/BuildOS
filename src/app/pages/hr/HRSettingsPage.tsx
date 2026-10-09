@@ -3,6 +3,7 @@ import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
 import { HRGeneralSetupPage } from "./HRGeneralSetupPage";
 import { LeaveTypeSetupPage } from "./LeaveTypeSetupPage";
 import { ClaimTypeSetupPage } from "./ClaimTypeSetupPage";
+import { EmploymentTypesPanel } from "./EmploymentTypesPanel";
 
 /**
  * HR Settings.
@@ -16,11 +17,12 @@ import { ClaimTypeSetupPage } from "./ClaimTypeSetupPage";
  * standalone routes and this page cannot drift apart. They render without their
  * own page heading when embedded.
  */
-const TABS = ["general", "leave", "claim", "numbering"] as const;
+const TABS = ["general", "employment", "leave", "claim", "numbering"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {
   general: "General",
+  employment: "Employment Types",
   leave: "Leave Types",
   claim: "Claim Types",
   numbering: "Numbering",
@@ -56,6 +58,7 @@ export function HRSettingsPage() {
       </div>
 
       {tab === "general" && <HRGeneralSetupPage embedded />}
+      {tab === "employment" && <EmploymentTypesPanel />}
       {tab === "leave" && <LeaveTypeSetupPage embedded />}
       {tab === "claim" && <ClaimTypeSetupPage embedded />}
       {tab === "numbering" && <NumberingConfigPanel app="hr" accent="indigo" />}
