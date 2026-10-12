@@ -6,6 +6,8 @@ import {
   updateMaterial,
   deleteMaterial,
   getStores,
+  createMaterialRequest,
+  getMaterialRequests,
   Store,
   DIMENSION_UNITS,
 } from "../../api/materials";
@@ -30,6 +32,7 @@ import {
   formatNumberByGeneralSettings,
 } from "../../utils/generalSettings";
 import { stockStatusFor } from "../../utils/stockThresholds";
+import { useAuthUser } from "../../utils/useAuthUser";
 import {
   Plus,
   Search,
@@ -40,6 +43,7 @@ import {
   Trash2,
   ShoppingCart,
   CheckCircle,
+  ChevronDown,
   X,
   RefreshCw,
   ArrowRightLeft,
@@ -273,7 +277,9 @@ function AddMaterialModal({
   onSaved: (materials: MaterialCatalogRowRecord[]) => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [categories, setCategories] = useState<MaterialCategoryRecord[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<MaterialCategoryRecord | null>(null);
@@ -288,11 +294,14 @@ function AddMaterialModal({
   }, []);
 
   const q = query.trim().toLowerCase();
-  const results = q ? categories.filter((c) => c.name.toLowerCase().includes(q)) : [];
+  const results = q
+    ? categories.filter((c) => c.name.toLowerCase().includes(q))
+    : categories;
 
   function pickCategory(c: MaterialCategoryRecord) {
     setSelectedCategory(c);
     setQuery("");
+    setCategoryPickerOpen(false);
   }
 
   function changeCategory() {
@@ -300,14 +309,18 @@ function AddMaterialModal({
     setMaterials([blankMaterial()]);
   }
 
-  const materialsComplete = isMaterialsComplete(materials);
+  const materialsComplete = isMaterialsComplete(materials, {
+    requireReorderLevel: true,
+  });
   const hasAtLeastOneMaterial = materials.some((m) => m.name.trim());
   const canSave =
     Boolean(selectedCategory) && !saving && materialsComplete && hasAtLeastOneMaterial;
 
   async function save() {
     if (!selectedCategory) return;
-    const incomplete = findIncompleteMaterialRow(materials);
+    const incomplete = findIncompleteMaterialRow(materials, {
+      requireReorderLevel: true,
+    });
     if (incomplete) {
       toast.error(incomplete);
       return;
@@ -350,33 +363,64 @@ function AddMaterialModal({
 
         <div className="p-6 space-y-5 overflow-y-auto">
           {!selectedCategory ? (
-            <div>
+            <div
+              ref={categoryPickerRef}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setCategoryPickerOpen(false);
+                }
+              }}
+            >
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Search Category
+                Category
               </label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input
                   ref={searchRef}
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by category name…"
-                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                  onFocus={() => setCategoryPickerOpen(true)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setCategoryPickerOpen(true);
+                  }}
+                  placeholder="Search or select a category…"
+                  role="combobox"
+                  aria-expanded={categoryPickerOpen}
+                  aria-controls="material-category-options"
+                  className="w-full pl-9 pr-10 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500"
                 />
+                <button
+                  type="button"
+                  aria-label="Show categories"
+                  onClick={() => {
+                    setCategoryPickerOpen((open) => !open);
+                    searchRef.current?.focus();
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <ChevronDown className={`w-4 h-4 transition-transform ${categoryPickerOpen ? "rotate-180" : ""}`} />
+                </button>
               </div>
-              {query.trim() ? (
-                <div className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+              {categoryPickerOpen && (
+                <div
+                  id="material-category-options"
+                  role="listbox"
+                  className="mt-1 border border-gray-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto bg-white shadow-lg"
+                >
                   {loadingCategories ? (
                     <p className="px-3 py-2 text-xs text-gray-400">Loading categories…</p>
                   ) : results.length === 0 ? (
                     <p className="px-3 py-2 text-xs text-red-500">
-                      No matching category found for "{query.trim()}".
+                      No matching category found{query.trim() ? ` for "${query.trim()}"` : ""}.
                     </p>
                   ) : (
                     results.map((c) => (
                       <button
                         key={c.id}
                         type="button"
+                        role="option"
+                        aria-selected={false}
                         onClick={() => pickCategory(c)}
                         className="w-full text-left px-3 py-2 text-sm hover:bg-teal-50 border-b border-gray-100 last:border-0"
                       >
@@ -388,11 +432,10 @@ function AddMaterialModal({
                     ))
                   )}
                 </div>
-              ) : (
-                <p className="text-xs text-gray-400 italic mt-2">
-                  Search and pick a category to see its materials and add new ones.
-                </p>
               )}
+              <p className="text-xs text-gray-400 italic mt-2">
+                Open the dropdown to see every category, or type to filter the list.
+              </p>
             </div>
           ) : (
             <>
@@ -409,6 +452,13 @@ function AddMaterialModal({
                   Change category
                 </button>
               </div>
+
+              <MaterialsBuilder
+                materials={materials}
+                onChange={setMaterials}
+                title={`Add materials to ${selectedCategory.name}`}
+                showReorderLevel
+              />
 
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-2">
@@ -429,6 +479,7 @@ function AddMaterialModal({
                           <th className="px-3 py-2 text-right font-medium">Available</th>
                           <th className="px-3 py-2 text-right font-medium">Reserved</th>
                           <th className="px-3 py-2 text-right font-medium">Unit Cost</th>
+                          <th className="px-3 py-2 text-right font-medium">Reorder Level</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -453,6 +504,9 @@ function AddMaterialModal({
                               {getCurrencySymbol()}
                               {formatNumberByGeneralSettings(row.unitCost)}
                             </td>
+                            <td className="px-3 py-2 text-right text-gray-700">
+                              {formatNumberByGeneralSettings(row.reorderLevel)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -461,11 +515,6 @@ function AddMaterialModal({
                 )}
               </div>
 
-              <MaterialsBuilder
-                materials={materials}
-                onChange={setMaterials}
-                title={`Add materials to ${selectedCategory.name}`}
-              />
             </>
           )}
         </div>
@@ -500,6 +549,7 @@ function AddMaterialModal({
 }
 
 export function AllMaterialsPage() {
+  const authUser = useAuthUser();
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -517,6 +567,8 @@ export function AllMaterialsPage() {
     null,
   );
   const [procurementQty, setProcurementQty] = useState("");
+  const [procurementStoreId, setProcurementStoreId] = useState("");
+  const [sendingToProcurement, setSendingToProcurement] = useState(false);
   const [sentToProcurement, setSentToProcurement] = useState<Set<string>>(
     new Set(),
   );
@@ -571,10 +623,36 @@ export function AllMaterialsPage() {
   }, []);
 
   useEffect(() => {
-    Promise.all([getMaterials(), getReferenceData()])
-      .then(([materialData, refs]) => {
+    Promise.all([
+      getMaterials(),
+      getReferenceData(),
+      // Request-state decoration should not prevent the inventory itself from
+      // loading if this secondary endpoint is temporarily unavailable.
+      getMaterialRequests().catch(() => []),
+    ])
+      .then(([materialData, refs, materialRequests]) => {
         setMaterials(materialData.map(toMaterial));
         setProjectOptions(refs.projects.map((p) => p.name));
+
+        const activeRequestMaterialIds = materialRequests.reduce(
+          (ids, request) => {
+            const status = String(request.status ?? "")
+              .trim()
+              .toLowerCase()
+              .replace(/\s+/g, "_");
+            if (["rejected", "fulfilled", "cancelled"].includes(status)) {
+              return ids;
+            }
+
+            const match = request.notes?.match(
+              /^Raised from Storefront All Materials for material (.+)\.$/,
+            );
+            if (match?.[1]) ids.add(match[1]);
+            return ids;
+          },
+          new Set<string>(),
+        );
+        setSentToProcurement(activeRequestMaterialIds);
       })
       .catch((err: unknown) =>
         toast.error(
@@ -651,6 +729,65 @@ export function AllMaterialsPage() {
       );
     }
   }
+
+  /**
+   * Persists the replenishment request before showing the material as sent.
+   * The old handler only changed `sentToProcurement`, so the success icon was
+   * browser-local and neither request screen ever received a record.
+   */
+  async function sendToProcurement() {
+    if (!procurementTarget || sendingToProcurement) return;
+
+    const qty = Number(procurementQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error("Enter a quantity greater than zero.");
+      return;
+    }
+
+    const selectedStore = stores.find((store) => store.id === procurementStoreId);
+    const storeId = selectedStore?.id || procurementTarget.storeId || undefined;
+    const storeName = selectedStore?.name || procurementTarget.storeName || "";
+    if (!storeName) {
+      toast.error("Choose the store that needs this material.");
+      return;
+    }
+
+    setSendingToProcurement(true);
+    try {
+      const created = await createMaterialRequest({
+        materialName: procurementTarget.name,
+        unit: procurementTarget.unit,
+        qty,
+        storeId,
+        storeName,
+        purpose: `Replenish ${procurementTarget.name} after stock fell to ${procurementTarget.availableQty} ${procurementTarget.unit}.`,
+        priority:
+          getStatus(procurementTarget) === "Out of Stock" ? "High" : "Normal",
+        status: "pending",
+        requestedBy: authUser.name || authUser.email || "Current User",
+        requestDate: new Date().toISOString(),
+        notes: `Raised from Storefront All Materials for material ${procurementTarget.id}.`,
+      });
+
+      setSentToProcurement((prev) =>
+        new Set([...prev, procurementTarget.id]),
+      );
+      toast.success(
+        `Material request ${created.reference || created.id} sent to Procurement.`,
+      );
+      setProcurementTarget(null);
+      setProcurementQty("");
+      setProcurementStoreId("");
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to send the material request to Procurement.",
+      );
+    } finally {
+      setSendingToProcurement(false);
+    }
+  }
   function handleExportCSV() {
     const rows = [
       [
@@ -661,6 +798,7 @@ export function AllMaterialsPage() {
         "Unit",
         "Total Qty",
         "Available Qty",
+        "Reorder Threshold",
         "Unit Cost",
         "Status",
       ],
@@ -672,6 +810,7 @@ export function AllMaterialsPage() {
         m.unit,
         m.totalQty,
         m.availableQty,
+        m.reorderLevel,
         m.unitCost,
         getStatus(m),
       ]),
@@ -818,7 +957,7 @@ export function AllMaterialsPage() {
           trailing actions cell was being cut off by the wrapper, which is what
           made the Edit and Archive buttons unreachable on smaller screens. */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
-        <table className="w-full min-w-[1000px] text-sm">
+        <table className="w-full min-w-[1100px] text-sm">
           <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Material ID</th>
@@ -830,6 +969,7 @@ export function AllMaterialsPage() {
               <th className="px-4 py-3 text-right font-medium">Total Qty</th>
               <th className="px-4 py-3 text-right font-medium">Available</th>
               <th className="px-4 py-3 text-right font-medium">Reserved</th>
+              <th className="px-4 py-3 text-right font-medium">Reorder Threshold</th>
               <th className="px-4 py-3 text-right font-medium">Unit Cost</th>
               <th className="px-4 py-3 text-left font-medium">Stock Status</th>
               <th className="px-4 py-3 text-left font-medium">Allocation</th>
@@ -840,7 +980,7 @@ export function AllMaterialsPage() {
             {filtered.length === 0 && (
               <tr>
                 <td
-                  colSpan={13}
+                  colSpan={14}
                   className="px-4 py-8 text-center text-gray-400 text-sm"
                 >
                   No materials found.
@@ -890,6 +1030,9 @@ export function AllMaterialsPage() {
                       {formatNumberByGeneralSettings(m.reservedQty)}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
+                      {formatNumberByGeneralSettings(m.reorderLevel)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-600">
                       {getCurrencySymbol()}
                       {formatNumberByGeneralSettings(m.unitCost)}
                     </td>
@@ -928,6 +1071,9 @@ export function AllMaterialsPage() {
                               onClick={() => {
                                 setProcurementTarget(m);
                                 setProcurementQty("");
+                                setProcurementStoreId(
+                                  m.storeId || stores[0]?.id || "",
+                                );
                               }}
                               className={`p-1 rounded ${sentToProcurement.has(m.id) ? "text-green-500" : "text-amber-500 hover:text-amber-700 hover:bg-amber-50"}`}
                               title={
@@ -1214,6 +1360,23 @@ export function AllMaterialsPage() {
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
               />
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Fulfilling Store <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={procurementStoreId}
+                onChange={(e) => setProcurementStoreId(e.target.value)}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+              >
+                <option value="">Select store…</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <p className="text-xs text-gray-500">
               A procurement request will be raised and sent to the Procurement
               team for sourcing.
@@ -1226,16 +1389,17 @@ export function AllMaterialsPage() {
                 Cancel
               </button>
               <button
-                disabled={!procurementQty || Number(procurementQty) <= 0}
-                onClick={() => {
-                  setSentToProcurement(
-                    (prev) => new Set([...prev, procurementTarget.id]),
-                  );
-                  setProcurementTarget(null);
-                }}
+                disabled={
+                  !procurementQty ||
+                  Number(procurementQty) <= 0 ||
+                  !procurementStoreId ||
+                  sendingToProcurement
+                }
+                onClick={() => void sendToProcurement()}
                 className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                <ShoppingCart className="w-4 h-4" /> Send to Procurement
+                <ShoppingCart className="w-4 h-4" />
+                {sendingToProcurement ? "Sending…" : "Send to Procurement"}
               </button>
             </div>
           </div>

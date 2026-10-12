@@ -36,11 +36,6 @@ enum EmployeeStatus {
   on_leave
 }
 
-enum EmploymentType {
-  FullTime
-  Contract
-}
-
 enum LeaveStatus {
   pending
   approved
@@ -254,7 +249,8 @@ model Employee {
   gender         String?
   dateHired      DateTime
   status         EmployeeStatus @default(active)
-  employmentType EmploymentType @default(FullTime)
+  employmentType String         @default("FullTime")
+  salaryType     String         @default("Monthly")
   projectCount   Int            @default(0)
   projects       String[]       @default([])
 
@@ -279,8 +275,11 @@ model Employee {
   pensionId         String?
   healthInsuranceId String?
 
-  // Job role (free-text position title, separate from the jobRole relation)
+  // Access role used when the employee is synced to a system user.
   role String?
+
+  // HR job title. This is deliberately independent from the system access role.
+  position String?
 
   // Additional info
   emergencyContact String?
@@ -1636,6 +1635,7 @@ model SalaryBand {
   gradeName   String?
   department  String?
   basicSalary Float?
+  salaryType String   @default("Monthly")
   components  Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

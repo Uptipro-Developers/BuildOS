@@ -38,19 +38,8 @@ import {
   updateMaterialCategory,
   deleteMaterialCategory,
   MaterialCategoryRecord,
-  MaterialCatalogRowRecord,
 } from "../../api/admin-extras";
 import { getReferenceData } from "../../api/reference-data";
-import {
-  MaterialsBuilder,
-  findIncompleteMaterialRow,
-  isMaterialsComplete,
-  materialsToPayload,
-  blankMaterial,
-  nextCatalogFormKey,
-  type MaterialFormRow,
-  type ItemFormRow,
-} from "../../components/MaterialsBuilder";
 import { useSearchParams } from "react-router";
 
 // ─── Store Level Configuration ────────────────────────────────────────────────
@@ -1585,50 +1574,6 @@ const COLOR_CLASSES: Record<string, { bg: string; text: string }> = {
   gray: { bg: "bg-gray-100", text: "text-gray-600" },
 };
 
-/**
- * The backend stores every dimension of every material item as its own flat
- * Material row (no Type table underneath a Material any more) — the category
- * list and its expanded view show that flat list directly, one card per row,
- * using each row's own (already-concatenated) name. Only the builder, when
- * reopening a category to edit it, needs the original Material Name -> item
- * -> dimension tree back — this regroups the flat rows into that shape for
- * that one purpose, using `materialGroupName`/`itemName` to know which rows
- * belong together.
- */
-function buildEditMaterials(rows: MaterialCatalogRowRecord[]): MaterialFormRow[] {
-  const materials: MaterialFormRow[] = [];
-  const materialIndex = new Map<string, MaterialFormRow>();
-  const itemIndex = new Map<string, ItemFormRow>();
-  for (const row of rows) {
-    const materialName = row.materialGroupName ?? row.name;
-    const classification = row.classification === "Reusable" ? "Reusable" : "Consumable";
-    const materialKey = `${materialName}::${classification}`;
-    let material = materialIndex.get(materialKey);
-    if (!material) {
-      material = { key: nextCatalogFormKey(), name: materialName, classification, items: [] };
-      materialIndex.set(materialKey, material);
-      materials.push(material);
-    }
-
-    const itemName = row.itemName ?? row.name;
-    const itemKey = `${materialKey}::${itemName}`;
-    let item = itemIndex.get(itemKey);
-    if (!item) {
-      item = { key: nextCatalogFormKey(), name: itemName, sku: row.sku || "", dimensions: [] };
-      itemIndex.set(itemKey, item);
-      material.items.push(item);
-    }
-
-    item.dimensions.push({
-      key: nextCatalogFormKey(),
-      kind: row.kind ?? "",
-      value: row.value == null ? "" : String(row.value),
-      unit: row.unit || "",
-    });
-  }
-  return materials;
-}
-
 function MaterialCategoriesPanel() {
   const [categories, setCategories] = useState<MaterialCategoryRecord[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -1636,7 +1581,6 @@ function MaterialCategoriesPanel() {
   const [deleteTarget, setDeleteTarget] = useState<MaterialCategoryRecord | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", description: "", color: "teal" });
-  const [materials, setMaterials] = useState<MaterialFormRow[]>([]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -1655,15 +1599,12 @@ function MaterialCategoriesPanel() {
   function openAdd() {
     setEditing(null);
     setForm({ name: "", description: "", color: "teal" });
-    setMaterials([blankMaterial()]);
     setShowModal(true);
   }
 
   function openEdit(c: MaterialCategoryRecord) {
     setEditing(c);
     setForm({ name: c.name, description: c.description || "", color: c.color });
-    const built = buildEditMaterials(c.materials ?? []);
-    setMaterials(built.length ? built : [blankMaterial()]);
     setShowModal(true);
   }
 
@@ -1672,18 +1613,12 @@ function MaterialCategoriesPanel() {
   const nameTaken = categories.some(
     (c) => c.id !== editing?.id && c.name.trim().toLowerCase() === trimmedName.toLowerCase(),
   );
-  const materialsComplete = isMaterialsComplete(materials);
-  const canSave = Boolean(trimmedName) && !nameTaken && materialsComplete && !saving;
+  const canSave = Boolean(trimmedName) && !nameTaken && !saving;
 
   async function save() {
     if (!trimmedName) return;
     if (nameTaken) {
       toast.error(`A category named "${trimmedName}" already exists`);
-      return;
-    }
-    const incomplete = findIncompleteMaterialRow(materials);
-    if (incomplete) {
-      toast.error(incomplete);
       return;
     }
     setSaving(true);
@@ -1692,7 +1627,6 @@ function MaterialCategoriesPanel() {
         name: trimmedName,
         description: form.description.trim(),
         color: form.color,
-        materials: materialsToPayload(materials),
       };
       console.log(
         `[MaterialCategory:save] submitting ${editing ? "update" : "create"} payload`,
@@ -1940,8 +1874,6 @@ function MaterialCategoriesPanel() {
                   })}
                 </div>
               </div>
-
-              <MaterialsBuilder materials={materials} onChange={setMaterials} />
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
               <button
@@ -1958,9 +1890,7 @@ function MaterialCategoriesPanel() {
                     ? "Category name is required"
                     : nameTaken
                       ? `A category named "${trimmedName}" already exists`
-                      : !materialsComplete
-                        ? "Fill in or remove every incomplete material, item and dimension"
-                        : undefined
+                      : undefined
                 }
                 className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60 disabled:cursor-not-allowed"
               >
@@ -2012,10 +1942,10 @@ export function StorefrontConfigPage() {
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const [tab, setTab] = useState<
-    "levels" | "stores" | "thresholds" | "units" | "categories" | "numbering"
+    "levels" | "stores" | "units" | "categories" | "numbering"
   >(() =>
     (
-      ["levels", "stores", "thresholds", "units", "categories", "numbering"] as const
+      ["levels", "stores", "units", "categories", "numbering"] as const
     ).includes(requestedTab as any)
       ? (requestedTab as "stores")
       : "levels",
@@ -2032,7 +1962,7 @@ export function StorefrontConfigPage() {
             Storefront Settings
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Manage store hierarchy, stock thresholds and units of measurement
+            Manage store hierarchy, units of measurement and material setup
             for the inventory system
           </p>
         </div>
@@ -2042,7 +1972,6 @@ export function StorefrontConfigPage() {
         {([
           ["levels", "Store Levels", <Layers key="l" className="w-4 h-4" />],
           ["stores", "Stores", <Store key="st" className="w-4 h-4" />],
-          ["thresholds", "Stock Thresholds", <Settings key="s" className="w-4 h-4" />],
           ["units", "Units of Measurement", <Ruler key="r" className="w-4 h-4" />],
           ["categories", "Material Categories", <Tag key="t" className="w-4 h-4" />],
           ["numbering", "Module Numbering", <Hash key="n" className="w-4 h-4" />],
@@ -2056,7 +1985,6 @@ export function StorefrontConfigPage() {
 
       {tab === "levels" && <StoreLevelsPanel />}
       {tab === "stores" && <StoresPanel />}
-      {tab === "thresholds" && <StockThresholdsPanel />}
       {tab === "units" && <UnitsOfMeasurementPanel />}
       {tab === "categories" && <MaterialCategoriesPanel />}
       {/* Shared panel. The local copy filtered with `cfg.module.match(/^Storefront/)`

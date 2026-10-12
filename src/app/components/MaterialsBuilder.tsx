@@ -1,6 +1,10 @@
+import { useEffect, useMemo, useState } from "react";
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
-import { DIMENSION_UNITS } from "../api/materials";
-import type { MaterialCatalogMaterialInput } from "../api/admin-extras";
+import {
+    getUnits,
+    type MaterialCatalogMaterialInput,
+    type UnitOfMeasurement,
+} from "../api/admin-extras";
 
 /**
  * Shared "Material Name -> item -> dimension" builder — every dimension of
@@ -10,17 +14,6 @@ import type { MaterialCatalogMaterialInput } from "../api/admin-extras";
  * Material modal (scoped to an already-selected category), so the two stay
  * in lockstep instead of drifting apart.
  */
-
-export const DIMENSION_KINDS = [
-    "Weight",
-    "Length",
-    "Width",
-    "Breadth",
-    "Thickness",
-    "Area",
-    "Volume",
-    "Custom",
-];
 
 let catalogFormKeySeed = 0;
 /** A fresh React key for a builder row — exported so callers reconstructing form state (e.g. regrouping flat rows for edit) can mint keys the same way. */
@@ -32,6 +25,8 @@ export function nextCatalogFormKey() {
 export interface DimensionFormRow {
     key: string;
     kind: string;
+    /** null for a configured kind; a string (including while blank) when Custom is selected. */
+    customKind: string | null;
     value: string;
     unit: string;
 }
@@ -39,6 +34,8 @@ export interface ItemFormRow {
     key: string;
     name: string;
     sku: string;
+    /** Applied to every dimension/SKU row created for this item. */
+    reorderLevel: string;
     /** No unit of its own — every dimension carries its own unit, since that's what a saved row's own unit comes from. Needs at least one dimension to save anything. */
     dimensions: DimensionFormRow[];
 }
@@ -50,13 +47,28 @@ export interface MaterialFormRow {
 }
 
 export function blankDimension(): DimensionFormRow {
-    return { key: nextCatalogFormKey(), kind: "Length", value: "", unit: "" };
+    return { key: nextCatalogFormKey(), kind: "", customKind: null, value: "", unit: "" };
 }
 export function blankItem(): ItemFormRow {
-    return { key: nextCatalogFormKey(), name: "", sku: "", dimensions: [blankDimension()] };
+    return { key: nextCatalogFormKey(), name: "", sku: "", reorderLevel: "", dimensions: [blankDimension()] };
 }
 export function blankMaterial(): MaterialFormRow {
     return { key: nextCatalogFormKey(), name: "", classification: "Consumable", items: [blankItem()] };
+}
+
+function effectiveDimensionKind(dimension: DimensionFormRow): string {
+    if (dimension.kind === "Custom" || dimension.customKind !== null) {
+        return (dimension.customKind ?? "").trim();
+    }
+    return dimension.kind.trim();
+}
+
+function isDimensionComplete(dimension: DimensionFormRow): boolean {
+    return Boolean(
+        effectiveDimensionKind(dimension) &&
+        dimension.value.trim() !== "" &&
+        dimension.unit,
+    );
 }
 
 /**
@@ -68,7 +80,10 @@ export function blankMaterial(): MaterialFormRow {
  * An item needs at least one dimension, since a saved row's identity
  * (and stock) comes from its dimension — there's nothing to save without one.
  */
-export function findIncompleteMaterialRow(materials: MaterialFormRow[]): string | null {
+export function findIncompleteMaterialRow(
+    materials: MaterialFormRow[],
+    options: { requireReorderLevel?: boolean } = {},
+): string | null {
     for (const m of materials) {
         const materialName = m.name.trim();
         for (const it of m.items) {
@@ -77,11 +92,18 @@ export function findIncompleteMaterialRow(materials: MaterialFormRow[]): string 
             if (!materialName) {
                 return `"${itemName}" needs its material's name filled in before it can be saved.`;
             }
+            if (options.requireReorderLevel && (
+                it.reorderLevel.trim() === "" ||
+                !Number.isFinite(Number(it.reorderLevel)) ||
+                Number(it.reorderLevel) < 0
+            )) {
+                return `"${itemName}" under "${materialName}" needs a valid reorder threshold.`;
+            }
             if (it.dimensions.length === 0) {
                 return `"${itemName}" under "${materialName}" needs at least one dimension before it can be saved.`;
             }
             for (const d of it.dimensions) {
-                if (!d.kind || d.value.trim() === "" || !d.unit) {
+                if (!isDimensionComplete(d)) {
                     return `"${itemName}" under "${materialName}" has a dimension missing a value or a unit.`;
                 }
             }
@@ -99,14 +121,22 @@ export function findIncompleteMaterialRow(materials: MaterialFormRow[]): string 
  * removed with its trash/X button before saving is possible. An empty
  * builder (no materials at all) is complete — materials are optional.
  */
-export function isMaterialsComplete(materials: MaterialFormRow[]): boolean {
+export function isMaterialsComplete(
+    materials: MaterialFormRow[],
+    options: { requireReorderLevel?: boolean } = {},
+): boolean {
     return materials.every((m) => {
         if (!m.name.trim()) return false;
         if (m.items.length === 0) return false;
         return m.items.every((it) => {
             if (!it.name.trim()) return false;
+            if (options.requireReorderLevel && (
+                it.reorderLevel.trim() === "" ||
+                !Number.isFinite(Number(it.reorderLevel)) ||
+                Number(it.reorderLevel) < 0
+            )) return false;
             if (it.dimensions.length === 0) return false;
-            return it.dimensions.every((d) => d.kind && d.value.trim() !== "" && Boolean(d.unit));
+            return it.dimensions.every(isDimensionComplete);
         });
     });
 }
@@ -123,10 +153,13 @@ export function materialsToPayload(materials: MaterialFormRow[]): MaterialCatalo
                 .map((it) => ({
                     name: it.name.trim(),
                     sku: it.sku.trim() || undefined,
+                    ...(it.reorderLevel.trim() !== ""
+                        ? { reorderLevel: Number(it.reorderLevel) }
+                        : {}),
                     dimensions: it.dimensions
-                        .filter((d) => d.kind)
+                        .filter((d) => effectiveDimensionKind(d))
                         .map((d) => ({
-                            kind: d.kind,
+                            kind: effectiveDimensionKind(d),
                             value: d.value === "" ? undefined : Number(d.value),
                             unit: d.unit || undefined,
                         })),
@@ -138,11 +171,58 @@ export function MaterialsBuilder({
     materials,
     onChange,
     title = "Materials under this category",
+    showReorderLevel = false,
 }: {
     materials: MaterialFormRow[];
     onChange: (materials: MaterialFormRow[]) => void;
     title?: string;
+    showReorderLevel?: boolean;
 }) {
+    const [configuredUnits, setConfiguredUnits] = useState<UnitOfMeasurement[]>([]);
+    const [unitsLoadFailed, setUnitsLoadFailed] = useState(false);
+
+    useEffect(() => {
+        let active = true;
+        getUnits()
+            .then((units) => {
+                if (!active) return;
+                setConfiguredUnits(units ?? []);
+                setUnitsLoadFailed(false);
+            })
+            .catch(() => {
+                if (!active) return;
+                setConfiguredUnits([]);
+                setUnitsLoadFailed(true);
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const dimensionKinds = useMemo(() => {
+        const configured = configuredUnits
+            .map((unit) => unit.category?.trim())
+            .filter((category): category is string => Boolean(category) && category !== "Custom");
+        return [...new Set(configured), "Custom"];
+    }, [configuredUnits]);
+
+    function isCustomDimension(dimension: DimensionFormRow): boolean {
+        return dimension.kind === "Custom" ||
+            dimension.customKind !== null ||
+            Boolean(dimension.kind && !dimensionKinds.includes(dimension.kind));
+    }
+
+    function unitOptionsFor(dimension: DimensionFormRow): string[] {
+        const matchingUnits = isCustomDimension(dimension)
+            ? configuredUnits
+            : configuredUnits.filter((unit) => unit.category === dimension.kind);
+        return [...new Set(
+            matchingUnits
+                .map((unit) => (unit.abbreviation || unit.name).trim())
+                .filter(Boolean),
+        )];
+    }
+
     function addMaterial() {
         onChange([...materials, blankMaterial()]);
     }
@@ -325,6 +405,19 @@ export function MaterialsBuilder({
                                                 placeholder="SKU (e.g. GT-W-600600)"
                                                 className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                                             />
+                                            {showReorderLevel && (
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={it.reorderLevel}
+                                                    onChange={(e) =>
+                                                        updateItemRow(m.key, it.key, { reorderLevel: e.target.value })
+                                                    }
+                                                    placeholder="Reorder threshold *"
+                                                    aria-label={`Reorder threshold for ${it.name || "item"}`}
+                                                    className="w-40 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                                />
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => addDimension(m.key, it.key)}
@@ -345,30 +438,63 @@ export function MaterialsBuilder({
                                         {!it.name.trim() && (
                                             <p className="text-[11px] text-red-500">Item name is required.</p>
                                         )}
+                                        {showReorderLevel && (it.reorderLevel.trim() === "" ||
+                                            !Number.isFinite(Number(it.reorderLevel)) ||
+                                            Number(it.reorderLevel) < 0) && (
+                                            <p className="text-[11px] text-red-500">
+                                                Reorder threshold is required at item/SKU level.
+                                            </p>
+                                        )}
                                         {it.dimensions.length === 0 && (
                                             <p className="text-[11px] text-red-500">
                                                 Needs at least one dimension.
                                             </p>
                                         )}
                                         {it.dimensions.length > 0 &&
-                                            it.dimensions.some((d) => !d.kind || d.value.trim() === "" || !d.unit) && (
+                                            it.dimensions.some((d) => !isDimensionComplete(d)) && (
                                                 <p className="text-[11px] text-red-500">
-                                                    Every dimension needs a value and a unit.
+                                                    Every dimension needs a type, value and unit. Custom dimensions also need a name.
                                                 </p>
                                             )}
-                                        {it.dimensions.map((d) => (
+                                        {it.dimensions.map((d) => {
+                                            const customDimension = isCustomDimension(d);
+                                            const selectedKind = customDimension ? "Custom" : d.kind;
+                                            const customKind = d.customKind ?? (d.kind === "Custom" ? "" : d.kind);
+                                            const unitOptions = unitOptionsFor(d);
+                                            return (
                                             <div key={d.key} className="flex flex-wrap items-center gap-2">
                                                 <select
-                                                    value={d.kind}
-                                                    onChange={(e) =>
-                                                        updateDimensionRow(m.key, it.key, d.key, { kind: e.target.value })
-                                                    }
+                                                    value={selectedKind}
+                                                    aria-label="Dimension type"
+                                                    onChange={(e) => {
+                                                        const kind = e.target.value;
+                                                        updateDimensionRow(m.key, it.key, d.key, {
+                                                            kind,
+                                                            customKind: kind === "Custom" ? "" : null,
+                                                            unit: "",
+                                                        });
+                                                    }}
                                                     className="w-32 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                                 >
-                                                    {DIMENSION_KINDS.map((k) => (
+                                                    <option value="">— type —</option>
+                                                    {dimensionKinds.map((k) => (
                                                         <option key={k} value={k}>{k}</option>
                                                     ))}
                                                 </select>
+                                                {customDimension && (
+                                                    <input
+                                                        value={customKind}
+                                                        onChange={(e) =>
+                                                            updateDimensionRow(m.key, it.key, d.key, {
+                                                                kind: "Custom",
+                                                                customKind: e.target.value,
+                                                            })
+                                                        }
+                                                        placeholder="Custom dimension name"
+                                                        aria-label="Custom dimension name"
+                                                        className="w-44 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                                    />
+                                                )}
                                                 <input
                                                     type="number"
                                                     value={d.value}
@@ -380,13 +506,17 @@ export function MaterialsBuilder({
                                                 />
                                                 <select
                                                     value={d.unit}
+                                                    aria-label="Dimension unit"
                                                     onChange={(e) =>
                                                         updateDimensionRow(m.key, it.key, d.key, { unit: e.target.value })
                                                     }
                                                     className="w-28 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                                 >
                                                     <option value="">— unit —</option>
-                                                    {DIMENSION_UNITS.map((u) => (
+                                                    {d.unit && !unitOptions.includes(d.unit) && (
+                                                        <option value={d.unit}>{d.unit}</option>
+                                                    )}
+                                                    {unitOptions.map((u) => (
                                                         <option key={u} value={u}>{u}</option>
                                                     ))}
                                                 </select>
@@ -399,7 +529,12 @@ export function MaterialsBuilder({
                                                     <X className="w-3.5 h-3.5" />
                                                 </button>
                                             </div>
-                                        ))}
+                                        )})}
+                                        {unitsLoadFailed && (
+                                            <p className="text-[11px] text-red-500">
+                                                Units of measurement could not be loaded from Storefront Config.
+                                            </p>
+                                        )}
                                     </div>
                                 ))}
                             </div>

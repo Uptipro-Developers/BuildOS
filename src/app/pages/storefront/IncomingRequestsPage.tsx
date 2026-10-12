@@ -25,6 +25,8 @@ type RequestStatus =
   | "Forwarded to Procurement";
 
 interface MaterialRequest {
+  /** Database id used by PATCH endpoints; `id` below is the display reference. */
+  apiId: string;
   id: string;
   requestedBy: string;
   department: string;
@@ -52,7 +54,21 @@ const STATUS_STYLE: Record<RequestStatus, string> = {
 };
 
 function toRequest(r: ApiRequest): MaterialRequest {
+  const normalizedStatus = String(r.status ?? "pending")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  const statusByApiValue: Record<string, RequestStatus> = {
+    pending: "Pending",
+    approved: "Approved",
+    fulfilled: "Fulfilled",
+    rejected: "Rejected",
+    in_procurement: "Forwarded to Procurement",
+    forwarded_to_procurement: "Forwarded to Procurement",
+  };
+
   return {
+    apiId: r.id,
     id: r.reference || r.id,
     requestedBy: r.requestedBy ?? "",
     department: r.projectName ?? "",
@@ -65,7 +81,7 @@ function toRequest(r: ApiRequest): MaterialRequest {
     destinationType: "Project Store",
     requestDate: formatDateByGeneralSettings(r.requestDate),
     requiredDate: "",
-    status: (r.status as RequestStatus) ?? "Pending",
+    status: statusByApiValue[normalizedStatus] ?? "Pending",
     remarks: r.purpose ?? "",
     approvedBy: r.approvedBy ?? "",
     approvalDate: r.approvedAt
@@ -83,9 +99,15 @@ export function IncomingRequestsPage() {
   const [requests, setRequests] = useState<MaterialRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
+  function loadRequests() {
+    return getMaterialRequests().then((data) => {
+      setRequests(data.map(toRequest));
+      return data;
+    });
+  }
+
   useEffect(() => {
-    getMaterialRequests()
-      .then((data) => setRequests(data.map(toRequest)))
+    loadRequests()
       .catch((err: unknown) =>
         toast.error(
           err instanceof Error ? err.message : "Failed to load requests.",
@@ -106,11 +128,13 @@ export function IncomingRequestsPage() {
 
   async function approve(id: string) {
     try {
-      const updated = await updateMaterialRequest(id, { status: "Approved" });
-      setRequests((prev) =>
-        prev.map((r) => (r.id === id ? toRequest(updated) : r)),
-      );
-      toast.success(`Request ${id} approved.`);
+      const displayId =
+        requests.find((request) => request.apiId === id)?.id || id;
+      await updateMaterialRequest(id, { status: "approved" });
+      // Approval can automatically raise a Purchase Request and move the
+      // Material Request to `in_procurement`, so use the final server state.
+      await loadRequests();
+      toast.success(`Request ${displayId} approved.`);
     } catch (err) {
       // This used to apply the change locally when the request FAILED, so a
       // rejected update looked successful and silently reverted on refresh.
@@ -127,9 +151,9 @@ export function IncomingRequestsPage() {
 
   async function reject(id: string) {
     try {
-      const updated = await updateMaterialRequest(id, { status: "Rejected" });
+      const updated = await updateMaterialRequest(id, { status: "rejected" });
       setRequests((prev) =>
-        prev.map((r) => (r.id === id ? toRequest(updated) : r)),
+        prev.map((r) => (r.apiId === id ? toRequest(updated) : r)),
       );
       toast.success(`Request ${id} rejected.`);
     } catch (err) {
@@ -149,10 +173,10 @@ export function IncomingRequestsPage() {
   async function forwardToProcurement(id: string) {
     try {
       const updated = await updateMaterialRequest(id, {
-        status: "Forwarded to Procurement",
+        status: "in_procurement",
       });
       setRequests((prev) =>
-        prev.map((r) => (r.id === id ? toRequest(updated) : r)),
+        prev.map((r) => (r.apiId === id ? toRequest(updated) : r)),
       );
     } catch (err) {
       // This used to apply the change locally when the request FAILED, so a
@@ -170,9 +194,9 @@ export function IncomingRequestsPage() {
 
   async function fulfill(id: string) {
     try {
-      const updated = await updateMaterialRequest(id, { status: "Fulfilled" });
+      const updated = await updateMaterialRequest(id, { status: "fulfilled" });
       setRequests((prev) =>
-        prev.map((r) => (r.id === id ? toRequest(updated) : r)),
+        prev.map((r) => (r.apiId === id ? toRequest(updated) : r)),
       );
       toast.success(`Request ${id} fulfilled.`);
     } catch (err) {
@@ -369,14 +393,14 @@ export function IncomingRequestsPage() {
                     {r.status === "Pending" && (
                       <>
                         <button
-                          onClick={() => approve(r.id)}
+                          onClick={() => approve(r.apiId)}
                           title="Approve"
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg"
                         >
                           <CheckCircle className="w-3 h-3" /> Approve
                         </button>
                         <button
-                          onClick={() => reject(r.id)}
+                          onClick={() => reject(r.apiId)}
                           title="Reject"
                           className="flex items-center gap-1 px-2 py-1 text-xs border border-red-200 text-red-600 hover:bg-red-50 rounded-lg"
                         >
@@ -386,7 +410,7 @@ export function IncomingRequestsPage() {
                     )}
                     {r.status === "Approved" && (
                       <button
-                        onClick={() => fulfill(r.id)}
+                        onClick={() => fulfill(r.apiId)}
                         title="Mark Fulfilled"
                         className="px-2 py-1 text-xs bg-teal-700 hover:bg-teal-800 text-white rounded-lg"
                       >
@@ -465,25 +489,25 @@ export function IncomingRequestsPage() {
             {selected.status === "Pending" && (
               <div className="px-6 py-4 border-t border-gray-100 flex gap-2 flex-wrap">
                 <button
-                  onClick={() => approve(selected.id)}
+                  onClick={() => approve(selected.apiId)}
                   className="flex items-center gap-2 px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-xl"
                 >
                   <CheckCircle className="w-4 h-4" /> Approve
                 </button>
                 <button
-                  onClick={() => fulfill(selected.id)}
+                  onClick={() => fulfill(selected.apiId)}
                   className="flex items-center gap-2 px-3 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
                 >
                   Approve & Fulfill
                 </button>
                 <button
-                  onClick={() => forwardToProcurement(selected.id)}
+                  onClick={() => forwardToProcurement(selected.apiId)}
                   className="flex items-center gap-2 px-3 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-xl"
                 >
                   <ExternalLink className="w-4 h-4" /> Fwd to Procurement
                 </button>
                 <button
-                  onClick={() => reject(selected.id)}
+                  onClick={() => reject(selected.apiId)}
                   className="flex items-center gap-2 px-3 py-2 text-sm border border-red-200 text-red-600 hover:bg-red-50 rounded-xl"
                 >
                   <XCircle className="w-4 h-4" /> Reject
@@ -493,7 +517,7 @@ export function IncomingRequestsPage() {
             {selected.status === "Approved" && (
               <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
                 <button
-                  onClick={() => fulfill(selected.id)}
+                  onClick={() => fulfill(selected.apiId)}
                   className="flex items-center gap-2 px-3 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
                 >
                   Mark as Fulfilled

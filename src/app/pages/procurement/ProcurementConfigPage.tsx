@@ -51,15 +51,14 @@ import {
   type TrancheTiming,
 } from "../../api/payment-terms";
 
-// Order follows the design: Numbering, Payment Terms, Signatories, Approvals, Thresholds.
-const TABS = ["numbering", "paymentTerms", "signatories", "approvals", "thresholds"] as const;
+// Stock thresholds belong to each Material and are managed in All Materials.
+const TABS = ["numbering", "paymentTerms", "signatories", "approvals"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {
   numbering: "Numbering",
   paymentTerms: "Payment Terms",
   signatories: "Signatories",
-  thresholds: "Thresholds",
   approvals: "Approvals",
 };
 
@@ -1147,7 +1146,6 @@ export function ProcurementConfigPage() {
       )}
       {tab === "paymentTerms" && <PaymentTermsPanel />}
       {tab === "signatories" && <SignatoriesPanel />}
-      {tab === "thresholds" && <ThresholdsPanel />}
       {tab === "approvals" && <ApprovalsPanel />}
     </div>
   );

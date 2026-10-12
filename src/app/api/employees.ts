@@ -23,8 +23,9 @@ function mapEmployee(e: any) {
         middleName: e.middleName ?? '',
         lastName: e.lastName ?? '',
         name: fullName,
-        role: e.role ?? '',
-        jobTitle: e.role ?? '',
+        role: e.user?.role ?? e.role ?? '',
+        position: e.position ?? e.role ?? '',
+        jobTitle: e.position ?? e.role ?? '',
         department: e.department?.name ?? '',
         departmentId: e.departmentId ?? e.department?.id ?? '',
         status: statusMap[e.status] ?? e.status,
@@ -36,6 +37,7 @@ function mapEmployee(e: any) {
         dateHiredISO: toLocalDateInput(e.dateHired),
         employmentDate: toLocalDateInput(e.dateHired),
         employmentType: EMPLOYMENT_TYPE_TO_DISPLAY[e.employmentType] ?? e.employmentType,
+        salaryType: e.salaryType === 'Annual' ? 'Annual' : 'Monthly',
         projectCount: e.projectCount ?? 0,
         projects: e.projects ?? [],
         dateOfBirth: toLocalDateInput(e.dateOfBirth),
@@ -82,12 +84,14 @@ export function toEmployeeCreatePayload(form: any) {
         lastName: String(form.lastName ?? '').trim(),
         email,
         phone,
-        role: String(form.jobTitle ?? form.role ?? '').trim(),
+        role: String(form.role ?? '').trim(),
+        position: String(form.position ?? form.jobTitle ?? '').trim(),
         dateHired: form.employmentDate || form.dateHiredISO || undefined,
         dateOfBirth: form.dateOfBirth || undefined,
         gender: form.gender || undefined,
         status: form.status ?? 'active',
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[form.employmentType] ?? form.employmentType ?? 'FullTime',
+        salaryType: form.salaryType === 'Annual' ? 'Annual' : 'Monthly',
         departmentId: form.departmentId || undefined,
         department: form.department || undefined,
         supervisorId: form.supervisorId || undefined,
@@ -117,9 +121,9 @@ export function toEmployeeCreatePayload(form: any) {
 export function toEmployeeUpdatePayload(draft: any) {
     const {
         department, dateHired, dateHiredISO, projectCount, projects, id, status,
-        employmentType, departmentId, baseSalary, supervisorId,
+        employmentType, salaryType, departmentId, baseSalary, supervisorId,
         // Display-only aliases and derived state that must never be written back.
-        syncStatus, userId, primarySupervisor, bankAccount, pfa, rsaNumber,
+        syncStatus, userId, role, primarySupervisor, bankAccount, pfa, rsaNumber,
         maritalStatus, orgLevel, nationality, name, jobTitle, personalEmail,
         personalPhone, employmentDate, nextOfKin, grade, onboardingWarning,
         ...rest
@@ -133,6 +137,9 @@ export function toEmployeeUpdatePayload(draft: any) {
         : Number(baseSalary);
     return {
         ...rest,
+        // Once linked, the system role belongs to Admin › Users. HR profile
+        // updates must never write a stale access role back to Employee.
+        ...(syncStatus === 'synced' ? {} : { role }),
         dateOfBirth,
         status,
         departmentId: departmentId || undefined,
@@ -142,6 +149,7 @@ export function toEmployeeUpdatePayload(draft: any) {
         // Keep the canonical column name; the UI exposes pfa/rsaNumber aliases.
         pensionId: rest.pensionId ?? rsaNumber ?? pfa ?? undefined,
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[employmentType] ?? employmentType,
+        salaryType: salaryType === 'Annual' ? 'Annual' : 'Monthly',
         dateHired: dateHiredISO && String(dateHiredISO).trim() ? dateHiredISO : undefined,
         // These now have columns of their own, so an edit persists instead of
         // being discarded as display-only.
