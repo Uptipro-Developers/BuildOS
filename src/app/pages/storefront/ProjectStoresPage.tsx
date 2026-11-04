@@ -21,7 +21,6 @@ import { toast } from "sonner";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   stockStatusFor,
-  useStoreThresholds,
   type StockStatus,
 } from "../../utils/stockThresholds";
 
@@ -70,17 +69,11 @@ export function ProjectStoresPage() {
   const [sentToProcurement, setSentToProcurement] = useState<Set<string>>(
     new Set(),
   );
-  const { thresholdForStore } = useStoreThresholds();
-
-  /**
-   * Stock status for one line, against the thresholds configured for the store
-   * holding it. Every store's items were judged by the material's reorder level
-   * alone, so per-store thresholds never applied.
-   */
-  const getStatus = (
-    item: { qty: number; reorderLevel: number },
-    storeName: string,
-  ): StockStatus => stockStatusFor(item, thresholdForStore(storeName));
+  /** Stock status always uses the material catalogue's reorder level. */
+  const getStatus = (item: {
+    qty: number;
+    reorderLevel: number;
+  }): StockStatus => stockStatusFor(item);
 
   // Store-level edit and delete. The card previously offered neither, and its
   // item-row actions were hidden behind hover.
@@ -174,7 +167,7 @@ export function ProjectStoresPage() {
             {stores.reduce(
               (acc, s) =>
                 acc +
-                s.items.filter((i) => getStatus(i, s.project) === "Low Stock")
+                s.items.filter((i) => getStatus(i) === "Low Stock")
                   .length,
               0,
             )}
@@ -187,7 +180,7 @@ export function ProjectStoresPage() {
               (acc, s) =>
                 acc +
                 s.items.filter(
-                  (i) => getStatus(i, s.project) === "Out of Stock",
+                  (i) => getStatus(i) === "Out of Stock",
                 ).length,
               0,
             )}
@@ -200,7 +193,7 @@ export function ProjectStoresPage() {
       <div className="space-y-3">
         {stores.map((store) => {
           const lowCount = store.items.filter(
-            (i) => getStatus(i, store.project) !== "In Stock",
+            (i) => getStatus(i) !== "In Stock",
           ).length;
           const isOpen = expanded === store.id;
           return (
@@ -282,7 +275,7 @@ export function ProjectStoresPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {store.items.map((item, i) => {
-                        const status = getStatus(item, store.project);
+                        const status = getStatus(item);
                         const procKey = `${store.id}-${i}`;
                         return (
                           <tr key={i} className="group">
@@ -367,11 +360,7 @@ export function ProjectStoresPage() {
               <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-amber-800">
-                  {getStatus(
-                    procurementTarget,
-                    stores.find((s) => s.id === procurementTarget.storeId)
-                      ?.project ?? "",
-                  )}
+                  {getStatus(procurementTarget)}
                 </p>
                 <p className="text-xs text-amber-700 mt-0.5">
                   <span className="font-medium">{procurementTarget.name}</span>{" "}

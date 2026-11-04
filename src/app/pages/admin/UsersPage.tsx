@@ -1839,11 +1839,11 @@ function SyncEmployeePanel({
   syncing: boolean;
 }) {
   const [email, setEmail] = useState(employee.email);
-  // Default to the employee's job title when it maps onto a real role, else the
-  // baseline Employee role — the admin can always override before syncing.
+  // Use the access role selected by HR, never infer permissions from the
+  // employee's position. The admin can always override before syncing.
   const [role, setRole] = useState(() => {
     const canonical = (v: string) => v.trim().toLowerCase().replace(/[\s_-]+/g, "");
-    const match = roleOptions.find((r) => canonical(r) === canonical(employee.jobTitle ?? ""));
+    const match = roleOptions.find((r) => canonical(r) === canonical(employee.systemRole ?? ""));
     return match ?? roleOptions.find((r) => canonical(r) === "employee") ?? "";
   });
   const [selectedApps, setSelectedApps] = useState<AppKey[]>(["ess"]);
@@ -1860,7 +1860,7 @@ function SyncEmployeePanel({
   const details: { label: string; value: string }[] = [
     { label: "Employee ID", value: employee.id },
     { label: "Full Name", value: employee.name },
-    { label: "Job Title", value: employee.jobTitle || "—" },
+    { label: "Position", value: employee.jobTitle || "—" },
     { label: "Department", value: employee.department || "—" },
     { label: "Phone", value: employee.phone || "—" },
     {
@@ -1931,7 +1931,7 @@ function SyncEmployeePanel({
             </select>
             {employee.jobTitle && (
               <p className="mt-1 text-xs text-gray-400">
-                HR job title: {employee.jobTitle}
+                HR position: {employee.jobTitle}
               </p>
             )}
           </div>
@@ -2401,7 +2401,7 @@ export function UsersPage() {
                   Employee
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  Job Title
+                  Position
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                   Department

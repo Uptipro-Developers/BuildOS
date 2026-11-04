@@ -7,11 +7,11 @@ import { HrSetupService } from '../hr-extras/hr-setup.service';
 /** Columns accepted from clients; everything else is dropped. */
 const EMPLOYEE_FIELDS = [
     'firstName', 'lastName', 'middleName', 'email', 'phone', 'dateOfBirth',
-    'gender', 'dateHired', 'status', 'employmentType', 'projectCount', 'projects',
+    'gender', 'dateHired', 'status', 'employmentType', 'salaryType', 'projectCount', 'projects',
     'baseSalary', 'gradeLevel', 'jobRoleId', 'bankName', 'accountNumber',
     'accountHolder', 'supervisorId', 'taxId', 'pensionId', 'healthInsuranceId',
     'emergencyContact', 'emergencyPhone', 'address', 'city', 'state', 'zipCode',
-    'departmentId', 'role',
+    'departmentId', 'role', 'position',
 ] as const;
 
 const DATE_FIELDS = new Set(['dateOfBirth', 'dateHired']);
@@ -47,7 +47,7 @@ export class EmployeesService {
                 ...(status ? { status: status as any } : {}),
                 ...(departmentId ? { departmentId } : {}),
             },
-            include: { department: true },
+            include: { department: true, user: { select: { role: true } } },
             orderBy: { firstName: 'asc' },
         });
     }
@@ -55,7 +55,7 @@ export class EmployeesService {
     findOne(id: string) {
         return this.prisma.employee.findUniqueOrThrow({
             where: { id },
-            include: { department: true },
+            include: { department: true, user: { select: { role: true } } },
         });
     }
 
@@ -86,7 +86,10 @@ export class EmployeesService {
         // Required columns without Prisma defaults.
         clean.phone = clean.phone ?? '';
         clean.dateHired = clean.dateHired ?? new Date();
-        const employee = await this.prisma.employee.create({ data: clean as any, include: { department: true } });
+        const employee = await this.prisma.employee.create({
+            data: clean as any,
+            include: { department: true, user: { select: { role: true } } },
+        });
         this.activityHistory.create({
             userId: employee.id,
             userName: `${employee.firstName} ${employee.lastName}`,
@@ -121,7 +124,11 @@ export class EmployeesService {
             });
             if (department) clean.departmentId = department.id;
         }
-        const employee = await this.prisma.employee.update({ where: { id }, data: clean as any, include: { department: true } });
+        const employee = await this.prisma.employee.update({
+            where: { id },
+            data: clean as any,
+            include: { department: true, user: { select: { role: true } } },
+        });
         this.activityHistory.create({
             userId: employee.id,
             userName: `${employee.firstName} ${employee.lastName}`,

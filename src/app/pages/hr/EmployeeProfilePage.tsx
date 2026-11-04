@@ -42,6 +42,13 @@ import {
   type EmploymentTerms,
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
+import { getAppRoles } from "../../api/admin-extras";
+import {
+  getEmploymentTypes,
+  getSalaryGrades,
+  type EmploymentTypeConfig,
+  type SalaryGradeOption,
+} from "../../api/employment-types";
 import {
   getAttendance,
   getPayslips,
@@ -130,6 +137,9 @@ export function EmployeeProfilePage() {
     { id: string; firstName: string; lastName: string }[]
   >([]);
   const [terms, setTerms] = useState<EmploymentTerms | null>(null);
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeConfig[]>([]);
+  const [salaryGrades, setSalaryGrades] = useState<SalaryGradeOption[]>([]);
+  const [roleOptions, setRoleOptions] = useState<string[]>([]);
 
   // Human-friendly display ID passed from the list page
   const displayId = searchParams.get("displayId") ?? emp?.id ?? "";
@@ -140,6 +150,19 @@ export function EmployeeProfilePage() {
         setDepartments(depts.map((d) => ({ id: d.id, name: d.name }))),
       )
       .catch(() => {});
+  }, []);
+  useEffect(() => {
+    getEmploymentTypes().then(setEmploymentTypes).catch(() => setEmploymentTypes([]));
+    getSalaryGrades().then(setSalaryGrades).catch(() => setSalaryGrades([]));
+    getAppRoles()
+      .then((roles) =>
+        setRoleOptions(
+          (Array.isArray(roles) ? roles : [])
+            .map((role: any) => String(role?.name ?? "").trim())
+            .filter(Boolean),
+        ),
+      )
+      .catch(() => setRoleOptions([]));
   }, []);
 
   // Probation / notice / retirement, worked out server-side from the HR policy
@@ -213,6 +236,7 @@ export function EmployeeProfilePage() {
     const errs: Record<string, string> = {};
     if (!draft.firstName?.trim()) errs.firstName = "First name is required";
     if (!draft.lastName?.trim()) errs.lastName = "Last name is required";
+    if (!draft.position?.trim()) errs.position = "Position is required";
     if (draft.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email))
       errs.email = "Enter a valid email address";
     if (draft.phone && !/^\+?[\d\s\-().]{7,20}$/.test(draft.phone))
@@ -277,7 +301,8 @@ export function EmployeeProfilePage() {
       ["First Name", emp.firstName ?? ""],
       ["Middle Name", emp.middleName ?? ""],
       ["Last Name", emp.lastName ?? ""],
-      ["Job Title", emp.role ?? ""],
+      ["Position", emp.position ?? ""],
+      ["System Role", emp.role ?? ""],
       ["Department", emp.department ?? ""],
       ["Supervisor", emp.primarySupervisor ?? ""],
       ["Status", statusCfg.label ?? emp.status ?? ""],
@@ -358,7 +383,7 @@ export function EmployeeProfilePage() {
               </span>
             </div>
             <p className="text-sm text-gray-500">
-              {emp.role} · {emp.department}
+              {emp.position || "Position not set"} · {emp.department}
             </p>
             <p className="text-xs text-gray-400 font-mono">{displayId}</p>
           </div>
@@ -502,13 +527,15 @@ export function EmployeeProfilePage() {
             </h3>
             {[
               { label: "Employee ID", value: displayId },
-              { label: "Job Title / Role", value: emp.role },
+              { label: "Position", value: emp.position || "—" },
+              { label: "System Role", value: emp.role || "—" },
               { label: "Department", value: emp.department || "—" },
               { label: "Grade Level", value: emp.gradeLevel || "—" },
               { label: "Employment Type", value: emp.employmentType ?? "—" },
+              { label: "Salary Type", value: emp.salaryType ?? "Monthly" },
               { label: "Date Hired", value: emp.dateHired ?? "—" },
               {
-                label: "Monthly Salary",
+                label: `${emp.salaryType ?? "Monthly"} Salary`,
                 value:
                   emp.baseSalary > 0
                     ? `${getCurrencySymbol()}${formatNumberByGeneralSettings(emp.baseSalary)}`
@@ -973,17 +1000,48 @@ export function EmployeeProfilePage() {
                 </div>
               </div>
 
-              {/* Role / Dept */}
+              {/* Position, access role and department are separate concerns. */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Job Title / Role
+                    Position <span className="text-red-500">*</span>
                   </label>
                   <input
-                    value={editDraft.role}
-                    onChange={(e) => df("role", e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={editDraft.position ?? ""}
+                    onChange={(e) => {
+                      df("position", e.target.value);
+                      setEditErrors((previous) => ({ ...previous, position: "" }));
+                    }}
+                    placeholder="e.g. Site Engineer"
+                    className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${editErrors.position ? "border-red-400" : "border-gray-300"}`}
                   />
+                  {editErrors.position && (
+                    <p className="text-xs text-red-500 mt-1">{editErrors.position}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    System / ITT Role
+                  </label>
+                  <select
+                    value={editDraft.role ?? ""}
+                    onChange={(e) => df("role", e.target.value)}
+                    disabled={isSynced}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
+                  >
+                    <option value="">Select system role…</option>
+                    {editDraft.role && !roleOptions.includes(editDraft.role) && (
+                      <option value={editDraft.role}>{editDraft.role}</option>
+                    )}
+                    {roleOptions.map((role) => (
+                      <option key={role} value={role}>{role}</option>
+                    ))}
+                  </select>
+                  {isSynced && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Change access roles in Admin › Users.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1021,11 +1079,18 @@ export function EmployeeProfilePage() {
                   </label>
                   <select
                     value={editDraft.employmentType}
-                    onChange={(e) => df("employmentType", e.target.value)}
+                    onChange={(e) => {
+                      const selected = employmentTypes.find((item) => item.name === e.target.value);
+                      setEditDraft((previous: any) => ({
+                        ...previous,
+                        employmentType: e.target.value,
+                        ...(selected ? { salaryType: selected.defaultSalaryType } : {}),
+                      }));
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    {["Full-time", "Contract"].map((t) => (
-                      <option key={t}>{t}</option>
+                    {employmentTypes.map((type) => (
+                      <option key={type.id} value={type.name}>{type.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1051,15 +1116,35 @@ export function EmployeeProfilePage() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     Grade Level
                   </label>
-                  <input
+                  <select
                     value={editDraft.gradeLevel ?? ""}
                     onChange={(e) => df("gradeLevel", e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Select configured grade…</option>
+                    {salaryGrades.map((grade) => (
+                      <option key={grade.id} value={grade.gradeLevel || grade.gradeName}>
+                        {grade.gradeName}{grade.gradeLevel ? ` (${grade.gradeLevel})` : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Monthly Salary
+                    Salary Type
+                  </label>
+                  <select
+                    value={editDraft.salaryType ?? "Monthly"}
+                    onChange={(e) => df("salaryType", e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="Monthly">Monthly</option>
+                    <option value="Annual">Annual</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Base Salary
                   </label>
                   <input
                     type="number"

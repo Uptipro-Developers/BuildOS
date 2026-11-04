@@ -22,7 +22,6 @@ import {
 } from "../../utils/generalSettings";
 import {
   stockStatusFor,
-  useStoreThresholds,
 } from "../../utils/stockThresholds";
 
 type ReportType = "Stock Levels" | "Movement" | "Transfer" | "Return";
@@ -127,13 +126,7 @@ export function StorefrontReportsPage() {
   const [movementData, setMovementData] = useState<MovementReportRow[]>([]);
   const [transferData, setTransferData] = useState<TransferReportRow[]>([]);
   const [returnData, setReturnData] = useState<ReturnReportRow[]>([]);
-  const { thresholdForStore } = useStoreThresholds();
-
-  /**
-   * Derived rather than built while loading, so the store thresholds — which
-   * arrive on their own request — are applied to the reported status instead of
-   * every row being judged against its reorder level alone.
-   */
+  /** Every report uses the material row's single reorder threshold. */
   const stockData = useMemo<StockReportRow[]>(
     () =>
       materials.map((m) => {
@@ -146,13 +139,10 @@ export function StorefrontReportsPage() {
           qty,
           reorder: m.reorderLevel ?? 0,
           value: qty * (m.unitCost ?? 0),
-          status: stockStatusFor(
-            { qty, reorderLevel: m.reorderLevel ?? 0 },
-            thresholdForStore(store),
-          ),
+          status: stockStatusFor({ qty, reorderLevel: m.reorderLevel ?? 0 }),
         };
       }),
-    [materials, thresholdForStore],
+    [materials],
   );
 
   useEffect(() => {

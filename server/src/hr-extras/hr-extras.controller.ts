@@ -138,6 +138,16 @@ export class HrExtrasController {
     @Delete('salary-bands/:id')
     deleteSalaryBand(@Param('id') id: string) { return this.svc.deleteSalaryBand(id); }
 
+    // ── Employment Types ──
+    @Get('employment-types')
+    getEmploymentTypes() { return this.svc.findEmploymentTypes(); }
+    @Post('employment-types')
+    createEmploymentType(@Body() body: any) { return this.svc.createEmploymentType(body); }
+    @Patch('employment-types/:id')
+    updateEmploymentType(@Param('id') id: string, @Body() body: any) { return this.svc.updateEmploymentType(id, body); }
+    @Delete('employment-types/:id')
+    deleteEmploymentType(@Param('id') id: string) { return this.svc.deleteEmploymentType(id); }
+
     // ── Holidays ──
     @Get('holidays')
     getHolidays() { return this.svc.findHolidays(); }

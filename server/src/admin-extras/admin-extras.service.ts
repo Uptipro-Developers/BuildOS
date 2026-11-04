@@ -2719,6 +2719,7 @@ export class AdminExtrasService {
         lastName: string;
         email: string;
         role?: string | null;
+        position?: string | null;
         department?: { name?: string | null } | null;
     }): Promise<void> {
         const email = String(employee?.email ?? '').trim().toLowerCase();
@@ -2736,7 +2737,7 @@ export class AdminExtrasService {
             employee_name: fullName,
             employee_email: email,
             email,
-            job_title: employee.role ?? '',
+            job_title: employee.position ?? '',
             department: employee.department?.name ?? '',
             company_name: companyName,
         };
@@ -2818,7 +2819,8 @@ export class AdminExtrasService {
             lastName: e.lastName,
             name: `${e.firstName} ${e.lastName}`.trim(),
             email: e.email,
-            jobTitle: e.role ?? '',
+            jobTitle: e.position ?? '',
+            systemRole: e.role ?? '',
             department: e.department?.name ?? '',
             departmentId: e.departmentId,
             dateHired: e.dateHired,
@@ -2896,7 +2898,7 @@ export class AdminExtrasService {
         const list = Array.isArray(materials) ? materials : [];
         const rows: {
             materialGroupName: string; itemName: string; classification: string;
-            sku: string | null; kind: string; value: number | null; unit: string | null; name: string;
+            sku: string | null; reorderLevel?: number; kind: string; value: number | null; unit: string | null; name: string;
         }[] = [];
         for (const m of list) {
             const materialName = String(m?.name ?? '').trim();
@@ -2917,6 +2919,14 @@ export class AdminExtrasService {
                     throw new BadRequestException(`"${materialName}" has an item with no name.`);
                 }
                 const sku = String(it?.sku ?? '').trim() || null;
+                const reorderLevel = it?.reorderLevel === undefined || it?.reorderLevel === null || it?.reorderLevel === ''
+                    ? undefined
+                    : Number(it.reorderLevel);
+                if (reorderLevel !== undefined && (Number.isNaN(reorderLevel) || reorderLevel < 0)) {
+                    throw new BadRequestException(
+                        `"${itemName}" under "${materialName}" has an invalid reorder threshold.`,
+                    );
+                }
                 const dims = (Array.isArray(it?.dimensions) ? it.dimensions : [])
                     .map((d: any) => ({
                         kind: String(d?.kind ?? '').trim(),
@@ -2942,6 +2952,7 @@ export class AdminExtrasService {
                         itemName,
                         classification,
                         sku,
+                        reorderLevel,
                         kind: d.kind,
                         value: d.value,
                         unit: d.unit,
@@ -2959,7 +2970,7 @@ export class AdminExtrasService {
         categoryName: string,
         row: {
             materialGroupName: string; itemName: string; classification: string;
-            sku: string | null; kind: string; value: number | null; unit: string | null; name: string;
+            sku: string | null; reorderLevel?: number; kind: string; value: number | null; unit: string | null; name: string;
         },
     ) {
         const created = await tx.material.create({
@@ -2971,6 +2982,7 @@ export class AdminExtrasService {
                 materialGroupName: row.materialGroupName,
                 itemName: row.itemName,
                 sku: row.sku,
+                ...(row.reorderLevel !== undefined ? { reorderLevel: row.reorderLevel } : {}),
                 kind: row.kind,
                 value: row.value,
                 unit: row.unit,

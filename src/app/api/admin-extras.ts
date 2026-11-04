@@ -81,6 +81,7 @@ export interface MaterialCatalogDimensionInput {
 export interface MaterialCatalogItemInput {
     name: string;
     sku?: string | null;
+    reorderLevel?: number;
     dimensions: MaterialCatalogDimensionInput[];
 }
 
@@ -112,7 +113,7 @@ export interface MaterialCatalogRowRecord {
     materialGroupName: string | null;
     itemName: string | null;
     sku: string | null;
-    /** Weight | Length | Width | Breadth | Thickness | Area | Volume | Custom */
+    /** Configured unit category, or the persisted name of a custom dimension. */
     kind: string | null;
     value: number | null;
     unit: string | null;
@@ -120,6 +121,7 @@ export interface MaterialCatalogRowRecord {
     availableQty: number;
     reservedQty: number;
     unitCost: number;
+    reorderLevel: number;
 }
 
 export interface MaterialCategoryRecord {
@@ -273,6 +275,7 @@ export interface PendingSyncEmployee {
     name: string;
     email: string;
     jobTitle: string;
+    systemRole: string;
     department: string;
     departmentId: string | null;
     dateHired: string;

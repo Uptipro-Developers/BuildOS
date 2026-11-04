@@ -8,6 +8,12 @@ import { PrismaService } from '../prisma/prisma.service';
 // One definition of the settings key, shared with the typed reader payroll uses.
 import { HR_SETUP_KEY, HrSetupService } from './hr-setup.service';
 
+const EMPLOYMENT_TYPES_KEY = 'hr-employment-types';
+const DEFAULT_EMPLOYMENT_TYPES = [
+    { id: 'full-time', name: 'Full-time', defaultSalaryType: 'Monthly' },
+    { id: 'contract', name: 'Contract', defaultSalaryType: 'Monthly' },
+];
+
 @Injectable()
 export class HrExtrasService {
     constructor(
@@ -443,6 +449,7 @@ export class HrExtrasService {
                 gradeName: data?.gradeName != null ? String(data.gradeName) : null,
                 department: data?.department != null ? String(data.department) : null,
                 basicSalary: data?.basicSalary != null ? Number(data.basicSalary) : null,
+                salaryType: data?.salaryType === 'Annual' ? 'Annual' : 'Monthly',
                 components: Array.isArray(data?.components) ? data.components : undefined,
             },
         });
@@ -458,11 +465,68 @@ export class HrExtrasService {
         if (data?.gradeName !== undefined) patch.gradeName = data.gradeName != null ? String(data.gradeName) : null;
         if (data?.department !== undefined) patch.department = data.department != null ? String(data.department) : null;
         if (data?.basicSalary !== undefined) patch.basicSalary = data.basicSalary != null ? Number(data.basicSalary) : null;
+        if (data?.salaryType !== undefined) patch.salaryType = data.salaryType === 'Annual' ? 'Annual' : 'Monthly';
         if (data?.components !== undefined) patch.components = Array.isArray(data.components) ? data.components : null;
         return this.prisma.salaryBand.update({ where: { id }, data: patch });
     }
     async deleteSalaryBand(id: string) {
         await this.prisma.salaryBand.delete({ where: { id } });
+        return { id, deleted: true };
+    }
+
+    // ── Employment Types ──
+    async findEmploymentTypes() {
+        const row = await this.prisma.systemSetting.findUnique({ where: { key: EMPLOYMENT_TYPES_KEY } });
+        const list = row?.value;
+        return Array.isArray(list) && list.length > 0 ? list : DEFAULT_EMPLOYMENT_TYPES;
+    }
+    private async saveEmploymentTypes(items: any[]) {
+        const value = JSON.parse(JSON.stringify(items));
+        await this.prisma.systemSetting.upsert({
+            where: { key: EMPLOYMENT_TYPES_KEY },
+            create: { key: EMPLOYMENT_TYPES_KEY, value },
+            update: { value },
+        });
+        return value;
+    }
+    async createEmploymentType(data: any) {
+        const name = String(data?.name ?? '').trim();
+        if (!name) throw new BadRequestException('Employment type name is required.');
+        const items = await this.findEmploymentTypes() as any[];
+        if (items.some((item) => String(item.name).toLowerCase() === name.toLowerCase())) {
+            throw new ConflictException(`Employment type "${name}" already exists.`);
+        }
+        const created = {
+            id: `employment-type-${Date.now()}`,
+            name,
+            defaultSalaryType: data?.defaultSalaryType === 'Annual' ? 'Annual' : 'Monthly',
+        };
+        await this.saveEmploymentTypes([...items, created]);
+        return created;
+    }
+    async updateEmploymentType(id: string, data: any) {
+        const items = await this.findEmploymentTypes() as any[];
+        const current = items.find((item) => item.id === id);
+        if (!current) throw new NotFoundException('Employment type not found.');
+        const name = data?.name === undefined ? current.name : String(data.name).trim();
+        if (!name) throw new BadRequestException('Employment type name is required.');
+        if (items.some((item) => item.id !== id && String(item.name).toLowerCase() === name.toLowerCase())) {
+            throw new ConflictException(`Employment type "${name}" already exists.`);
+        }
+        const updated = {
+            ...current,
+            name,
+            defaultSalaryType: data?.defaultSalaryType === undefined
+                ? current.defaultSalaryType
+                : data.defaultSalaryType === 'Annual' ? 'Annual' : 'Monthly',
+        };
+        await this.saveEmploymentTypes(items.map((item) => item.id === id ? updated : item));
+        return updated;
+    }
+    async deleteEmploymentType(id: string) {
+        const items = await this.findEmploymentTypes() as any[];
+        if (!items.some((item) => item.id === id)) throw new NotFoundException('Employment type not found.');
+        await this.saveEmploymentTypes(items.filter((item) => item.id !== id));
         return { id, deleted: true };
     }
 

@@ -9,6 +9,12 @@ import {
 import { fetchDepartments } from "../../api/departments";
 import { fetchOrgUnits } from "../../api/org-units";
 import { getAppRoles } from "../../api/admin-extras";
+import {
+  getEmploymentTypes,
+  getSalaryGrades,
+  type EmploymentTypeConfig,
+  type SalaryGradeOption,
+} from "../../api/employment-types";
 import { useNumbering } from "../../stores/numberingStore";
 import { useClickOutside } from "../../utils/useClickOutside";
 import {
@@ -65,9 +71,11 @@ const empTypeColor: Record<string, string> = {
 
 function buildEmployeeFilterFields(
   departmentNames: string[],
+  employmentTypeNames: string[],
 ): FilterFieldDef[] {
   return [
-    { key: "role", label: "Role / Position", type: "text" },
+    { key: "position", label: "Position", type: "text" },
+    { key: "role", label: "System Role", type: "text" },
     {
       key: "department",
       label: "Department",
@@ -84,7 +92,7 @@ function buildEmployeeFilterFields(
       key: "employmentType",
       label: "Employment Type",
       type: "select",
-      options: ["Full-time", "Contract"],
+      options: employmentTypeNames,
     },
   ];
 }
@@ -93,11 +101,13 @@ interface AddEmpForm {
   firstName: string;
   lastName: string;
   middleName: string;
+  position: string;
   role: string;
   departmentId: string;
   email: string;
   phone: string;
   employmentType: string;
+  salaryType: "Monthly" | "Annual";
   dateOfBirth: string;
   gender: string;
   supervisorId: string;
@@ -126,6 +136,7 @@ interface EmployeeRow {
   id: string;
   firstName: string;
   lastName: string;
+  position: string;
   role: string;
   department: string;
   status: EmpStatus;
@@ -134,6 +145,7 @@ interface EmployeeRow {
   dateHired: string;
   dateHiredISO: string;
   employmentType: string;
+  salaryType: string;
   projectCount: number;
   projects: string[];
   /** Derived from the linked login account: 'synced' once a User row exists. */
@@ -144,11 +156,13 @@ const emptyEmpForm: AddEmpForm = {
   firstName: "",
   lastName: "",
   middleName: "",
+  position: "",
   role: "",
   departmentId: "",
   email: "",
   phone: "",
   employmentType: "Full-time",
+  salaryType: "Monthly",
   dateOfBirth: "",
   gender: "",
   supervisorId: "",
@@ -224,7 +238,8 @@ function validateEmployeeForm(
 
   req("firstName", "First name");
   req("lastName", "Last name");
-  req("role", "Role / position");
+  req("position", "Position");
+  req("role", "System role");
   req("gender", "Gender");
   req("dateOfBirth", "Date of birth");
   req("address", "Address");
@@ -276,6 +291,8 @@ function AddEmployeeModal({
   roleOptions,
   activeEmployees,
   orgUnits,
+  employmentTypes,
+  salaryGrades,
   saving,
 }: {
   onSave: (f: AddEmpForm) => void;
@@ -284,6 +301,8 @@ function AddEmployeeModal({
   roleOptions: string[];
   activeEmployees: { id: string; firstName: string; lastName: string }[];
   orgUnits: string[];
+  employmentTypes: EmploymentTypeConfig[];
+  salaryGrades: SalaryGradeOption[];
   saving: boolean;
 }) {
   const [form, setForm] = useState<AddEmpForm>({ ...emptyEmpForm });
@@ -342,11 +361,19 @@ function AddEmployeeModal({
               <FormField label="Middle Name">
                 <input value={form.middleName} onChange={(e) => set("middleName", e.target.value)} className={inputClass} />
               </FormField>
-              <FormField label="Role / Position" required error={errors.role}>
-                {/* Roles created in Admin are the source of truth; on sync the
-                    chosen role becomes the user's system role. */}
+              <FormField label="Position" required error={errors.position}>
+                <input
+                  value={form.position}
+                  onChange={(e) => set("position", e.target.value)}
+                  placeholder="e.g. Site Engineer"
+                  className={cls("position")}
+                />
+              </FormField>
+              <FormField label="System / ITT Role" required error={errors.role}>
+                {/* Access roles are configured in Admin and remain independent
+                    from the employee's HR position. */}
                 <select value={form.role} onChange={(e) => set("role", e.target.value)} className={`${cls("role")} bg-white`}>
-                  <option value="">Select role…</option>
+                  <option value="">Select system role…</option>
                   {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </FormField>
@@ -403,17 +430,26 @@ function AddEmployeeModal({
                   {orgUnits.map((u) => <option key={u} value={u}>{u}</option>)}
                 </select>
               </FormField>
-              <div className="col-span-2">
-                <label className="block text-xs font-medium text-gray-600 mb-1">Employment Type</label>
-                <div className="flex gap-3">
-                  {(["Full-time", "Contract"] as const).map((t) => (
-                    <label key={t} className="flex items-center gap-2 cursor-pointer">
-                      <input type="radio" name="empType" value={t} checked={form.employmentType === t} onChange={() => set("employmentType", t)} className="accent-indigo-600" />
-                      <span className="text-sm text-gray-700">{t}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              <FormField label="Employment Type">
+                <select
+                  value={form.employmentType}
+                  onChange={(e) => {
+                    const selected = employmentTypes.find((item) => item.name === e.target.value);
+                    set("employmentType", e.target.value);
+                    if (selected) set("salaryType", selected.defaultSalaryType);
+                  }}
+                  className={`${inputClass} bg-white`}
+                >
+                  <option value="">Select employment type…</option>
+                  {employmentTypes.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
+                </select>
+              </FormField>
+              <FormField label="Salary Type">
+                <select value={form.salaryType} onChange={(e) => set("salaryType", e.target.value as "Monthly" | "Annual")} className={`${inputClass} bg-white`}>
+                  <option value="Monthly">Monthly</option>
+                  <option value="Annual">Annual</option>
+                </select>
+              </FormField>
             </div>
           </div>
 
@@ -454,7 +490,14 @@ function AddEmployeeModal({
             <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Payment</p>
             <div className="grid grid-cols-2 gap-4">
               <FormField label="Salary Grade" required error={errors.gradeLevel}>
-                <input value={form.gradeLevel} onChange={(e) => set("gradeLevel", e.target.value)} className={cls("gradeLevel")} />
+                <select value={form.gradeLevel} onChange={(e) => set("gradeLevel", e.target.value)} className={`${cls("gradeLevel")} bg-white`}>
+                  <option value="">Select configured grade…</option>
+                  {salaryGrades.map((grade) => (
+                    <option key={grade.id} value={grade.gradeLevel || grade.gradeName}>
+                      {grade.gradeName}{grade.gradeLevel ? ` (${grade.gradeLevel})` : ""}
+                    </option>
+                  ))}
+                </select>
               </FormField>
               <FormField label="Base Salary" required error={errors.baseSalary}>
                 <input type="number" min="0" value={form.baseSalary} onChange={(e) => set("baseSalary", e.target.value)} className={cls("baseSalary")} />
@@ -509,8 +552,10 @@ export function EmployeesPage() {
   >([]);
   /** Org units for the form's Org Unit select, from the HR org structure. */
   const [orgUnits, setOrgUnits] = useState<string[]>([]);
-  /** System roles from Admin — the source of truth for an employee's role. */
+  /** System roles from Admin; these control access, not the employee's position. */
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeConfig[]>([]);
+  const [salaryGrades, setSalaryGrades] = useState<SalaryGradeOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -532,6 +577,8 @@ export function EmployeesPage() {
         ),
       )
       .catch(() => setRoleOptions([]));
+    getEmploymentTypes().then(setEmploymentTypes).catch(() => setEmploymentTypes([]));
+    getSalaryGrades().then(setSalaryGrades).catch(() => setSalaryGrades([]));
   }, []);
 
   function loadEmployees() {
@@ -575,6 +622,7 @@ export function EmployeesPage() {
 
   const employeeFilterFields = buildEmployeeFilterFields(
     departments.map((d) => d.name),
+    employmentTypes.map((item) => item.name),
   );
 
   // Stable, human-friendly Employee IDs following the numbering template
@@ -605,7 +653,7 @@ export function EmployeesPage() {
   const filtered = empList
     .filter((e) => {
       const matchSearch =
-        `${e.firstName} ${e.lastName} ${displayId(e.id)} ${e.role}`
+        `${e.firstName} ${e.lastName} ${displayId(e.id)} ${e.position} ${e.role}`
           .toLowerCase()
           .includes(search.toLowerCase());
       const matchAdv = Object.entries(advFilters).every(([key, vals]) => {
@@ -676,7 +724,8 @@ export function EmployeesPage() {
       "Employee ID",
       "First Name",
       "Last Name",
-      "Role",
+      "Position",
+      "System Role",
       "Department",
       "Status",
       "Email",
@@ -689,6 +738,7 @@ export function EmployeesPage() {
       displayId(e.id),
       e.firstName,
       e.lastName,
+      e.position ?? "",
       e.role ?? "",
       e.department ?? "",
       statusConfig[e.status as EmpStatus]?.label ?? e.status,
@@ -750,7 +800,7 @@ export function EmployeesPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by name, ID, or role..."
+            placeholder="Search by name, ID, position, or system role..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-indigo-500"
@@ -770,14 +820,15 @@ export function EmployeesPage() {
 
       {/* Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="min-w-[720px] w-full text-sm">
+        <table className="min-w-[840px] w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-left">
               {(
                 [
                   { key: "id", label: "Employee ID" },
                   { key: "name", label: "Full Name" },
-                  { key: "role", label: "Role / Position" },
+                  { key: "position", label: "Position" },
+                  { key: "role", label: "System Role" },
                   { key: "department", label: "Department" },
                   { key: "dateHired", label: "Date Hired" },
                   { key: "status", label: "Status" },
@@ -841,7 +892,8 @@ export function EmployeesPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{emp.role}</td>
+                  <td className="px-4 py-3 text-gray-700">{emp.position || "—"}</td>
+                  <td className="px-4 py-3 text-gray-500">{emp.role || "—"}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
                     {emp.department}
                   </td>
@@ -957,6 +1009,8 @@ export function EmployeesPage() {
           roleOptions={roleOptions}
           activeEmployees={empList.filter((e) => e.status === "active")}
           orgUnits={orgUnits}
+          employmentTypes={employmentTypes}
+          salaryGrades={salaryGrades}
           saving={creatingEmployee}
         />
       )}

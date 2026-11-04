@@ -55,19 +55,30 @@ export class MaterialsService {
     }
 
     // ── Stores ──
-    findAllStores(type?: string) {
-        return this.prisma.store.findMany({
+    async findAllStores(type?: string) {
+        const stores = await this.prisma.store.findMany({
             where: type ? { type } : {},
             include: { storeItems: true },
             orderBy: { name: 'asc' },
         });
+        const items = stores.flatMap((store) => store.storeItems);
+        const hydrated = await this.withMaterialReorderLevels(items);
+        const byId = new Map(hydrated.map((item) => [item.id, item]));
+        return stores.map((store) => ({
+            ...store,
+            storeItems: store.storeItems.map((item) => byId.get(item.id) ?? item),
+        }));
     }
 
-    findStore(id: string) {
-        return this.prisma.store.findUniqueOrThrow({
+    async findStore(id: string) {
+        const store = await this.prisma.store.findUniqueOrThrow({
             where: { id },
             include: { storeItems: true },
         });
+        return {
+            ...store,
+            storeItems: await this.withMaterialReorderLevels(store.storeItems),
+        };
     }
 
     /**
@@ -128,29 +139,65 @@ export class MaterialsService {
     }
 
     // ── Store Items ──
-    findAllStoreItems() {
-        return this.prisma.storeItem.findMany({
+    async findAllStoreItems() {
+        const items = await this.prisma.storeItem.findMany({
             orderBy: { materialName: 'asc' },
         });
+        return this.withMaterialReorderLevels(items);
     }
 
-    findStoreItems(storeId: string) {
-        return this.prisma.storeItem.findMany({
+    async findStoreItems(storeId: string) {
+        const items = await this.prisma.storeItem.findMany({
             where: { storeId },
             orderBy: { materialName: 'asc' },
         });
+        return this.withMaterialReorderLevels(items);
     }
 
-    createStoreItem(data: any) {
-        return this.prisma.storeItem.create({ data });
+    async createStoreItem(data: any) {
+        const { reorderLevel: _ignored, ...storeItemData } = data ?? {};
+        const created = await this.prisma.storeItem.create({ data: storeItemData });
+        return (await this.withMaterialReorderLevels([created]))[0];
     }
 
-    updateStoreItem(id: string, data: any) {
-        return this.prisma.storeItem.update({ where: { id }, data });
+    async updateStoreItem(id: string, data: any) {
+        const { reorderLevel: _ignored, ...storeItemData } = data ?? {};
+        const updated = await this.prisma.storeItem.update({ where: { id }, data: storeItemData });
+        return (await this.withMaterialReorderLevels([updated]))[0];
     }
 
     deleteStoreItem(id: string) {
         return this.prisma.storeItem.delete({ where: { id } });
+    }
+
+    /**
+     * StoreItem keeps quantities and location only. Its public reorder level is
+     * always read from the matching Material row, making the material catalogue
+     * the single source of truth even for legacy StoreItem rows that still have
+     * an old database value.
+     */
+    private async withMaterialReorderLevels<T extends {
+        materialName: string;
+        unit?: string | null;
+        reorderLevel?: number | null;
+    }>(items: T[]): Promise<T[]> {
+        if (items.length === 0) return items;
+        const names = [...new Set(items.map((item) => item.materialName).filter(Boolean))];
+        const materials = await this.prisma.material.findMany({
+            where: { name: { in: names } },
+            select: { name: true, unit: true, reorderLevel: true },
+        });
+        const key = (name: string, unit?: string | null) =>
+            `${name.trim().toLowerCase()}::${String(unit ?? '').trim().toLowerCase()}`;
+        const exact = new Map(materials.map((material) => [key(material.name, material.unit), material.reorderLevel]));
+        const byName = new Map(materials.map((material) => [key(material.name), material.reorderLevel]));
+        return items.map((item) => ({
+            ...item,
+            reorderLevel:
+                exact.get(key(item.materialName, item.unit)) ??
+                byName.get(key(item.materialName)) ??
+                0,
+        }));
     }
 
     // ── Stock Movements ──
