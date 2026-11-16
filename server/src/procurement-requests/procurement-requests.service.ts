@@ -101,8 +101,19 @@ export class ProcurementRequestsService {
             return pr;
         });
     }
-    updatePR(id: string, data: any) {
-        return this.prisma.purchaseRequest.update({ where: { id }, data });
+    async updatePR(id: string, data: any) {
+        const updated = await this.prisma.purchaseRequest.update({ where: { id }, data });
+        const status = normaliseStatus(updated.status);
+        if (updated.mrRef && !['draft', 'not_raised', 'pending_approval'].includes(status)) {
+            const requestStatus = status === 'cancelled' || status === 'rejected'
+                ? { status: 'rejected', fulfillmentStatus: 'rejected' }
+                : { status: 'procurement_in_progress', fulfillmentStatus: 'procurement_in_progress' };
+            await this.prisma.materialRequest.updateMany({
+                where: { OR: [{ reference: updated.mrRef }, { reference: { startsWith: `${updated.mrRef}/` } }] },
+                data: requestStatus,
+            });
+        }
+        return updated;
     }
     deletePR(id: string) {
         return this.prisma.purchaseRequest.delete({ where: { id } });

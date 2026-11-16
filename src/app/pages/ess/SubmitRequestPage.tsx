@@ -19,11 +19,12 @@ import {
   Package,
   DollarSign,
   Calendar,
-  PlusCircle,
   Wrench,
   Edit2,
+  Plus,
+  Trash2,
 } from "lucide-react";
-import { searchMaterials, Material as MaterialSearchHit } from "../../api/materials";
+import { searchMaterials, getStores, Material as MaterialSearchHit, type Store } from "../../api/materials";
 import { getUnits } from "../../api/admin-extras";
 import { IssueForm } from "../../components/IssueForm";
 import { ChangeRequestForm } from "../../components/ChangeRequestForm";
@@ -39,7 +40,7 @@ import { allocateNumber } from "../../api/numbering";
 import { useHRConfig } from "../../store/hrConfig";
 import { createExpense } from "../../api/expenses";
 import { createLeaveRequest } from "../../api/leave-requests";
-import { createMaterialRequest } from "../../api/materials";
+import { createMaterialRequest, createMaterialRequestBatch } from "../../api/materials";
 import { fetchProjects } from "../../api/projects";
 import { useAuthUser } from "../../utils/useAuthUser";
 import { logActivity } from "../../utils/activityLog";
@@ -53,17 +54,6 @@ function stockLevelOf(m: { availableQty?: number; reorderLevel?: number }): Stoc
   if (available <= 0) return "out_of_stock";
   return available <= Number(m.reorderLevel ?? 0) ? "low_stock" : "in_stock";
 }
-
-const STOCK_LABEL: Record<StockLevel, string> = {
-  in_stock: "In Stock",
-  low_stock: "Low Stock",
-  out_of_stock: "Out of Stock",
-};
-const STOCK_BADGE: Record<StockLevel, string> = {
-  in_stock: "bg-green-100 text-green-700",
-  low_stock: "bg-amber-100 text-amber-700",
-  out_of_stock: "bg-red-100 text-red-700",
-};
 
 /** Stock level for a catalogue Material hit, using its own reorder level. */
 function stockLevelOfType(hit: MaterialSearchHit): StockLevel {
@@ -170,24 +160,18 @@ function MaterialCombobox({
               <div className="px-4 py-3 text-sm text-gray-400">Searching…</div>
             ) : results.length > 0 ? (
               results.map((hit) => {
-                const stock = stockLevelOfType(hit);
                 return (
                   <button
                     key={hit.id}
                     type="button"
                     onMouseDown={() => select(hit)}
-                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-teal-50 transition-colors flex items-center justify-between ${value === hit.name ? "bg-teal-50 text-teal-700 font-medium" : "text-gray-700"}`}
+                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-teal-50 transition-colors ${value === hit.name ? "bg-teal-50 text-teal-700 font-medium" : "text-gray-700"}`}
                   >
                     <span>
                       {hit.name}
                       <span className="block text-xs text-gray-400 font-normal">
                         {hit.category}
                       </span>
-                    </span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ml-2 ${STOCK_BADGE[stock]}`}
-                    >
-                      {STOCK_LABEL[stock]}
                     </span>
                   </button>
                 );
@@ -278,6 +262,7 @@ function MaterialCreationForm({
 }: {
   onSuccess: (id: string) => void;
 }) {
+  const authUser = useAuthUser();
   const [formState, setFormState] = useState({
     materialName: "",
     description: "",
@@ -285,12 +270,14 @@ function MaterialCreationForm({
     // Blank for the same reason as the Material Request form: "pcs" was not a
     // configured unit.
     unit: "",
+    destinationStoreId: "",
     notes: "",
   });
   // The unit list was hardcoded here while Storefront configures units of
   // measurement, so a request could be raised in a unit the store does not
   // stock. Same defect that was fixed on the Material Request form.
   const [unitOptions, setUnitOptions] = useState<string[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -309,16 +296,24 @@ function MaterialCreationForm({
       alive = false;
     };
   }, []);
+  useEffect(() => {
+    getStores().then(setStores).catch(() => setStores([]));
+  }, []);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   function validate() {
     const e: Record<string, string> = {};
     if (!formState.materialName.trim()) e.materialName = "Required";
+    if (!formState.destinationStoreId) e.destinationStoreId = "Required";
     if (!formState.estimatedQty || Number(formState.estimatedQty) <= 0)
       e.estimatedQty = "Enter a valid quantity";
+    const photo = attachments[0];
+    if (!photo || !photo.type.startsWith("image/")) e.photo = "A material photo is required";
+    else if (photo.size > 2 * 1024 * 1024) e.photo = "Photo must be 2 MB or smaller";
     return e;
   }
 
@@ -332,8 +327,40 @@ function MaterialCreationForm({
     setShowConfirm(true);
   }
 
-  function submitRequest() {
-    onSuccess("MCR-" + String(Math.floor(1000 + Math.random() * 8999)));
+  async function submitRequest() {
+    const photo = attachments[0];
+    if (!photo) return;
+    setSubmitting(true);
+    try {
+      const imageUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("Could not read the selected photo."));
+        reader.readAsDataURL(photo);
+      });
+      const { reference } = await allocateNumber("MaterialRequest");
+      const created = await createMaterialRequest({
+        reference,
+        materialName: formState.materialName.trim(),
+        unit: formState.unit,
+        qty: Number(formState.estimatedQty),
+        storeId: formState.destinationStoreId,
+        storeName: stores.find((store) => store.id === formState.destinationStoreId)?.name || "",
+        purpose: formState.description.trim() || "New catalogue material request",
+        notes: formState.notes.trim() || undefined,
+        priority: "Normal",
+        status: "pending",
+        requestedBy: authUser.name || authUser.email || "Employee",
+        imageUrl,
+        isNewMaterial: true,
+      });
+      setShowConfirm(false);
+      onSuccess(created.reference || created.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit the material creation request.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function field(name: keyof typeof formState, value: string) {
@@ -453,6 +480,18 @@ function MaterialCreationForm({
           </div>
         </div>
 
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Destination store<span className="text-red-500">*</span>
+          </label>
+          <select value={formState.destinationStoreId} onChange={(event) => field("destinationStoreId", event.target.value)}
+            className={`w-full border rounded-md px-3 py-2.5 text-sm bg-white ${errors.destinationStoreId ? "border-red-400" : "border-gray-300"}`}>
+            <option value="">Select the store that needs this material…</option>
+            {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+          </select>
+          {errors.destinationStoreId && <p className="text-xs text-red-500 mt-1">{errors.destinationStoreId}</p>}
+        </div>
+
         {/* Additional Notes */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -468,7 +507,15 @@ function MaterialCreationForm({
           />
         </div>
 
-        <AttachmentsSection files={attachments} onChange={setAttachments} />
+        <AttachmentsSection files={attachments} onChange={(files) => {
+          setAttachments(files);
+          if (errors.photo) setErrors((current) => {
+            const next = { ...current };
+            delete next.photo;
+            return next;
+          });
+        }} requiredImageOnly />
+        {errors.photo && <p className="text-xs text-red-500 -mt-3">{errors.photo}</p>}
 
         <button
           type="submit"
@@ -483,8 +530,9 @@ function MaterialCreationForm({
         title="Submit Material Creation Request?"
         description={`This will request the creation of ${formState.estimatedQty || "0"} ${formState.unit} of "${formState.materialName}". Your line manager reviews it first, then the store manager creates and procures the material.`}
         confirmLabel="Submit Request"
-        onConfirm={submitRequest}
+        onConfirm={() => void submitRequest()}
         onCancel={() => setShowConfirm(false)}
+        isLoading={submitting}
       />
     </>
   );
@@ -499,15 +547,31 @@ function MaterialForm({
   projects: string[];
 }) {
   const authUser = useAuthUser();
+  type MaterialRequestRow = {
+    id: string;
+    material: string;
+    quantity: string;
+    unit: string;
+    stock: StockLevel | null;
+  };
+  const blankMaterialRow = (): MaterialRequestRow => ({
+    id: crypto.randomUUID(),
+    material: "",
+    quantity: "",
+    unit: "",
+    stock: null,
+  });
   const [requestKind, setRequestKind] = useState<"material" | "service">(
     "material",
   );
   const [selectedStock, setSelectedStock] = useState<StockLevel | null>(null);
+  const [materialRows, setMaterialRows] = useState<MaterialRequestRow[]>([blankMaterialRow()]);
   /**
    * Units of Measurement configured in Storefront. This was a hardcoded list,
    * so the picker offered units that were never actually configured.
    */
   const [unitOptions, setUnitOptions] = useState<string[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
 
   useEffect(() => {
     getUnits()
@@ -518,9 +582,13 @@ function MaterialForm({
       )
       .catch(() => setUnitOptions([]));
   }, []);
+  useEffect(() => {
+    getStores().then(setStores).catch(() => setStores([]));
+  }, []);
   const [showCreationForm, setShowCreationForm] = useState(false);
   const [formState, setFormState] = useState({
     project: "",
+    destinationStoreId: "",
     material: "",
     quantity: "",
     // Blank, not "pcs". That default was not a configured unit of measurement,
@@ -547,12 +615,14 @@ function MaterialForm({
     const e: Record<string, string> = {};
     if (!formState.project) e.project = "Required";
     if (requestKind === "material") {
-      if (!formState.material) e.material = "Required";
-      if (!formState.quantity || Number(formState.quantity) <= 0)
-        e.quantity = "Enter a valid quantity";
-      // Now that the unit starts blank it has to be chosen, or the request goes
-      // out with no unit at all.
-      if (!formState.unit) e.unit = "Required";
+      if (!formState.destinationStoreId) e.destinationStoreId = "Required";
+      materialRows.forEach((row, index) => {
+        if (!row.material.trim()) e[`material_${index}`] = "Required";
+        if (!row.quantity || Number(row.quantity) <= 0) e[`quantity_${index}`] = "Enter a valid quantity";
+        if (!row.unit) e[`unit_${index}`] = "Required";
+      });
+      const names = materialRows.map((row) => row.material.trim().toLowerCase()).filter(Boolean);
+      if (new Set(names).size !== names.length) e.materials = "The same material cannot be requested twice.";
       if (!formState.neededDate) e.neededDate = "Required";
     } else {
       if (!formState.serviceType) e.serviceType = "Required";
@@ -575,6 +645,7 @@ function MaterialForm({
     requestKind === "service"
       ? `This will submit a ${formState.serviceType || "service"} request for ${formState.project}, needed by ${formatDateByGeneralSettings(formState.serviceDate)}. It will be routed for approval once submitted.`
       : `This will request ${formState.quantity} ${formState.unit} of ${formState.material} for ${formState.project}. It will be routed for approval once submitted.`;
+  const materialConfirmDescription = `This will submit ${materialRows.length} material${materialRows.length === 1 ? "" : "s"} for ${formState.project}. They will share one request reference and approval decision.`;
 
   async function submitRequest() {
     setSubmitting(true);
@@ -623,18 +694,22 @@ function MaterialForm({
         return;
       }
 
-      const created: any = await createMaterialRequest({
+      const created = await createMaterialRequestBatch({
         reference,
-        materialName: formState.material,
-        unit: formState.unit,
-        qty: Number(formState.quantity),
-        storeName: "General Store",
+        items: materialRows.map((row) => ({
+          materialName: row.material.trim(),
+          unit: row.unit,
+          qty: Number(row.quantity),
+        })),
+        storeId: formState.destinationStoreId,
+        storeName: stores.find((store) => store.id === formState.destinationStoreId)?.name || "",
         projectName: formState.project,
         priority,
+        neededBy: formState.neededDate ? new Date(formState.neededDate).toISOString() : undefined,
         purpose: formState.comments,
         requestedBy: authUser.name || authUser.email || "Employee",
       });
-      onSuccess(created?.id ?? "MR");
+      onSuccess(created.reference || "MR");
     } catch (err) {
       toast.error(
         err instanceof Error
@@ -655,6 +730,23 @@ function MaterialForm({
         delete x[name];
         return x;
       });
+  }
+
+  function updateMaterialRow(id: string, patch: Partial<MaterialRequestRow>) {
+    setMaterialRows((rows) => rows.map((row) => row.id === id ? { ...row, ...patch } : row));
+    setErrors((current) => {
+      const next = { ...current };
+      delete next.materials;
+      return next;
+    });
+  }
+
+  function addMaterialRow() {
+    setMaterialRows((rows) => [...rows, blankMaterialRow()]);
+  }
+
+  function removeMaterialRow(id: string) {
+    setMaterialRows((rows) => rows.length === 1 ? rows : rows.filter((row) => row.id !== id));
   }
 
   return (
@@ -737,118 +829,64 @@ function MaterialForm({
               )}
             </div>
 
-            {/* Material Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Material Name<span className="text-red-500">*</span>
-              </label>
-              <MaterialCombobox
-                value={formState.material}
-                onChange={(v) => field("material", v)}
-                onStockChange={(s) => setSelectedStock(s)}
-                onUnitChange={(u) => field("unit", u)}
-                error={errors.material}
-              />
-              {errors.material && (
-                <p className="text-xs text-red-500 mt-1">{errors.material}</p>
-              )}
-            </div>
-
-            {/* Stock level feedback */}
-            {selectedStock === "low_stock" && (
-              <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+            <>
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">
-                    Low Stock
-                  </p>
-                  <p className="text-xs text-amber-700 mt-0.5">
-                    Available but running low. Your request will proceed
-                    normally. Storefront may raise a procurement order to
-                    replenish stock.
-                  </p>
-                </div>
-              </div>
-            )}
-            {selectedStock === "out_of_stock" && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-4 space-y-3">
-                <div className="flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-semibold text-red-800">
-                      Out of Stock
-                    </p>
-                    <p className="text-xs text-red-700 mt-0.5">
-                      This material is currently unavailable. You cannot submit
-                      a direct material request. Instead, submit a{" "}
-                      <strong>Material Creation Request</strong> to initiate the
-                      procurement process through your Line Manager and Store
-                      Manager.
-                    </p>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Destination store<span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={formState.destinationStoreId}
+                      onChange={(event) => field("destinationStoreId", event.target.value)}
+                      className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.destinationStoreId ? "border-red-400" : "border-gray-300"}`}
+                    >
+                      <option value="">Select the store that needs these materials…</option>
+                      {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                   </div>
+                  {errors.destinationStoreId && <p className="text-xs text-red-500 mt-1">{errors.destinationStoreId}</p>}
+                  <p className="text-xs text-gray-500 mt-1">Approved stock movements and procurement receipts will be fulfilled to this store.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowCreationForm(true)}
-                  className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  Request New Material
-                </button>
-              </div>
-            )}
-
-            {/* Quantity + Unit — only when not out of stock */}
-            {selectedStock !== "out_of_stock" && (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Quantity<span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      value={formState.quantity}
-                      onChange={(e) => field("quantity", e.target.value)}
-                      type="number"
-                      min="1"
-                      placeholder="0"
-                      className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.quantity ? "border-red-400" : "border-gray-300"}`}
-                    />
-                    {errors.quantity && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.quantity}
-                      </p>
-                    )}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-gray-700">Materials<span className="text-red-500">*</span></label>
+                    <button type="button" onClick={addMaterialRow} className="flex items-center gap-1 text-sm font-medium text-teal-700 hover:text-teal-800">
+                      <Plus className="w-4 h-4" /> Add another material
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Unit<span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={formState.unit}
-                        onChange={(e) => field("unit", e.target.value)}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      >
-                        <option value="">
-                          {unitOptions.length === 0
-                            ? "No units configured"
-                            : "Select unit…"}
-                        </option>
-                        {Array.from(
-                          new Set(
-                            [...unitOptions, formState.unit].filter(Boolean),
-                          ),
-                        ).map((u) => (
-                          <option key={u}>{u}</option>
-                        ))}
-                      </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  {errors.materials && <p className="text-xs text-red-500">{errors.materials}</p>}
+                  {materialRows.map((row, index) => (
+                    <div key={row.id} className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50/50">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-gray-500">Material {index + 1}</p>
+                        <button type="button" disabled={materialRows.length === 1} onClick={() => removeMaterialRow(row.id)} className="p-1 text-gray-400 hover:text-red-600 disabled:opacity-30" title="Remove material">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <MaterialCombobox
+                        value={row.material}
+                        onChange={(material) => updateMaterialRow(row.id, { material })}
+                        onStockChange={(stock) => updateMaterialRow(row.id, { stock })}
+                        onUnitChange={(unit) => updateMaterialRow(row.id, { unit })}
+                        error={errors[`material_${index}`]}
+                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <input value={row.quantity} onChange={(event) => updateMaterialRow(row.id, { quantity: event.target.value })} type="number" min="1" placeholder="Quantity" className={`w-full border rounded-md px-3 py-2.5 text-sm ${errors[`quantity_${index}`] ? "border-red-400" : "border-gray-300"}`} />
+                          {errors[`quantity_${index}`] && <p className="text-xs text-red-500 mt-1">{errors[`quantity_${index}`]}</p>}
+                        </div>
+                        <div className="relative">
+                          <select value={row.unit} onChange={(event) => updateMaterialRow(row.id, { unit: event.target.value })} className={`w-full border rounded-md px-3 py-2.5 text-sm appearance-none bg-white ${errors[`unit_${index}`] ? "border-red-400" : "border-gray-300"}`}>
+                            <option value="">Select unit…</option>
+                            {Array.from(new Set([...unitOptions, row.unit].filter(Boolean))).map((unit) => <option key={unit}>{unit}</option>)}
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                      {row.stock === "low_stock" && <p className="text-xs text-amber-700">Low stock — Storefront will decide the fulfilment route.</p>}
                     </div>
-                    {errors.unit && (
-                      <p className="text-xs text-red-500 mt-1">{errors.unit}</p>
-                    )}
-                  </div>
+                  ))}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -917,8 +955,7 @@ function MaterialForm({
                 >
                   {submitting ? "Submitting…" : "Submit Material Request"}
                 </button>
-              </>
-            )}
+            </>
           </>
         ) : (
           // Service request branch
@@ -1068,7 +1105,7 @@ function MaterialForm({
             ? "Submit Service Request?"
             : "Submit Material Request?"
         }
-        description={confirmDescription}
+        description={requestKind === "material" ? materialConfirmDescription : confirmDescription}
         confirmLabel="Submit Request"
         isLoading={submitting}
         onConfirm={submitRequest}

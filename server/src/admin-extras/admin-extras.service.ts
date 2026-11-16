@@ -735,7 +735,7 @@ export class AdminExtrasService {
         }
         for (const item of Array.isArray(persisted) ? persisted : []) {
             const id = String(item?.id ?? '').trim();
-            if (id) byId.set(id, item);
+            if (id && id !== 'p_store_requests') byId.set(id, item);
         }
         return Array.from(byId.values());
     }
@@ -847,7 +847,9 @@ export class AdminExtrasService {
 
     async findProcessWorkflows() {
         const settings = await this.readAdminSettings();
-        return settings.processWorkflows;
+        // The legacy Incoming Store Requests workflow duplicated Material
+        // Request Approval. Keep only the canonical p_material_requests entry.
+        return settings.processWorkflows.filter((item: any) => item.processId !== 'p_store_requests');
     }
 
     async createProcessWorkflow(data: any) {
@@ -1152,6 +1154,8 @@ export class AdminExtrasService {
                 return 'p_purchase_requests';
             case 'Material Request':
                 return 'p_material_requests';
+            case 'Storefront Material Request':
+                return 'p_storefront_material_requests';
             case 'Purchase Order':
                 return 'p_purchase_orders';
             case 'Purchase Invoice':
@@ -1325,7 +1329,7 @@ export class AdminExtrasService {
             const custom = Array.isArray(settings.processCatalog) ? settings.processCatalog : [];
             for (const item of custom) {
                 const id = String(item?.id ?? '').trim();
-                if (!id) continue;
+                if (!id || id === 'p_store_requests') continue;
                 const actions = Array.isArray(item?.actions)
                     ? item.actions.map((a: unknown) => String(a).trim().toLowerCase())
                     : ['approve'];
@@ -1486,19 +1490,12 @@ export class AdminExtrasService {
             })));
         }
 
-        if (target === 'all' || target === 'procurement') {
-            const [materialRequests, purchaseRequests, purchaseOrders] = await Promise.all([
-                this.prisma.materialRequest.findMany({ orderBy: { createdAt: 'desc' } }),
-                this.prisma.purchaseRequest.findMany({ orderBy: { createdAt: 'desc' } }),
-                this.prisma.purchaseOrder.findMany({
-                    include: { supplier: true },
-                    orderBy: { createdAt: 'desc' },
-                }),
-            ]);
-            rows.push(...materialRequests.map((r) => ({
+        if (target === 'all' || target === 'storefront') {
+            const materialRequests = await this.prisma.materialRequest.findMany({ orderBy: { createdAt: 'desc' } });
+            rows.push(...materialRequests.filter((r) => r.fulfillmentMethod !== 'procurement').map((r) => ({
                 id: r.id,
-                module: 'procurement',
-                type: 'Material Request',
+                module: 'storefront',
+                type: 'Storefront Material Request',
                 title: `${r.materialName} — ${r.qty} ${r.unit}`,
                 project: r.projectName ?? r.storeName,
                 requestedBy: r.requestedBy,
@@ -1506,8 +1503,46 @@ export class AdminExtrasService {
                 status: this.normalizeApprovalStatus(r.status),
                 urgency: String(r.priority).toLowerCase().includes('urgent') ? 'urgent' : 'normal',
                 description: r.purpose ?? r.notes ?? '',
-                approvalFlow: flowForType('Material Request'),
+                approvalFlow: flowForType('Storefront Material Request'),
             })));
+        }
+
+        if (target === 'all' || target === 'procurement') {
+            const [purchaseRequests, purchaseOrders] = await Promise.all([
+                this.prisma.purchaseRequest.findMany({ orderBy: { createdAt: 'desc' } }),
+                this.prisma.purchaseOrder.findMany({
+                    include: { supplier: true },
+                    orderBy: { createdAt: 'desc' },
+                }),
+            ]);
+            const materialRequests = await this.prisma.materialRequest.findMany({
+                where: { fulfillmentMethod: { in: ['procurement', 'mixed'] } },
+                orderBy: { createdAt: 'desc' },
+            });
+            const materialRequestGroups = new Map<string, typeof materialRequests>();
+            for (const request of materialRequests) {
+                const base = request.reference.replace(/\/\d+$/, '');
+                materialRequestGroups.set(base, [...(materialRequestGroups.get(base) ?? []), request]);
+            }
+            rows.push(...Array.from(materialRequestGroups.values()).map((group) => {
+                const r = group[0];
+                return ({
+                id: r.id,
+                module: 'procurement',
+                type: 'Material Request',
+                title: group.length === 1 ? `${r.materialName} — ${r.qty} ${r.unit}` : `${group.length} materials — ${r.reference.replace(/\/\d+$/, '')}`,
+                project: r.projectName ?? r.storeName,
+                requestedBy: r.requestedBy,
+                date: r.requestDate,
+                status: r.status.includes('pending_procurement_approval')
+                    ? 'pending'
+                    : r.status === 'rejected'
+                      ? 'rejected'
+                      : 'approved',
+                urgency: String(r.priority).toLowerCase().includes('urgent') ? 'urgent' : 'normal',
+                description: r.purpose ?? r.notes ?? '',
+                approvalFlow: flowForType('Material Request'),
+            }); }));
             rows.push(...purchaseRequests.map((r) => ({
                 id: r.id,
                 module: 'procurement',
@@ -2877,20 +2912,34 @@ export class AdminExtrasService {
         },
     };
 
-    /** One "(value+unit)" suffix for a dimension, e.g. "12mm" or just "12"/"mm" alone — falls back to its kind if it has neither. */
-    private formatDimensionSuffix(d: { kind: string; value: number | null; unit: string | null }): string {
-        const joined = `${d.value ?? ''}${d.unit ?? ''}`;
-        return joined || d.kind;
+    private defaultSkuPrefix(name: string) {
+        const letters = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+        return `${letters || 'MAT'}-`;
+    }
+
+    private normalizeSkuPrefix(value: unknown, categoryName: string) {
+        const prefix = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '-');
+        return prefix || this.defaultSkuPrefix(categoryName);
+    }
+
+    private async allocateCategorySku(tx: any, categoryId: string) {
+        const category = await tx.materialCategory.update({
+            where: { id: categoryId },
+            data: { skuNext: { increment: 1 } },
+            select: { skuPrefix: true, skuStart: true, skuNext: true },
+        });
+        const issued = category.skuNext - 1;
+        return `${category.skuPrefix}${String(issued).padStart(Math.max(3, String(category.skuStart).length), '0')}`;
     }
 
     /**
-     * Normalises a submitted materials/items/dimensions tree and flattens it
-     * into one Material-create input per dimension — an item is no longer a
-     * row of its own; each of its dimensions is. Only a material with no
+     * Normalises a submitted materials/items/dimensions tree into one
+     * Material-create input per item. Dimensions are optional variants stored
+     * on that row. Only a material with no
      * name AND no items is a genuine no-op and silently skipped (the blank
      * placeholder row the builder starts with); anything else half-filled —
-     * a named material with no items, an item with no name, an item with no
-     * dimension, or a dimension missing a value or unit — is rejected
+     * a named material with no items, an item with no name, or a partially
+     * completed dimension — is rejected
      * outright rather than silently dropped, so nothing typed in is ever
      * lost without the caller knowing.
      */
@@ -2898,7 +2947,7 @@ export class AdminExtrasService {
         const list = Array.isArray(materials) ? materials : [];
         const rows: {
             materialGroupName: string; itemName: string; classification: string;
-            sku: string | null; reorderLevel?: number; kind: string; value: number | null; unit: string | null; name: string;
+            reorderLevel?: number; dimensions: { kind: string; value: number; unit: string }[]; aliases: string[]; imageUrl: string | null; name: string;
         }[] = [];
         for (const m of list) {
             const materialName = String(m?.name ?? '').trim();
@@ -2918,7 +2967,6 @@ export class AdminExtrasService {
                 if (!itemName) {
                     throw new BadRequestException(`"${materialName}" has an item with no name.`);
                 }
-                const sku = String(it?.sku ?? '').trim() || null;
                 const reorderLevel = it?.reorderLevel === undefined || it?.reorderLevel === null || it?.reorderLevel === ''
                     ? undefined
                     : Number(it.reorderLevel);
@@ -2927,6 +2975,10 @@ export class AdminExtrasService {
                         `"${itemName}" under "${materialName}" has an invalid reorder threshold.`,
                     );
                 }
+                const aliases: string[] = Array.isArray(it?.aliases)
+                    ? [...new Set<string>(it.aliases.map((alias: any) => String(alias ?? '').trim()).filter(Boolean))]
+                    : [];
+                const imageUrl = String(it?.imageUrl ?? '').trim() || null;
                 const dims = (Array.isArray(it?.dimensions) ? it.dimensions : [])
                     .map((d: any) => ({
                         kind: String(d?.kind ?? '').trim(),
@@ -2934,11 +2986,6 @@ export class AdminExtrasService {
                         unit: String(d?.unit ?? '').trim() || null,
                     }))
                     .filter((d: any) => d.kind);
-                if (dims.length === 0) {
-                    throw new BadRequestException(
-                        `"${itemName}" under "${materialName}" needs at least one dimension before it can be saved.`,
-                    );
-                }
                 for (const d of dims) {
                     if (d.value === null || Number.isNaN(d.value) || !d.unit) {
                         throw new BadRequestException(
@@ -2946,19 +2993,16 @@ export class AdminExtrasService {
                         );
                     }
                 }
-                for (const d of dims) {
-                    rows.push({
-                        materialGroupName: materialName,
-                        itemName,
-                        classification,
-                        sku,
-                        reorderLevel,
-                        kind: d.kind,
-                        value: d.value,
-                        unit: d.unit,
-                        name: `${materialName} — ${itemName} (${this.formatDimensionSuffix(d)})`,
-                    });
-                }
+                rows.push({
+                    materialGroupName: materialName,
+                    itemName,
+                    classification,
+                    reorderLevel,
+                    dimensions: dims,
+                    aliases,
+                    imageUrl,
+                    name: materialName === itemName ? itemName : `${materialName} — ${itemName}`,
+                });
             }
         }
         return rows;
@@ -2970,9 +3014,11 @@ export class AdminExtrasService {
         categoryName: string,
         row: {
             materialGroupName: string; itemName: string; classification: string;
-            sku: string | null; reorderLevel?: number; kind: string; value: number | null; unit: string | null; name: string;
+            reorderLevel?: number; dimensions: { kind: string; value: number; unit: string }[]; aliases: string[]; imageUrl: string | null; name: string;
         },
     ) {
+        const sku = await this.allocateCategorySku(tx, categoryId);
+        const firstDimension = row.dimensions[0];
         const created = await tx.material.create({
             data: {
                 categoryId,
@@ -2981,11 +3027,14 @@ export class AdminExtrasService {
                 name: row.name,
                 materialGroupName: row.materialGroupName,
                 itemName: row.itemName,
-                sku: row.sku,
+                sku,
                 ...(row.reorderLevel !== undefined ? { reorderLevel: row.reorderLevel } : {}),
-                kind: row.kind,
-                value: row.value,
-                unit: row.unit,
+                dimensions: row.dimensions,
+                ...(row.aliases.length ? { aliases: row.aliases } : {}),
+                ...(row.imageUrl ? { imageUrl: row.imageUrl } : {}),
+                kind: firstDimension?.kind ?? null,
+                value: firstDimension?.value ?? null,
+                unit: firstDimension?.unit ?? null,
             },
         });
         this.logger.log(`[MaterialCategory:material] material row committed id=${created.id} name="${row.name}"`);
@@ -3008,6 +3057,8 @@ export class AdminExtrasService {
                     { name: { contains: q, mode: 'insensitive' } },
                     { materialGroupName: { contains: q, mode: 'insensitive' } },
                     { itemName: { contains: q, mode: 'insensitive' } },
+                    { sku: { contains: q, mode: 'insensitive' } },
+                    { aliases: { has: q } },
                 ],
             },
             orderBy: { name: 'asc' },
@@ -3103,6 +3154,8 @@ export class AdminExtrasService {
             throw new ConflictException(`A category named "${name}" already exists`);
         }
         const rows = this.buildMaterialCreateInput(data?.materials);
+        const skuStart = Math.max(1, Math.floor(Number(data?.skuStart) || 1));
+        const skuPrefix = this.normalizeSkuPrefix(data?.skuPrefix, name);
         this.logger.log(
             `[MaterialCategory:create] after filtering blanks: ${rows.length} row(s) — ` +
             rows.map((r) => r.name).join(', '),
@@ -3115,6 +3168,9 @@ export class AdminExtrasService {
                         name,
                         description: String(data?.description ?? '').trim() || null,
                         color: String(data?.color ?? 'teal').trim() || 'teal',
+                        skuPrefix,
+                        skuStart,
+                        skuNext: skuStart,
                     },
                 });
                 this.logger.log(`[MaterialCategory:create] category row committed id=${category.id}`);
@@ -3163,6 +3219,12 @@ export class AdminExtrasService {
         }
         if (data?.description !== undefined) patch.description = String(data.description ?? '').trim() || null;
         if (data?.color !== undefined) patch.color = String(data.color ?? 'teal').trim() || 'teal';
+        if (data?.skuPrefix !== undefined) patch.skuPrefix = this.normalizeSkuPrefix(data.skuPrefix, (patch.name as string | undefined) ?? existing.name);
+        if (data?.skuStart !== undefined) {
+            const skuStart = Math.max(1, Math.floor(Number(data.skuStart) || 1));
+            patch.skuStart = skuStart;
+            if (existing.skuNext < skuStart) patch.skuNext = skuStart;
+        }
 
         const categoryName = (patch.name as string | undefined) ?? existing.name;
 
@@ -3222,7 +3284,7 @@ export class AdminExtrasService {
 
         const rows = this.buildMaterialCreateInput(data?.materials);
         if (rows.length === 0) {
-            throw new BadRequestException('At least one material with a name and a dimension is required');
+            throw new BadRequestException('At least one material item is required');
         }
         this.logger.log(
             `[MaterialCategory:addMaterials] adding ${rows.length} row(s) to categoryId=${categoryId} — ` +
@@ -3244,6 +3306,7 @@ export class AdminExtrasService {
         );
         return this.toPublicCategory(result);
     }
+
 
     async deleteMaterialCategory(id: string) {
         this.logger.log(`[MaterialCategory:delete] request for id=${id}`);

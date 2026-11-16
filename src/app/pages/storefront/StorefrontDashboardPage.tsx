@@ -52,10 +52,11 @@ type StoreDisplay = {
   name: string;
   items: number;
   /** Lines held by this store, kept so the low count can honour its thresholds. */
-  lines: { qty: number; reorderLevel: number }[];
+  lines: { qty: number; reorderLevel: number; outOfStockLevel?: number }[];
   lastActivity: string;
   icon: React.ElementType;
   color: string;
+  type: string;
 };
 type TransferDisplay = {
   id: string;
@@ -104,6 +105,14 @@ export function StorefrontDashboardPage() {
   const stats = useMemo(
     () => [
       {
+        label: "Total Stores",
+        value: stores.length,
+        sub: "Configured locations",
+        icon: Store,
+        color: "bg-purple-50 text-purple-600",
+        href: "/apps/storefront/config?tab=stores",
+      },
+      {
         label: "Total Stock Value",
         value: formatStockValue(
           materials.reduce(
@@ -114,6 +123,7 @@ export function StorefrontDashboardPage() {
         sub: "Across all stores",
         icon: DollarSign,
         color: "bg-teal-50 text-teal-600",
+        href: "/apps/storefront/general-store",
       },
       {
         label: "Available Materials",
@@ -121,6 +131,7 @@ export function StorefrontDashboardPage() {
         sub: "Unique SKUs in stock",
         icon: Package,
         color: "bg-blue-50 text-blue-600",
+        href: "/apps/storefront/all-materials",
       },
       {
         label: "Pending Requests",
@@ -128,6 +139,7 @@ export function StorefrontDashboardPage() {
         sub: "Awaiting processing",
         icon: Clock,
         color: "bg-yellow-50 text-yellow-600",
+        href: "/apps/storefront/incoming-requests",
       },
       {
         label: "Approved Transfers",
@@ -139,6 +151,7 @@ export function StorefrontDashboardPage() {
         sub: "This month",
         icon: CheckCircle2,
         color: "bg-green-50 text-green-600",
+        href: "/apps/storefront/stock-movement",
       },
       {
         label: "Low Stock Alerts",
@@ -154,9 +167,10 @@ export function StorefrontDashboardPage() {
         sub: "Below reorder level",
         icon: AlertTriangle,
         color: "bg-red-50 text-red-500",
+        href: "/apps/storefront/all-materials",
       },
     ],
-    [materials, requests, transfers],
+    [materials, requests, stores.length, transfers],
   );
 
   // A dashboard widget that fails to load used to leave an empty card with no
@@ -179,10 +193,12 @@ export function StorefrontDashboardPage() {
             lines: (s.storeItems ?? []).map((it) => ({
               qty: it.qty || 0,
               reorderLevel: it.reorderLevel || 0,
+              outOfStockLevel: it.outOfStockLevel ?? it.outOfStockThreshold ?? 0,
             })),
             lastActivity: "—",
             icon: STORE_ICONS[i] ?? FolderOpen,
             color: STORE_COLORS[i] ?? "bg-gray-600",
+            type: s.type,
           })),
         ),
       )
@@ -220,11 +236,13 @@ export function StorefrontDashboardPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
         {stats.map((s) => (
-          <div
+          <Link
             key={s.label}
-            className="bg-white border border-gray-200 rounded-xl p-4 flex items-start gap-3"
+            to={s.href}
+            aria-label={`View ${s.label}`}
+            className="bg-white border border-gray-200 rounded-xl p-4 flex items-start gap-3 hover:border-teal-300 hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-teal-500"
           >
             <span
               className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${s.color}`}
@@ -236,7 +254,8 @@ export function StorefrontDashboardPage() {
               <p className="text-xs text-gray-500 leading-tight">{s.label}</p>
               <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>
             </div>
-          </div>
+            <ArrowRight className="ml-auto w-3.5 h-3.5 text-gray-300" />
+          </Link>
         ))}
       </div>
 
@@ -263,9 +282,11 @@ export function StorefrontDashboardPage() {
           {stores.slice(0, STORES_ON_DASHBOARD).map((store) => {
             const lowStock = lowStockByStore[store.id] ?? 0;
             return (
-              <div
+              <Link
                 key={store.name}
-                className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4"
+                to={store.type.toLowerCase() === "general" ? "/apps/storefront/general-store" : "/apps/storefront/project-stores"}
+                aria-label={`View ${store.name}`}
+                className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-4 hover:border-blue-300 hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <div
                   className={`w-10 h-10 rounded-xl ${store.color} flex items-center justify-center`}
@@ -288,7 +309,8 @@ export function StorefrontDashboardPage() {
                     {lowStock} low
                   </span>
                 )}
-              </div>
+                <ArrowRight className="w-4 h-4 text-gray-300" />
+              </Link>
             );
           })}
         </div>
@@ -296,9 +318,10 @@ export function StorefrontDashboardPage() {
 
       {/* Recent Transfers */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">
-          Recent Transfers
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-700">Recent Transfers</h2>
+          <Link to="/apps/storefront/stock-movement" className="flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline">View all transfers <ArrowRight className="w-3.5 h-3.5" /></Link>
+        </div>
         <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
           <table className="min-w-[720px] w-full text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
@@ -316,18 +339,18 @@ export function StorefrontDashboardPage() {
               {recentTransfers.map((t) => (
                 <tr key={t.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                    {t.id}
+                    <Link to="/apps/storefront/stock-movement" className="hover:text-blue-700 hover:underline">{t.id}</Link>
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{t.from}</td>
-                  <td className="px-4 py-3 text-gray-700">{t.to}</td>
-                  <td className="px-4 py-3 text-gray-600">{t.items}</td>
-                  <td className="px-4 py-3 text-gray-500">{t.date}</td>
+                  <td className="px-4 py-3 text-gray-700"><Link to={stores.find((store) => store.name === t.from)?.type.toLowerCase() === "general" ? "/apps/storefront/general-store" : "/apps/storefront/project-stores"} className="hover:text-blue-700 hover:underline">{t.from}</Link></td>
+                  <td className="px-4 py-3 text-gray-700"><Link to={stores.find((store) => store.name === t.to)?.type.toLowerCase() === "general" ? "/apps/storefront/general-store" : "/apps/storefront/project-stores"} className="hover:text-blue-700 hover:underline">{t.to}</Link></td>
+                  <td className="px-4 py-3 text-gray-600"><Link to="/apps/storefront/stock-movement" className="hover:text-blue-700 hover:underline">{t.items}</Link></td>
+                  <td className="px-4 py-3 text-gray-500"><Link to="/apps/storefront/stock-movement" className="hover:text-blue-700 hover:underline">{t.date}</Link></td>
                   <td className="px-4 py-3">
-                    <span
+                    <Link to="/apps/storefront/stock-movement"
                       className={`px-2 py-0.5 rounded-full text-xs font-medium ${t.status === "Completed" ? "bg-green-50 text-green-700" : "bg-yellow-50 text-yellow-700"}`}
                     >
                       {t.status}
-                    </span>
+                    </Link>
                   </td>
                 </tr>
               ))}

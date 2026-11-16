@@ -35,6 +35,18 @@ interface Movement {
   type: MovementType;
   reference: string;
   remarks: string;
+  qtyBefore?: number;
+  qtyAfter?: number;
+  status?: string;
+}
+
+function movementLabel(type: string): MovementType {
+  const value = type.toLowerCase();
+  if (value.includes("transfer")) return "Transfer";
+  if (value.includes("issue") || value.includes("outgoing") || value.includes("consumption")) return "Issue";
+  if (value.includes("receipt") || value.includes("incoming")) return "Receipt";
+  if (value.includes("return")) return "Return";
+  return "Adjustment";
 }
 
 const TYPE_STYLE: Record<MovementType, string> = {
@@ -64,11 +76,13 @@ const BLANK_FORM = {
   type: "Adjustment" as MovementType,
   reference: "",
   remarks: "",
+  adjustmentDirection: "decrease" as "increase" | "decrease",
 };
 
 export function StockMovementPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [stores, setStores] = useState<string[]>([]);
+  const [storeRecords, setStoreRecords] = useState<{ id: string; name: string }[]>([]);
   const [materials, setMaterials] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"material" | "store">("material");
@@ -91,12 +105,16 @@ export function StockMovementPage() {
             toStore: m.projectName ?? "—",
             quantity: m.qty,
             unit: m.unit,
-            type: m.type as MovementType,
+            type: movementLabel(m.type),
             reference: m.reference ?? "",
             remarks: m.notes ?? "",
+            qtyBefore: m.qtyBefore,
+            qtyAfter: m.qtyAfter,
+            status: m.status,
           })),
         );
         setStores(strs.map((s) => s.name));
+        setStoreRecords(strs.map((s) => ({ id: s.id, name: s.name })));
         const materialNames = mats.map((m) => m.name);
         setMaterials(materialNames);
         setForm((prev) => ({ ...prev, material: prev.material || materialNames[0] || "" }));
@@ -128,12 +146,18 @@ export function StockMovementPage() {
 
   async function record() {
     try {
+      const fromStore = storeRecords.find((store) => store.name === form.fromStore);
+      const toStore = storeRecords.find((store) => store.name === form.toStore);
       const created = await createStockMovement({
         type: form.type,
         materialName: form.material,
         unit: form.unit,
         qty: form.quantity,
         storeName: form.fromStore,
+        storeId: fromStore?.id,
+        toStoreName: form.toStore,
+        toStoreId: toStore?.id,
+        direction: form.type === "Adjustment" ? form.adjustmentDirection : undefined,
         reference: form.reference || undefined,
         notes: form.remarks || undefined,
       });
@@ -146,16 +170,19 @@ export function StockMovementPage() {
         toStore: created.projectName ?? "—",
         quantity: created.qty,
         unit: created.unit,
-        type: created.type as MovementType,
+        type: movementLabel(created.type),
         reference: created.reference ?? "",
         remarks: created.notes ?? "",
+        qtyBefore: created.qtyBefore,
+        qtyAfter: created.qtyAfter,
+        status: created.status,
       };
       setMovements((prev) => [mov, ...prev]);
       setShowModal(false);
       setForm({ ...BLANK_FORM });
-      toast.success(
-        `${form.type} of ${form.quantity} ${form.unit} ${form.material} recorded.`,
-      );
+      toast.success(form.type === "Adjustment"
+        ? `Adjustment submitted for approval.`
+        : `${form.type} of ${form.quantity} ${form.unit} ${form.material} recorded.`);
     } catch (err) {
       // A stock movement that failed to record used to close nothing and say
       // nothing, leaving the operator unsure whether stock had moved.
@@ -299,9 +326,12 @@ export function StockMovementPage() {
                     "From Store",
                     "To Store",
                     "Qty",
+                    "Before",
+                    "After",
                     "Unit",
                     "Type",
                     "Reference",
+                    "Status",
                   ].map((h) => (
                     <th key={h} className="px-4 py-3 text-left font-medium">
                       {h}
@@ -313,7 +343,7 @@ export function StockMovementPage() {
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={12}
                       className="px-4 py-8 text-center text-gray-400 text-sm"
                     >
                       No movements found.
@@ -343,6 +373,8 @@ export function StockMovementPage() {
                     <td className="px-4 py-3 text-gray-900 font-medium">
                       {formatNumberByGeneralSettings(m.quantity)}
                     </td>
+                    <td className="px-4 py-3 text-gray-500">{m.qtyBefore ?? "—"}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-800">{m.qtyAfter ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-500">{m.unit}</td>
                     <td className="px-4 py-3">
                       <span
@@ -354,6 +386,7 @@ export function StockMovementPage() {
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
                       {m.reference || "—"}
                     </td>
+                    <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${m.status === "posted" ? "bg-green-50 text-green-700" : m.status === "rejected" ? "bg-red-50 text-red-700" : "bg-yellow-50 text-yellow-700"}`}>{(m.status ?? "posted").replace(/_/g, " ")}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -500,6 +533,16 @@ export function StockMovementPage() {
                   )}
                 </select>
               </div>
+              {form.type === "Adjustment" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Adjustment Direction</label>
+                  <select value={form.adjustmentDirection} onChange={(e) => setForm({ ...form, adjustmentDirection: e.target.value as "increase" | "decrease" })} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500">
+                    <option value="increase">Increase stock</option>
+                    <option value="decrease">Decrease stock</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-gray-400">Manual adjustments remain pending until approved and are then posted to the ledger.</p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Material

@@ -14,6 +14,7 @@ import {
 import {
   getStores,
   updateStore,
+  updateStoreItem,
   deleteStore,
   type Store,
 } from "../../api/materials";
@@ -35,7 +36,7 @@ interface ProjectStore {
   project: string;
   location: string;
   custodian: string;
-  items: { name: string; qty: number; unit: string; reorderLevel: number }[];
+  items: { id: string; name: string; qty: number; unit: string; reorderLevel: number; outOfStockLevel: number }[];
 }
 
 function toProjectStore(s: Store): ProjectStore {
@@ -45,10 +46,12 @@ function toProjectStore(s: Store): ProjectStore {
     location: s.location ?? "",
     custodian: s.manager ?? "",
     items: (s.storeItems || []).map((it: any) => ({
+      id: it.id,
       name: it.materialName,
       qty: it.qty,
       unit: it.unit,
       reorderLevel: it.reorderLevel,
+      outOfStockLevel: it.outOfStockLevel ?? it.outOfStockThreshold ?? 0,
     })),
   };
 }
@@ -82,6 +85,24 @@ export function ProjectStoresPage() {
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [thresholdTarget, setThresholdTarget] = useState<{ storeId: string; item: ProjectStore["items"][number] } | null>(null);
+  const [thresholdForm, setThresholdForm] = useState({ low: 0, out: 0 });
+
+  async function saveItemThresholds() {
+    if (!thresholdTarget) return;
+    setBusy(true);
+    try {
+      await updateStoreItem(thresholdTarget.item.id, {
+        reorderLevel: thresholdForm.low,
+        outOfStockThreshold: thresholdForm.out,
+        reason: "Store-item threshold update",
+      } as any);
+      toast.success("Threshold changes submitted for approval.");
+      setThresholdTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit threshold changes.");
+    } finally { setBusy(false); }
+  }
 
   async function saveStore() {
     if (!storeForm) return;
@@ -163,7 +184,7 @@ export function ProjectStoresPage() {
           <p className="text-xs text-gray-500">Total Items Tracked</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-2xl font-bold text-yellow-600">
+          <p className="text-2xl font-bold text-red-600">
             {stores.reduce(
               (acc, s) =>
                 acc +
@@ -301,6 +322,13 @@ export function ProjectStoresPage() {
                             </td>
                             <td className="py-2.5 text-right">
                               <div className="flex items-center justify-end">
+                                <button
+                                  onClick={() => { setThresholdTarget({ storeId: store.id, item }); setThresholdForm({ low: item.reorderLevel, out: item.outOfStockLevel }); }}
+                                  className="p-1.5 text-gray-400 hover:text-teal-700 rounded-lg hover:bg-teal-50"
+                                  title="Edit store-item thresholds"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
                                 {(status === "Low Stock" ||
                                   status === "Out of Stock") &&
                                   (sentToProcurement.has(procKey) ? (
@@ -340,6 +368,32 @@ export function ProjectStoresPage() {
           );
         })}
       </div>
+
+      {thresholdTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Material Threshold Override</h2>
+              <p className="text-xs text-gray-500 mt-1">{thresholdTarget.item.name}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Low Stock</label>
+                <input type="number" min={0} value={thresholdForm.low} onChange={(e) => setThresholdForm((p) => ({ ...p, low: Number(e.target.value) }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Out of Stock</label>
+                <input type="number" min={0} value={thresholdForm.out} onChange={(e) => setThresholdForm((p) => ({ ...p, out: Number(e.target.value) }))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">The live thresholds remain unchanged until this amendment is approved.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setThresholdTarget(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-xl">Cancel</button>
+              <button onClick={() => void saveItemThresholds()} disabled={busy} className="px-4 py-2 text-sm bg-teal-700 text-white rounded-xl disabled:opacity-50">Submit for Approval</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Send for Procurement Modal */}
       {procurementTarget && (

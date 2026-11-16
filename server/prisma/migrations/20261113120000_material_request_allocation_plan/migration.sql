@@ -1,0 +1,5 @@
+ALTER TABLE "StoreItem" ADD COLUMN "reservedQty" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+ALTER TABLE "MaterialRequest"
+ADD COLUMN "fulfillmentPlan" JSONB,
+ADD COLUMN "stockTransferRefs" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

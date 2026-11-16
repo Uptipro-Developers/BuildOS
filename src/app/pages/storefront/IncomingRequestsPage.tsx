@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { exportCSV } from "../../utils/exportCSV";
 import {
   getMaterialRequests,
-  updateMaterialRequest,
   type MaterialRequest as ApiRequest,
 } from "../../api/materials";
 import {
@@ -10,19 +9,22 @@ import {
   Download,
   Filter,
   Eye,
-  CheckCircle,
-  XCircle,
-  ExternalLink,
 } from "lucide-react";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { toast } from "sonner";
+import { baseMaterialRequestRef } from "../../utils/materialRequestRef";
 
 type RequestStatus =
-  | "Pending"
-  | "Approved"
-  | "Fulfilled"
+  | "Pending Approval"
+  | "Approved for Stock Movement"
+  | "Stock Movement In Progress"
+  | "Fulfilled via Storefront"
+  | "Awaiting Procurement Approval"
+  | "Forwarded to Procurement"
+  | "Procurement In Progress"
+  | "Fulfilled via Procurement"
   | "Rejected"
-  | "Forwarded to Procurement";
+  ;
 
 interface MaterialRequest {
   /** Database id used by PATCH endpoints; `id` below is the display reference. */
@@ -43,50 +45,79 @@ interface MaterialRequest {
   remarks: string;
   approvedBy: string;
   approvalDate: string;
+  imageUrl?: string | null;
+  fulfillmentMethod?: "stock_movement" | "procurement" | null;
+  fulfillmentStatus?: string | null;
+  stockTransferRef?: string | null;
+  prRef?: string | null;
+  materials: Array<{ name: string; qty: number; unit: string; imageUrl?: string | null }>;
 }
 
 const STATUS_STYLE: Record<RequestStatus, string> = {
-  Pending: "bg-yellow-50 text-yellow-700",
-  Approved: "bg-blue-50 text-blue-700",
-  Fulfilled: "bg-green-50 text-green-700",
+  "Pending Approval": "bg-yellow-50 text-yellow-700",
+  "Approved for Stock Movement": "bg-blue-50 text-blue-700",
+  "Stock Movement In Progress": "bg-cyan-50 text-cyan-700",
+  "Fulfilled via Storefront": "bg-green-50 text-green-700",
+  "Awaiting Procurement Approval": "bg-amber-50 text-amber-700",
+  "Procurement In Progress": "bg-indigo-50 text-indigo-700",
+  "Fulfilled via Procurement": "bg-green-50 text-green-700",
   Rejected: "bg-red-50 text-red-700",
   "Forwarded to Procurement": "bg-purple-50 text-purple-700",
 };
 
-function toRequest(r: ApiRequest): MaterialRequest {
-  const normalizedStatus = String(r.status ?? "pending")
+function toRequestGroup(rows: ApiRequest[]): MaterialRequest {
+  const r = rows[0];
+  const normalizedStatus = String(r.fulfillmentStatus || r.status || "pending")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_");
   const statusByApiValue: Record<string, RequestStatus> = {
-    pending: "Pending",
-    approved: "Approved",
-    fulfilled: "Fulfilled",
+    pending: "Pending Approval",
+    pending_approval: "Pending Approval",
+    approved: "Approved for Stock Movement",
+    approved_for_stock_movement: "Approved for Stock Movement",
+    stock_movement_in_progress: "Stock Movement In Progress",
+    fulfilled: r.fulfillmentMethod === "procurement" ? "Fulfilled via Procurement" : "Fulfilled via Storefront",
+    fulfilled_via_storefront: "Fulfilled via Storefront",
+    fulfilled_via_procurement: "Fulfilled via Procurement",
+    fulfilled_via_stock_and_procurement: "Fulfilled via Stock & Procurement",
+    procurement_fulfilled_stock_movement_pending: "Procurement Fulfilled · Stock Movement Pending",
+    partially_reserved_pending_procurement_approval: "Stock Reserved · Awaiting Procurement Approval",
+    partially_fulfilled_procurement_pending: "Stock Fulfilled · Procurement Pending",
+    stock_movement_action_required: "Stock Movement Action Required",
+    pending_procurement_approval: "Awaiting Procurement Approval",
     rejected: "Rejected",
     in_procurement: "Forwarded to Procurement",
     forwarded_to_procurement: "Forwarded to Procurement",
+    procurement_in_progress: "Procurement In Progress",
   };
 
   return {
     apiId: r.id,
-    id: r.reference || r.id,
+    id: baseMaterialRequestRef(r.reference || r.id),
     requestedBy: r.requestedBy ?? "",
     department: r.projectName ?? "",
-    material: r.materialName,
+    material: rows.length === 1 ? r.materialName : `${rows.length} materials`,
     category: "",
-    quantity: r.qty,
-    unit: r.unit,
-    sourceStore: r.storeName,
+    quantity: rows.reduce((sum, item) => sum + Number(item.qty || 0), 0),
+    unit: rows.length === 1 ? r.unit : "items",
+    sourceStore: r.sourceStoreName ?? "—",
     destination: r.projectName ?? "",
     destinationType: "Project Store",
     requestDate: formatDateByGeneralSettings(r.requestDate),
     requiredDate: "",
-    status: statusByApiValue[normalizedStatus] ?? "Pending",
+    status: statusByApiValue[normalizedStatus] ?? "Pending Approval",
     remarks: r.purpose ?? "",
     approvedBy: r.approvedBy ?? "",
     approvalDate: r.approvedAt
       ? formatDateByGeneralSettings(r.approvedAt)
       : "",
+    imageUrl: r.imageUrl,
+    fulfillmentMethod: r.fulfillmentMethod,
+    fulfillmentStatus: r.fulfillmentStatus,
+    stockTransferRef: r.stockTransferRef,
+    prRef: r.prRef,
+    materials: rows.map((item) => ({ name: item.materialName, qty: item.qty, unit: item.unit, imageUrl: item.imageUrl })),
   };
 }
 
@@ -101,7 +132,12 @@ export function IncomingRequestsPage() {
 
   function loadRequests() {
     return getMaterialRequests().then((data) => {
-      setRequests(data.map(toRequest));
+      const groups = new Map<string, ApiRequest[]>();
+      data.forEach((request) => {
+        const base = baseMaterialRequestRef(request.reference || request.id);
+        groups.set(base, [...(groups.get(base) ?? []), request]);
+      });
+      setRequests(Array.from(groups.values()).map(toRequestGroup));
       return data;
     });
   }
@@ -125,90 +161,6 @@ export function IncomingRequestsPage() {
     const matchStatus = statusFilter === "All" || r.status === statusFilter;
     return matchSearch && matchStatus;
   });
-
-  async function approve(id: string) {
-    try {
-      const displayId =
-        requests.find((request) => request.apiId === id)?.id || id;
-      await updateMaterialRequest(id, { status: "approved" });
-      // Approval can automatically raise a Purchase Request and move the
-      // Material Request to `in_procurement`, so use the final server state.
-      await loadRequests();
-      toast.success(`Request ${displayId} approved.`);
-    } catch (err) {
-      // This used to apply the change locally when the request FAILED, so a
-      // rejected update looked successful and silently reverted on refresh.
-      // The row now stays as the server has it and the failure is surfaced.
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Failed to approve the request.",
-      );
-      return;
-    }
-    setSelected(null);
-  }
-
-  async function reject(id: string) {
-    try {
-      const updated = await updateMaterialRequest(id, { status: "rejected" });
-      setRequests((prev) =>
-        prev.map((r) => (r.apiId === id ? toRequest(updated) : r)),
-      );
-      toast.success(`Request ${id} rejected.`);
-    } catch (err) {
-      // This used to apply the change locally when the request FAILED, so a
-      // rejected update looked successful and silently reverted on refresh.
-      // The row now stays as the server has it and the failure is surfaced.
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Failed to reject the request.",
-      );
-      return;
-    }
-    setSelected(null);
-  }
-
-  async function forwardToProcurement(id: string) {
-    try {
-      const updated = await updateMaterialRequest(id, {
-        status: "in_procurement",
-      });
-      setRequests((prev) =>
-        prev.map((r) => (r.apiId === id ? toRequest(updated) : r)),
-      );
-    } catch (err) {
-      // This used to apply the change locally when the request FAILED, so a
-      // rejected update looked successful and silently reverted on refresh.
-      // The row now stays as the server has it and the failure is surfaced.
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Failed to forward the request.",
-      );
-      return;
-    }
-    setSelected(null);
-  }
-
-  async function fulfill(id: string) {
-    try {
-      const updated = await updateMaterialRequest(id, { status: "fulfilled" });
-      setRequests((prev) =>
-        prev.map((r) => (r.apiId === id ? toRequest(updated) : r)),
-      );
-      toast.success(`Request ${id} fulfilled.`);
-    } catch (err) {
-      // Applied the change locally on failure, so an unfulfilled request appeared
-      // fulfilled until the next load.
-      toast.error(
-        err instanceof Error ? err.message : "Failed to fulfil the request.",
-      );
-      return;
-    }
-    setSelected(null);
-  }
 
   function handleExportCSV() {
     const rows = [
@@ -244,7 +196,7 @@ export function IncomingRequestsPage() {
     exportCSV("incoming-requests", rows[0] as string[], rows.slice(1));
   }
 
-  const pendingCount = requests.filter((r) => r.status === "Pending").length;
+  const pendingCount = requests.filter((r) => r.status === "Pending Approval").length;
 
   if (loading)
     return <div className="p-8 text-center text-gray-400">Loading...</div>;
@@ -257,7 +209,7 @@ export function IncomingRequestsPage() {
             Incoming Material Requests
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Requests submitted from ESS by employees and project teams
+            Track ESS material requests across approval, stock movement, and procurement
           </p>
         </div>
         <button
@@ -269,14 +221,19 @@ export function IncomingRequestsPage() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
         {(
           [
             "All",
-            "Pending",
-            "Approved",
-            "Fulfilled",
+            "Pending Approval",
+            "Approved for Stock Movement",
+            "Stock Movement In Progress",
+            "Fulfilled via Storefront",
+            "Awaiting Procurement Approval",
             "Forwarded to Procurement",
+            "Procurement In Progress",
+            "Fulfilled via Procurement",
+            "Rejected",
           ] as const
         ).map((s) => {
           const count =
@@ -303,7 +260,7 @@ export function IncomingRequestsPage() {
             <span className="font-semibold">
               {pendingCount} request{pendingCount > 1 ? "s" : ""}
             </span>{" "}
-            pending your review.
+            awaiting action in Storefront Approvals.
           </p>
         </div>
       )}
@@ -364,8 +321,13 @@ export function IncomingRequestsPage() {
                   <p className="text-xs text-gray-400">{r.department}</p>
                 </td>
                 <td className="px-4 py-3">
-                  <p className="text-gray-900 font-medium">{r.material}</p>
-                  <p className="text-xs text-gray-400">{r.category}</p>
+                  <div className="flex items-center gap-2">
+                    {r.imageUrl && <img src={r.imageUrl} alt={r.material} className="w-10 h-10 rounded-lg object-cover border border-gray-200" />}
+                    <div>
+                      <p className="text-gray-900 font-medium">{r.material}</p>
+                      <p className="text-xs text-gray-400">{r.materials.length > 1 ? "Open to view all items" : r.category}</p>
+                    </div>
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-gray-900 font-medium">
                   {r.quantity}{" "}
@@ -390,33 +352,6 @@ export function IncomingRequestsPage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1">
-                    {r.status === "Pending" && (
-                      <>
-                        <button
-                          onClick={() => approve(r.apiId)}
-                          title="Approve"
-                          className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg"
-                        >
-                          <CheckCircle className="w-3 h-3" /> Approve
-                        </button>
-                        <button
-                          onClick={() => reject(r.apiId)}
-                          title="Reject"
-                          className="flex items-center gap-1 px-2 py-1 text-xs border border-red-200 text-red-600 hover:bg-red-50 rounded-lg"
-                        >
-                          <XCircle className="w-3 h-3" /> Reject
-                        </button>
-                      </>
-                    )}
-                    {r.status === "Approved" && (
-                      <button
-                        onClick={() => fulfill(r.apiId)}
-                        title="Mark Fulfilled"
-                        className="px-2 py-1 text-xs bg-teal-700 hover:bg-teal-800 text-white rounded-lg"
-                      >
-                        Fulfill
-                      </button>
-                    )}
                     <button
                       onClick={() => setSelected(r)}
                       title="View details"
@@ -453,10 +388,12 @@ export function IncomingRequestsPage() {
               </button>
             </div>
             <div className="p-6 space-y-3">
+              {selected.imageUrl && (
+                <img src={selected.imageUrl} alt={selected.material} className="w-full max-h-64 object-contain rounded-xl border border-gray-200 bg-gray-50" />
+              )}
               {(
                 [
-                  ["Material", `${selected.material} (${selected.category})`],
-                  ["Quantity", `${selected.quantity} ${selected.unit}`],
+                  ["Materials", selected.materials.map((item) => `${item.name} — ${item.qty} ${item.unit}`).join(", ")],
                   ["Source Store", selected.sourceStore],
                   [
                     "Destination",
@@ -465,6 +402,9 @@ export function IncomingRequestsPage() {
                   ["Request Date", selected.requestDate],
                   ["Required By", selected.requiredDate],
                   ["Status", selected.status],
+                  ...(selected.fulfillmentMethod ? [["Fulfilment Method", selected.fulfillmentMethod === "stock_movement" ? "Stock Movement" : "Procurement"]] : []),
+                  ...(selected.stockTransferRef ? [["Stock Transfer", selected.stockTransferRef]] : []),
+                  ...(selected.prRef ? [["Purchase Request", selected.prRef]] : []),
                   ["Remarks", selected.remarks || "—"],
                   ...(selected.approvedBy
                     ? [
@@ -486,61 +426,14 @@ export function IncomingRequestsPage() {
                 </div>
               ))}
             </div>
-            {selected.status === "Pending" && (
-              <div className="px-6 py-4 border-t border-gray-100 flex gap-2 flex-wrap">
-                <button
-                  onClick={() => approve(selected.apiId)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-xl"
-                >
-                  <CheckCircle className="w-4 h-4" /> Approve
-                </button>
-                <button
-                  onClick={() => fulfill(selected.apiId)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
-                >
-                  Approve & Fulfill
-                </button>
-                <button
-                  onClick={() => forwardToProcurement(selected.apiId)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-xl"
-                >
-                  <ExternalLink className="w-4 h-4" /> Fwd to Procurement
-                </button>
-                <button
-                  onClick={() => reject(selected.apiId)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm border border-red-200 text-red-600 hover:bg-red-50 rounded-xl"
-                >
-                  <XCircle className="w-4 h-4" /> Reject
-                </button>
-              </div>
-            )}
-            {selected.status === "Approved" && (
-              <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
-                <button
-                  onClick={() => fulfill(selected.apiId)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl"
-                >
-                  Mark as Fulfilled
-                </button>
-                <button
-                  onClick={() => setSelected(null)}
-                  className="px-3 py-2 text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl"
-                >
-                  Close
-                </button>
-              </div>
-            )}
-            {selected.status !== "Pending" &&
-              selected.status !== "Approved" && (
-                <div className="px-6 py-4 border-t border-gray-100">
-                  <button
-                    onClick={() => setSelected(null)}
-                    className="px-4 py-2 text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl"
-                  >
-                    Close
-                  </button>
-                </div>
-              )}
+            <div className="px-6 py-4 border-t border-gray-100">
+              <button
+                onClick={() => setSelected(null)}
+                className="px-4 py-2 text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

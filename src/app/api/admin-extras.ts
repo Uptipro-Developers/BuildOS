@@ -74,13 +74,14 @@ export interface MaterialCatalogDimensionInput {
 
 /**
  * A material item under a Material — e.g. "Deformed Bar" under "Iron Rod".
- * There is no row of its own any more: on save, each of its dimensions
- * becomes its own flat Material row (see MaterialCatalogRowRecord below), so
- * an item needs at least one dimension or it has nothing to save.
+ * Each item is one catalogue material. Dimensions are optional variants
+ * stored on that material rather than separate inventory rows.
  */
 export interface MaterialCatalogItemInput {
     name: string;
     sku?: string | null;
+    aliases?: string[];
+    imageUrl?: string | null;
     reorderLevel?: number;
     dimensions: MaterialCatalogDimensionInput[];
 }
@@ -95,16 +96,14 @@ export interface MaterialCategoryInput {
     name: string;
     description?: string;
     color?: string;
+    skuPrefix?: string;
+    skuStart?: number;
     materials?: MaterialCatalogMaterialInput[];
 }
 
 /**
- * One flat Material row produced by the catalogue builder — a specific
- * dimension of a specific item under a Material Name. This is a real
- * Material row (the same table Goods Receipt/Stock Movement use), not a
- * disposable catalog-only record; `materialGroupName`/`itemName` are the
- * pre-concatenation names, kept only so the builder can regroup flat rows
- * back into a Material -> item -> dimension tree when reopened for edit.
+ * One inventory/catalogue material. Its optional dimensions are variants of
+ * the same material and therefore share one SKU and stock identity.
  */
 export interface MaterialCatalogRowRecord {
     id: string;
@@ -117,6 +116,9 @@ export interface MaterialCatalogRowRecord {
     kind: string | null;
     value: number | null;
     unit: string | null;
+    dimensions: MaterialCatalogDimensionInput[];
+    aliases: string[];
+    imageUrl: string | null;
     totalQty: number;
     availableQty: number;
     reservedQty: number;
@@ -129,6 +131,9 @@ export interface MaterialCategoryRecord {
     name: string;
     description: string | null;
     color: string;
+    skuPrefix: string;
+    skuStart: number;
+    skuNext: number;
     materials: MaterialCatalogRowRecord[];
 }
 

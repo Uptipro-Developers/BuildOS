@@ -38,7 +38,7 @@ const PROCESS_BY_ENTITY: Record<string, string> = {
   ProjectDocument: 'p_documents',
   FundingRelease: 'p_project_funding',
   StockMovement: 'p_stock_movements',
-  MaterialReturn: 'p_store_requests',
+  MaterialReturn: 'p_materials',
   Appraisal: 'p_appraisals',
   AttendanceRecord: 'p_attendance',
 };

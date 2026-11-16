@@ -27,7 +27,9 @@ export class MaterialsController {
     @Post('materials')
     createMaterial(@Body() body: any) { return this.svc.createMaterial(body); }
     @Put('materials/:id')
-    updateMaterial(@Param('id') id: string, @Body() body: any) { return this.svc.updateMaterial(id, body); }
+    updateMaterial(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        return this.svc.updateMaterial(id, body, this.actor(req));
+    }
     @Delete('materials/:id')
     @RequiresProcess('p_materials', 'delete')
     deleteMaterial(@Param('id') id: string) { return this.svc.deleteMaterial(id); }
@@ -52,7 +54,9 @@ export class MaterialsController {
     @Post('store-items')
     createStoreItem(@Body() body: any) { return this.svc.createStoreItem(body); }
     @Put('store-items/:id')
-    updateStoreItem(@Param('id') id: string, @Body() body: any) { return this.svc.updateStoreItem(id, body); }
+    updateStoreItem(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        return this.svc.updateStoreItem(id, body, this.actor(req));
+    }
     @Delete('store-items/:id')
     deleteStoreItem(@Param('id') id: string) { return this.svc.deleteStoreItem(id); }
 
@@ -60,7 +64,18 @@ export class MaterialsController {
     @Get('stock-movements')
     getAllMovements(@Query('storeId') storeId?: string) { return this.svc.findAllMovements(storeId); }
     @Post('stock-movements')
-    createMovement(@Body() body: any) { return this.svc.createMovement(body); }
+    createMovement(@Body() body: any, @Req() req?: any) { return this.svc.createMovement(body, this.actor(req)); }
+
+    // ── Approval-controlled amendments ──
+    @Get('material-amendments')
+    getAmendments(@Query('status') status?: string) { return this.svc.findAmendments(status); }
+    @Patch('material-amendments/:id/decision')
+    @RequiresProcess('p_materials', 'approve')
+    decideAmendment(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        const decision = String(body?.decision ?? '').toLowerCase();
+        if (decision !== 'approved' && decision !== 'rejected') throw new ForbiddenException('Decision must be approved or rejected');
+        return this.svc.decideAmendment(id, decision, this.actor(req));
+    }
 
     // ── Stock Transfers ──
     @Get('stock-transfers')
@@ -77,6 +92,8 @@ export class MaterialsController {
     getAllRequests(@Query('status') status?: string) { return this.svc.findAllRequests(status); }
     @Get('material-requests/:id')
     getRequest(@Param('id') id: string) { return this.svc.findRequest(id); }
+    @Post('material-requests/batch')
+    createRequestBatch(@Body() body: any) { return this.svc.createRequestBatch(body); }
     @Post('material-requests')
     createRequest(@Body() body: any) { return this.svc.createRequest(body); }
     /**
@@ -99,9 +116,13 @@ export class MaterialsController {
                 email: user?.email,
                 role: user?.role,
             };
-            await this.adminExtras.assertMayApprove(identity, 'p_material_requests');
-
             const existing = await this.svc.findRequest(id).catch(() => null);
+            const approvalProcess = existing?.fulfillmentMethod === 'procurement'
+                || (existing?.fulfillmentMethod === 'mixed' && body?.fulfillmentMethod === 'procurement')
+                ? 'p_material_requests'
+                : 'p_storefront_material_requests';
+            await this.adminExtras.assertMayApprove(identity, approvalProcess);
+
             const raisedBy = String(existing?.requestedBy ?? '').trim().toLowerCase();
             const mine = [identity.name, identity.email]
                 .map((v) => String(v ?? '').trim().toLowerCase())
@@ -115,8 +136,18 @@ export class MaterialsController {
                     'You raised this request, so it must be approved by someone else.',
                 );
             }
+            body.approvedBy = identity.name || identity.email || identity.userId || 'Approver';
         }
         return this.svc.updateRequest(id, body);
+    }
+
+    private actor(req?: any) {
+        const user = req?.user ?? {};
+        return {
+            userId: user.sub ?? user.id ?? user.userId,
+            name: user.name ?? user.fullName,
+            email: user.email,
+        };
     }
 
     // ── Material Returns ──

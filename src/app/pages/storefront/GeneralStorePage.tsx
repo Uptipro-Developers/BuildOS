@@ -18,6 +18,7 @@ import {
   updateStoreItem,
   deleteStoreItem,
   getMaterials,
+  getStores,
   type StoreItem as ApiStoreItem,
 } from "../../api/materials";
 import {
@@ -46,6 +47,7 @@ interface StockItem {
   unit: string;
   qty: number;
   reorderLevel: number;
+  outOfStockLevel: number;
   unitCost: number;
   lastReceived: string;
   bin: string;
@@ -61,11 +63,34 @@ function toStockItem(item: ApiStoreItem): StockItem {
     unit: item.unit ?? "Units",
     qty: item.qty ?? 0,
     reorderLevel: item.reorderLevel ?? 0,
+    outOfStockLevel: item.outOfStockLevel ?? item.outOfStockThreshold ?? 0,
     unitCost: item.unitCost ?? 0,
     lastReceived: item.lastReceived ?? "",
     bin: item.bin ?? "",
     storeId: item.storeId ?? "",
   };
+}
+
+function aggregateStoreItems(rows: ApiStoreItem[]): StockItem[] {
+  const grouped = new Map<string, StockItem>();
+  for (const row of rows) {
+    const item = toStockItem(row);
+    const key = item.name.trim().toLowerCase();
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, { ...item, id: `ORG-${key}`, storeId: "", bin: "All stores" });
+      continue;
+    }
+    const combinedQty = current.qty + item.qty;
+    current.unitCost = combinedQty > 0
+      ? ((current.unitCost * current.qty) + (item.unitCost * item.qty)) / combinedQty
+      : current.unitCost;
+    current.qty = combinedQty;
+    current.reorderLevel += item.reorderLevel;
+    current.outOfStockLevel += item.outOfStockLevel;
+    if (item.lastReceived > current.lastReceived) current.lastReceived = item.lastReceived;
+  }
+  return [...grouped.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const BLANK: Omit<StockItem, "id"> = {
@@ -74,6 +99,7 @@ const BLANK: Omit<StockItem, "id"> = {
   unit: "Units",
   qty: 0,
   reorderLevel: 0,
+  outOfStockLevel: 0,
   unitCost: 0,
   lastReceived: "",
   bin: "",
@@ -105,6 +131,7 @@ export function GeneralStorePage() {
   >([]);
   const [configuredCategories, setConfiguredCategories] = useState<string[]>([]);
   const [configuredUnits, setConfiguredUnits] = useState<string[]>([]);
+  const [generalStoreId, setGeneralStoreId] = useState("");
   const getStatus = (item: StockItem): StockStatus =>
     stockStatusFor(item);
 
@@ -118,7 +145,7 @@ export function GeneralStorePage() {
 
   useEffect(() => {
     getStoreItems()
-      .then((data) => setItems(data.map(toStockItem)))
+      .then((data) => setItems(aggregateStoreItems(data)))
       .catch(reportLoadFailure("stock items"))
       .finally(() => setLoading(false));
 
@@ -145,6 +172,10 @@ export function GeneralStorePage() {
         ),
       )
       .catch(reportLoadFailure("units"));
+
+    getStores()
+      .then((rows) => setGeneralStoreId(rows.find((store) => store.type === "General")?.id ?? rows[0]?.id ?? ""))
+      .catch(reportLoadFailure("stores"));
   }, []);
 
   const filtered = items.filter((i) => {
@@ -182,8 +213,11 @@ export function GeneralStorePage() {
       category: form.category,
       unit: form.unit,
       qty: form.qty,
+      reorderLevel: form.reorderLevel,
+      outOfStockThreshold: form.outOfStockLevel,
       unitCost: form.unitCost,
       bin: form.bin,
+      storeId: form.storeId || generalStoreId,
     };
     setBusy(true);
     try {
@@ -192,7 +226,7 @@ export function GeneralStorePage() {
         setItems((prev) =>
           prev.map((i) => (i.id === editingId ? toStockItem(updated) : i)),
         );
-        toast.success(`"${form.name}" updated.`);
+        toast.success(`Changes to "${form.name}" were submitted for approval.`);
       } else {
         const created = await createStoreItem(payload);
         setItems((prev) => [...prev, toStockItem(created)]);
@@ -239,19 +273,10 @@ export function GeneralStorePage() {
             General Store
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Central warehouse inventory
+            Organization-wide stock roll-up across every store
           </p>
         </div>
-        <button
-          onClick={() => {
-            setForm({ ...BLANK });
-            setEditingId(null);
-            setShowModal(true);
-          }}
-          className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm px-4 py-2 rounded-xl"
-        >
-          <Plus className="w-4 h-4" /> Add Item
-        </button>
+        <span className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">Calculated from store balances</span>
       </div>
 
       {/* Stats */}
@@ -261,7 +286,7 @@ export function GeneralStorePage() {
           <p className="text-xs text-gray-500">Total SKUs</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-2xl font-bold text-yellow-600">
+          <p className="text-2xl font-bold text-red-600">
             {items.filter((i) => getStatus(i) === "Low Stock").length}
           </p>
           <p className="text-xs text-gray-500">Low Stock Items</p>
@@ -406,34 +431,6 @@ export function GeneralStorePage() {
                             <ShoppingCart className="w-3.5 h-3.5" />
                           </button>
                         ))}
-                      <button
-                        onClick={() => {
-                          setForm({
-                            name: item.name,
-                            category: item.category,
-                            unit: item.unit,
-                            qty: item.qty,
-                            reorderLevel: item.reorderLevel,
-                            unitCost: item.unitCost,
-                            bin: item.bin,
-                            lastReceived: item.lastReceived,
-                            storeId: item.storeId,
-                          });
-                          setEditingId(item.id);
-                          setShowModal(true);
-                        }}
-                        className="p-1.5 text-gray-400 hover:text-teal-700 rounded-lg hover:bg-teal-50"
-                        title="Edit stock item"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(item)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50"
-                        title="Remove stock item"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -610,6 +607,7 @@ export function GeneralStorePage() {
                     min={0}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
                     value={form.qty}
+                    disabled={Boolean(editingId)}
                     onChange={(e) =>
                       setForm({ ...form, qty: Number(e.target.value) })
                     }
@@ -622,12 +620,21 @@ export function GeneralStorePage() {
                   <input
                     type="number"
                     min={0}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100 disabled:text-gray-500"
                     value={form.unitCost}
                     onChange={(e) =>
                       setForm({ ...form, unitCost: Number(e.target.value) })
                     }
                   />
+                  {editingId && <p className="mt-1 text-[11px] text-gray-400">Quantity changes are posted through Stock Movement and recorded in the ledger.</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Low Stock Threshold</label>
+                  <input type="number" min={0} value={form.reorderLevel} onChange={(e) => setForm({ ...form, reorderLevel: Number(e.target.value) })} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Out of Stock Threshold</label>
+                  <input type="number" min={0} value={form.outOfStockLevel} onChange={(e) => setForm({ ...form, outOfStockLevel: Number(e.target.value) })} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus-within:ring-teal-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">

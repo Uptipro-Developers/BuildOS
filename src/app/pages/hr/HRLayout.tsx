@@ -124,6 +124,12 @@ const sidebarSections = [
         icon: <PlayCircle className="w-4 h-4" />,
         end: true,
       },
+      {
+        label: "Salary Structure",
+        href: "/apps/hr/salary-structure",
+        icon: <Sliders className="w-4 h-4" />,
+        end: true,
+      },
     ],
   },
   {
@@ -133,29 +139,6 @@ const sidebarSections = [
         label: "Workforce Allocation",
         href: "/apps/hr/workforce",
         icon: <Network className="w-4 h-4" />,
-        end: true,
-      },
-    ],
-  },
-  {
-    label: "Payroll Setup",
-    items: [
-      {
-        label: "Payroll Period",
-        href: "/apps/hr/payroll-periods",
-        icon: <Calendar className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Bank Names",
-        href: "/apps/hr/bank-names",
-        icon: <Landmark className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Salary Structure",
-        href: "/apps/hr/salary-structure",
-        icon: <Sliders className="w-4 h-4" />,
         end: true,
       },
     ],
@@ -190,6 +173,18 @@ const sidebarSections = [
     items: [
       // General, Leave Types, Claim Types and Numbering are tabs within Settings,
       // as in the design; they were four sidebar entries to four full pages.
+      {
+        label: "Payroll Period",
+        href: "/apps/hr/payroll-periods",
+        icon: <Calendar className="w-4 h-4" />,
+        end: true,
+      },
+      {
+        label: "Bank Names",
+        href: "/apps/hr/bank-names",
+        icon: <Landmark className="w-4 h-4" />,
+        end: true,
+      },
       {
         label: "Settings",
         href: "/apps/hr/settings",

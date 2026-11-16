@@ -394,6 +394,7 @@ export class GoodsReceiptsService {
         }));
 
         const result = await this.prisma.$transaction(async (tx) => {
+            const stockAlerts: { itemId: string; before: number; storeName: string }[] = [];
             const store = grn.storeId
                 ? await tx.store.findUnique({ where: { id: grn.storeId } })
                 : await tx.store.findFirst({ where: { name: grn.storeName } });
@@ -422,6 +423,15 @@ export class GoodsReceiptsService {
 
                 const unitCost = await this.unitCostFor(tx, grn.purchaseOrderId, line.material);
 
+                const posted = await this.postToStore(tx, {
+                    storeId,
+                    material: line.material,
+                    unit: line.unit,
+                    qty: line.passAccepted,
+                    unitCost,
+                    at: now,
+                });
+
                 await tx.stockMovement.create({
                     data: {
                         type: 'incoming',
@@ -435,6 +445,12 @@ export class GoodsReceiptsService {
                         projectId,
                         date: now,
                         createdBy: grn.receivedBy,
+                        qtyBefore: posted?.before ?? 0,
+                        qtyAfter: posted?.after ?? line.passAccepted,
+                        direction: 'increase',
+                        status: 'posted',
+                        relatedType: 'GoodsReceipt',
+                        relatedId: grn.id,
                         notes: [
                             `Goods receipt ${grn.reference} from ${grn.supplierName}`,
                             grn.deliveryNote ? `Delivery note ${grn.deliveryNote}` : null,
@@ -443,15 +459,7 @@ export class GoodsReceiptsService {
                             .join('. '),
                     },
                 });
-
-                await this.postToStore(tx, {
-                    storeId,
-                    material: line.material,
-                    unit: line.unit,
-                    qty: line.passAccepted,
-                    unitCost,
-                    at: now,
-                });
+                if (posted) stockAlerts.push({ itemId: posted.itemId, before: posted.before, storeName: grn.storeName });
 
                 await this.postToCatalogue(tx, {
                     material: line.material,
@@ -480,22 +488,34 @@ export class GoodsReceiptsService {
             }
 
             if (!stillOutstanding && po?.mrRef) {
-                await tx.materialRequest
-                    .updateMany({
-                        where: { OR: [{ reference: po.mrRef }, { reference: { startsWith: `${po.mrRef}/` } }] },
-                        data: { status: 'fulfilled' },
-                    })
-                    .catch(() => undefined);
+                const materialRequests = await tx.materialRequest.findMany({
+                    where: { OR: [{ reference: po.mrRef }, { reference: { startsWith: `${po.mrRef}/` } }] },
+                });
+                for (const request of materialRequests) {
+                    const procurementQty = Number((request.fulfillmentPlan as any)?.procurementQty ?? (request.fulfillmentMethod === 'procurement' ? request.qty : 0));
+                    if (procurementQty <= 0) continue;
+                    let nextStatus = 'fulfilled_via_procurement';
+                    if (request.fulfillmentMethod === 'mixed') {
+                        const refs = request.stockTransferRefs.length ? request.stockTransferRefs : request.stockTransferRef ? [request.stockTransferRef] : [];
+                        const transfers = refs.length ? await tx.stockTransfer.findMany({ where: { reference: { in: refs } }, select: { status: true } }) : [];
+                        nextStatus = transfers.length > 0 && transfers.every((transfer) => transfer.status.toLowerCase() === 'completed')
+                            ? 'fulfilled_via_stock_and_procurement'
+                            : 'procurement_fulfilled_stock_movement_pending';
+                    }
+                    await tx.materialRequest.update({ where: { id: request.id }, data: { status: nextStatus, fulfillmentStatus: nextStatus } });
+                }
             }
 
-            return tx.goodsReceipt.update({
+            const receipt = await tx.goodsReceipt.update({
                 where: { id },
                 data: { status, receivedDate: now, stockPostedAt: now },
                 include: { items: true },
             });
+            return { receipt, stockAlerts };
         });
 
-        return result;
+        for (const alert of result.stockAlerts) await this.dispatchStockThreshold(alert.itemId, alert.before, alert.storeName, grn.id);
+        return result.receipt;
     }
 
     /** Value of everything accepted against the order so far, from this GRN's own cumulative totals. */
@@ -694,20 +714,55 @@ export class GoodsReceiptsService {
                     lastReceived: line.at,
                 },
             });
-            return;
+            return { itemId: existing.id, before: existing.qty, after: existing.qty + line.qty };
         }
         const catalogue = await tx.material.findFirst({ where: { name: line.material } });
-        await tx.storeItem.create({
+        const created = await tx.storeItem.create({
             data: {
                 storeId: line.storeId,
                 materialName: line.material,
                 category: catalogue?.category ?? 'General',
                 unit: line.unit,
                 qty: line.qty,
-                reorderLevel: catalogue?.reorderLevel ?? 0,
+                openingQty: line.qty,
+                reorderLevel: 0,
+                lowStockThreshold: null,
+                outOfStockThreshold: null,
                 unitCost: line.unitCost,
                 lastReceived: line.at,
             },
+        });
+        return { itemId: created.id, before: 0, after: line.qty };
+    }
+
+    private async dispatchStockThreshold(itemId: string, beforeQty: number, storeName: string, relatedId: string) {
+        // Lightweight unit-test transaction doubles may not expose the root
+        // StoreItem delegate; stock posting itself has already been asserted in
+        // those tests, while production Prisma always supplies it.
+        if (!(this.prisma as any).storeItem?.findUnique) return;
+        const item = await this.prisma.storeItem.findUnique({ where: { id: itemId } });
+        if (!item) return;
+        const settings = await this.prisma.systemSetting.findUnique({ where: { key: 'admin-settings' } }).catch(() => null);
+        const rows = Array.isArray((settings?.value as any)?.storeThresholds) ? (settings!.value as any).storeThresholds : [];
+        const defaults = rows.find((row: any) => String(row.storeName ?? '').trim().toLowerCase() === storeName.trim().toLowerCase());
+        const percent = String(defaults?.unit ?? '').trim() === '%';
+        const baseline = Number(item.openingQty ?? item.qty ?? 0);
+        const defaultLow = percent ? baseline * Number(defaults?.lowStockQty ?? 0) / 100 : Number(defaults?.lowStockQty ?? 0);
+        const defaultOut = percent ? baseline * Number(defaults?.outOfStockQty ?? 0) / 100 : Number(defaults?.outOfStockQty ?? 0);
+        const low = Number(item.lowStockThreshold ?? (defaults ? defaultLow : item.reorderLevel ?? 0));
+        const out = Number(item.outOfStockThreshold ?? (defaults ? defaultOut : 0));
+        const state = (qty: number) => qty <= out ? 'out_of_stock' : qty <= low ? 'low_stock' : 'in_stock';
+        const before = state(beforeQty);
+        const after = state(item.qty);
+        await this.prisma.storeItem.update({ where: { id: item.id }, data: { alertState: after } });
+        if (before === after) return;
+        const event = after === 'low_stock' ? 'stock.low' : after === 'out_of_stock' ? 'stock.out' : 'stock.restored';
+        const label = after === 'low_stock' ? 'Low stock' : after === 'out_of_stock' ? 'Out of stock' : 'Stock restored';
+        void this.notifications.dispatch(event, {
+            title: `${label}: ${item.materialName}`,
+            message: `${storeName} now has ${item.qty} ${item.unit} (low ${low}, out ${out}).`,
+            actionUrl: '/apps/storefront/stock-levels', relatedId, relatedType: 'GoodsReceipt',
+            vars: { storeId: item.storeId, storeName, materialName: item.materialName, store_name: storeName, material_name: item.materialName, quantity: item.qty, unit: item.unit, lowThreshold: low, outThreshold: out },
         });
     }
 

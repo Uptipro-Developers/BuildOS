@@ -12,6 +12,7 @@ export interface Material {
     unitCost: number; reorderLevel: number; materialType?: string;
     allocationStatus?: string; allocatedTo?: string; allocatedProject?: string;
     condition?: string; createdAt: string;
+    amendmentId?: string; amendmentStatus?: 'pending';
     /** Catalog-created rows only — kind/value/unit are the dimension that produced this row; sku is the material item's. */
     sku?: string | null;
     kind?: string | null;
@@ -30,7 +31,9 @@ export interface Store {
 }
 export interface StoreItem {
     id: string; materialName: string; category: string; unit: string;
-    qty: number; reorderLevel: number; unitCost: number;
+    qty: number; reservedQty?: number; openingQty?: number; reorderLevel: number; unitCost: number;
+    lowStockThreshold?: number | null; outOfStockThreshold?: number | null;
+    outOfStockLevel?: number; thresholdSource?: 'item' | 'store';
     lastReceived?: string; bin?: string; storeId: string;
 }
 export interface StockMovement {
@@ -38,6 +41,15 @@ export interface StockMovement {
     storeName: string; storeId: string; reference?: string;
     projectName?: string; projectId?: string; date: string;
     createdBy?: string; notes?: string;
+    qtyBefore?: number; qtyAfter?: number; direction?: 'increase' | 'decrease'; status?: string;
+    toStoreId?: string; toStoreName?: string;
+}
+export interface MaterialAmendment {
+    id: string; entityType: 'Material' | 'StoreItem'; entityId: string;
+    materialName: string; storeId?: string; storeName?: string;
+    oldValue: Record<string, unknown>; proposedValue: Record<string, unknown>;
+    reason?: string; status: 'pending' | 'approved' | 'rejected';
+    requestedBy: string; reviewedBy?: string; createdAt: string; reviewedAt?: string;
 }
 export interface StockTransfer {
     id: string; reference: string; fromStoreId: string; fromStoreName: string;
@@ -55,6 +67,24 @@ export interface MaterialRequest {
     approvedAt?: string; notes?: string;
     /** Backlink to the Purchase Request auto-raised when this request is approved. */
     prRef?: string;
+    /** Photo supplied for a material that does not yet exist in the catalogue. */
+    imageUrl?: string | null;
+    isNewMaterial?: boolean;
+    fulfillmentMethod?: 'stock_movement' | 'procurement' | 'mixed' | null;
+    fulfillmentStatus?: string | null;
+    sourceStoreId?: string | null;
+    sourceStoreName?: string | null;
+    stockTransferRef?: string | null;
+    stockTransferRefs?: string[];
+    fulfillmentPlan?: {
+        allocations: { storeId: string; storeName: string; qty: number; transferRef?: string }[];
+        procurementQty: number;
+    } | null;
+    fulfillmentPlans?: {
+        requestId: string;
+        allocations: { storeId: string; qty: number }[];
+        procurementQty: number;
+    }[];
 }
 export interface MaterialReturn {
     id: string; reference: string; materialName: string; unit: string; qty: number;
@@ -113,6 +143,13 @@ export const updateStoreItem = (id: string, data: Partial<StoreItem>) =>
 export const deleteStoreItem = (id: string) =>
     apiFetch<void>(`/store-items/${id}`, { method: 'DELETE' });
 
+export const getMaterialAmendments = (status?: string) =>
+    apiFetch<MaterialAmendment[]>(status ? `/material-amendments?status=${encodeURIComponent(status)}` : '/material-amendments');
+export const decideMaterialAmendment = (id: string, decision: 'approved' | 'rejected') =>
+    apiFetch<MaterialAmendment>(`/material-amendments/${id}/decision`, {
+        method: 'PATCH', body: JSON.stringify({ decision }),
+    });
+
 // Stock Movements
 export const getStockMovements = (storeId?: string) =>
     apiFetch<StockMovement[]>(storeId ? `/stock-movements?storeId=${storeId}` : '/stock-movements');
@@ -134,6 +171,14 @@ export const getMaterialRequests = (status?: string) =>
 export const getMaterialRequest = (id: string) => apiFetch<MaterialRequest>(`/material-requests/${id}`);
 export const createMaterialRequest = (data: Partial<MaterialRequest>) =>
     apiFetch<MaterialRequest>('/material-requests', { method: 'POST', body: JSON.stringify(data) });
+export const createMaterialRequestBatch = (data: {
+    reference?: string;
+    items: Array<{ materialName: string; unit: string; qty: number; notes?: string }>;
+    [key: string]: unknown;
+}) => apiFetch<{ reference: string; items: MaterialRequest[] }>('/material-requests/batch', {
+    method: 'POST',
+    body: JSON.stringify(data),
+});
 export const updateMaterialRequest = (id: string, data: Partial<MaterialRequest>) =>
     apiFetch<MaterialRequest>(`/material-requests/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 

@@ -28,6 +28,7 @@ import {
   ApprovalPipeline,
   type PipelineStep,
 } from "../../components/ApprovalPipeline";
+import { baseMaterialRequestRef } from "../../utils/materialRequestRef";
 
 type ReqStatus = "pending" | "approved" | "rejected";
 type ReqType =
@@ -107,6 +108,7 @@ interface RequestItem {
   name: string;
   qty?: string;
   amount?: string;
+  imageUrl?: string | null;
 }
 interface ApprovalHistoryEntry {
   actor: string;
@@ -264,27 +266,34 @@ export function MyRequestsPage() {
           approvalHistory: [],
         }));
 
-        const mappedMaterial: Request[] = materialRequests
+        const materialGroups = new Map<string, typeof materialRequests>();
+        materialRequests
           .filter((mr) => raisedByMe(mr.requestedBy))
-          .map((mr) => ({
-            id: mr.reference || mr.id,
+          .forEach((mr) => {
+            const base = baseMaterialRequestRef(mr.reference || mr.id);
+            materialGroups.set(base, [...(materialGroups.get(base) ?? []), mr]);
+          });
+        const mappedMaterial: Request[] = Array.from(materialGroups.entries())
+          .map(([base, rows]) => {
+            const mr = rows[0];
+            return {
+            id: base,
             type: "Material Request",
-            title: mr.materialName || "Material request",
+            title: rows.length === 1 ? (mr.materialName || "Material request") : `${rows.length} materials requested`,
             project: mr.projectName || "—",
             date: mr.requestDate?.slice(0, 10) || "",
             status: toReqStatus(mr.status),
-            items: [
-              {
-                name: mr.materialName || "Material",
+            items: rows.map((item) => ({
+                name: item.materialName || "Material",
                 qty:
-                  mr.qty != null
-                    ? `${mr.qty} ${mr.unit || ""}`.trim()
+                  item.qty != null
+                    ? `${item.qty} ${item.unit || ""}`.trim()
                     : undefined,
-              },
-            ],
+                imageUrl: item.imageUrl,
+              })),
             comments: mr.purpose || mr.notes || "",
             approvalHistory: [],
-          }));
+          }});
 
         const mappedExpenses: Request[] = expenses
           .filter((exp: any) => raisedByMe(exp.createdBy))
@@ -588,7 +597,9 @@ export function MyRequestsPage() {
                           className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-2.5"
                         >
                           <div className="flex items-center gap-2">
-                            {tc.icon}
+                            {item.imageUrl ? (
+                              <img src={item.imageUrl} alt={item.name} className="w-10 h-10 rounded-lg object-cover border border-gray-200" />
+                            ) : tc.icon}
                             <span className="text-sm text-gray-800">
                               {item.name}
                             </span>

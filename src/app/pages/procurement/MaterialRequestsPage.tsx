@@ -79,11 +79,14 @@ type LocalMR = {
   storeName?: string;
   /** The Purchase Request auto-raised when this request was approved. */
   prRef?: string;
+  fulfillmentMethod?: "stock_movement" | "procurement";
+  fulfillmentStatus?: string;
   items: {
     material: string;
     qty: number;
     unit: string;
     notes: string;
+    imageUrl?: string | null;
   }[];
 };
 
@@ -96,8 +99,13 @@ function fromApiMR(r: ApiMR): LocalMR {
     "fulfilled",
   ];
   const rawStatus = r.status?.toLowerCase().replace(/\s+/g, "_") ?? "pending";
-  const status: ReqStatus = validStatuses.includes(rawStatus as ReqStatus)
-    ? (rawStatus as ReqStatus)
+  const routedStatus = ["forwarded_to_procurement", "procurement_in_progress"].includes(rawStatus)
+    ? "in_procurement"
+    : rawStatus === "fulfilled_via_procurement"
+      ? "fulfilled"
+      : rawStatus;
+  const status: ReqStatus = validStatuses.includes(routedStatus as ReqStatus)
+    ? (routedStatus as ReqStatus)
     : "pending";
   const rawPri = r.priority?.toLowerCase() ?? "normal";
   const priority = (
@@ -120,12 +128,15 @@ function fromApiMR(r: ApiMR): LocalMR {
     totalItems: 1,
     justification: r.purpose ?? r.notes ?? "",
     prRef: r.prRef,
+    fulfillmentMethod: r.fulfillmentMethod ?? undefined,
+    fulfillmentStatus: r.fulfillmentStatus ?? undefined,
     items: [
       {
         material: r.materialName,
         qty: r.qty,
         unit: r.unit,
         notes: r.notes ?? "",
+        imageUrl: r.imageUrl,
       },
     ],
   };
@@ -870,12 +881,13 @@ export function MaterialRequestsPage() {
 
   const filtered = applyFiltersAndSort(
     reqList.filter((r) => {
+      const routedToProcurement = r.fulfillmentMethod === "procurement" || r.status === "in_procurement";
       const matchTab = activeTab === "all" || r.status === activeTab;
       const matchSearch =
         r.id.toLowerCase().includes(search.toLowerCase()) ||
         r.project.toLowerCase().includes(search.toLowerCase()) ||
         r.requestedBy.toLowerCase().includes(search.toLowerCase());
-      return matchTab && matchSearch;
+      return routedToProcurement && matchTab && matchSearch;
     }),
     advFilters,
     advSort,
@@ -894,15 +906,9 @@ export function MaterialRequestsPage() {
             Material Requests
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Review, approve, and track material issuance requests from site
+            Process requests approved and forwarded by Storefront
           </p>
         </div>
-        <button
-          onClick={() => setShowNewMR(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-md text-sm hover:bg-blue-800"
-        >
-          <Plus className="w-3.5 h-3.5" /> New Request
-        </button>
       </div>
 
       {/* Tabs */}
@@ -1072,7 +1078,10 @@ export function MaterialRequestsPage() {
                           {req.items.map((item, i) => (
                             <tr key={i} className="hover:bg-gray-50">
                               <td className="px-3 py-2 font-medium text-gray-900">
-                                {item.material}
+                                <div className="flex items-center gap-2">
+                                  {item.imageUrl && <img src={item.imageUrl} alt={item.material} className="w-10 h-10 rounded-lg object-cover border border-gray-200" />}
+                                  <span>{item.material}</span>
+                                </div>
                               </td>
                               <td className="px-3 py-2 text-right font-semibold text-gray-900">
                                 {formatNumberByGeneralSettings(item.qty)}{" "}
@@ -1090,7 +1099,12 @@ export function MaterialRequestsPage() {
                         this process, and never for the person who raised the
                         request. Previously every viewer saw Approve and Reject, so
                         a requester could approve their own request. */}
-                    {req.status === "pending" &&
+                    {req.status === "pending" && req.fulfillmentStatus === "pending_procurement_approval" && (
+                      <p className="mt-4 text-xs text-amber-700 italic text-right">
+                        Awaiting action in Procurement Approvals.
+                      </p>
+                    )}
+                    {req.status === "pending" && req.fulfillmentStatus !== "pending_procurement_approval" &&
                       (mayApproveRequests && !isOwnRequest(req) ? (
                         <div className="flex gap-2 mt-4 justify-end">
                           <button

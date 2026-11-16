@@ -15,6 +15,7 @@ import { fetchProjects } from "../../api/projects";
 import { getPurchaseRequests } from "../../api/procurement-requests";
 import { useAuthUser } from "../../utils/useAuthUser";
 import { getGreeting } from "../../utils/generalSettings";
+import { getMyNotifications, markNotificationRead } from "../../api/notifications";
 
 interface RecentRequest {
   id: string;
@@ -128,6 +129,9 @@ const notifConfig: Record<string, { dot: string; bg: string }> = {
   rejection: { dot: "bg-red-500", bg: "bg-red-50" },
   assignment: { dot: "bg-blue-500", bg: "bg-blue-50" },
   reminder: { dot: "bg-amber-500", bg: "bg-amber-50" },
+  "stock.low": { dot: "bg-amber-500", bg: "bg-amber-50" },
+  "stock.out": { dot: "bg-red-500", bg: "bg-red-50" },
+  "stock.restored": { dot: "bg-green-500", bg: "bg-green-50" },
 };
 
 export function ESSDashboardPage() {
@@ -153,10 +157,19 @@ export function ESSDashboardPage() {
 
   const [allProjects, setAllProjects] = useState<any[]>([]);
   const [allRequests, setAllRequests] = useState<RecentRequest[]>([]);
-  const [notifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const unreadNotifs = notifications.filter((n) => !n.read).length;
 
   useEffect(() => {
+    getMyNotifications()
+      .then((rows) => setNotifications(rows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        text: `${row.title} — ${row.message}`,
+        time: new Date(row.createdAt).toLocaleString(),
+        read: row.status === "read",
+      }))))
+      .catch(() => {});
     fetchProjects({ status: "Active" })
       .then(setAllProjects)
       .catch(() => {});
@@ -412,6 +425,14 @@ export function ESSDashboardPage() {
                 return (
                   <div
                     key={n.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      if (!n.read) {
+                        void markNotificationRead(n.id);
+                        setNotifications((current) => current.map((item) => item.id === n.id ? { ...item, read: true } : item));
+                      }
+                    }}
                     className={`flex items-start gap-3 px-4 py-3 ${!n.read ? nc.bg : ""}`}
                   >
                     <span
