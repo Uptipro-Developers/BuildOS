@@ -6,6 +6,7 @@ import {
   CreditCard, Users2, FileText, CheckSquare, List, BarChart3, Settings2, ListTodo, PenLine, User,
   GitBranch, CalendarCheck, RefreshCw, ScrollText,
 } from "lucide-react";
+import { useApplicationResponsibility } from "../../utils/useApplicationResponsibility";
 
 const sidebarSections = [
   {
@@ -82,13 +83,14 @@ const sidebarSections = [
 ];
 
 export function FinanceLayout() {
+  const { canConfigure } = useApplicationResponsibility("finance");
   return (
       <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
         <AppHeader currentApp="finance" appColor="bg-emerald-600" />
         <div className="flex flex-1 overflow-hidden">
           <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
             <CollapsibleSidebar
-              sections={sidebarSections}
+              sections={canConfigure ? sidebarSections : sidebarSections.filter((section) => section.label !== "Settings")}
               activeClass="bg-emerald-50 text-emerald-700 font-medium [&_svg]:text-emerald-600"
               baseClass="text-gray-600 hover:bg-gray-50 hover:text-gray-900 [&_svg]:text-gray-400"
             />

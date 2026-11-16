@@ -1,5 +1,6 @@
 import { useState, useEffect, Fragment } from "react";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
+import { ApplicationResponsibilitiesPanel } from "../../components/ApplicationResponsibilitiesPanel";
 import {
   Settings,
   Plus,
@@ -1133,6 +1134,21 @@ function StockThresholdsPanel() {
                   <option value="Project">Project Store</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Threshold Unit
+                </label>
+                <select
+                  value={form.unit}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, unit: e.target.value }))
+                  }
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                >
+                  <option value="%">Percentage (%)</option>
+                  <option value=" units">Absolute quantity (units)</option>
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -1179,26 +1195,11 @@ function StockThresholdsPanel() {
                   </div>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Threshold Unit
-                </label>
-                <select
-                  value={form.unit}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, unit: e.target.value }))
-                  }
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                >
-                  <option value="%">Percentage (%)</option>
-                  <option value=" units">Absolute quantity (units)</option>
-                </select>
-                <p className="mt-1 text-[11px] text-gray-400">
-                  A percentage is taken from each store item's recorded opening
-                  quantity. An absolute threshold is compared directly to the
-                  quantity on hand. Material-specific overrides take priority.
-                </p>
-              </div>
+              <p className="mt-1 text-[11px] text-gray-400">
+                A percentage is taken from each store item's recorded opening
+                quantity. An absolute threshold is compared directly to the
+                quantity on hand. Material-specific overrides take priority.
+              </p>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
               <button
@@ -1973,10 +1974,10 @@ export function StorefrontConfigPage() {
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const [tab, setTab] = useState<
-    "levels" | "stores" | "thresholds" | "units" | "categories" | "numbering"
+    "levels" | "stores" | "thresholds" | "units" | "categories" | "numbering" | "people"
   >(() =>
     (
-      ["levels", "stores", "thresholds", "units", "categories", "numbering"] as const
+      ["levels", "stores", "thresholds", "units", "categories", "numbering", "people"] as const
     ).includes(requestedTab as any)
       ? (requestedTab as "stores")
       : "levels",
@@ -2007,6 +2008,7 @@ export function StorefrontConfigPage() {
           ["units", "Units of Measurement", <Ruler key="r" className="w-4 h-4" />],
           ["categories", "Material Categories", <Tag key="t" className="w-4 h-4" />],
           ["numbering", "Module Numbering", <Hash key="n" className="w-4 h-4" />],
+          ["people", "People & Responsibilities", <Settings key="p" className="w-4 h-4" />],
         ] as const).map(([key, label, icon]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === key ? "border-teal-600 text-teal-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
@@ -2028,6 +2030,7 @@ export function StorefrontConfigPage() {
       {tab === "numbering" && (
         <NumberingConfigPanel app="storefront" accent="teal" />
       )}
+      {tab === "people" && <ApplicationResponsibilitiesPanel app="storefront" />}
     </div>
   );
 }

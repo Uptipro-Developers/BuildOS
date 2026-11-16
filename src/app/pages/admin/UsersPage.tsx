@@ -55,6 +55,13 @@ import {
 import { getReferenceData } from "../../api/reference-data";
 import { toast } from "sonner";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
+import {
+  appointApplicationOwner,
+  getApplicationOwners,
+  revokeApplicationOwner,
+  type ApplicationOwner,
+  type DelegatedApp,
+} from "../../api/responsibilities";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type AppKey =
@@ -111,6 +118,10 @@ const ALL_APPS: AppDef[] = [
   },
   { key: "ess", label: "ESS", color: "bg-teal-100 text-teal-700", abbr: "ESS" },
 ];
+const DELEGATED_APP_DEFS = ALL_APPS.filter(
+  (app): app is AppDef & { key: DelegatedApp } =>
+    ["construction", "storefront", "procurement", "finance", "hr"].includes(app.key),
+);
 
 interface Process {
   id: string;
@@ -2034,6 +2045,13 @@ export function UsersPage() {
   const [syncTarget, setSyncTarget] = useState<PendingSyncEmployee | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
+  const [applicationOwners, setApplicationOwners] = useState<ApplicationOwner[]>([]);
+  const [ownerSaving, setOwnerSaving] = useState<string | null>(null);
+
+  const loadApplicationOwners = () =>
+    Promise.all(DELEGATED_APP_DEFS.map((app) => getApplicationOwners(app.key)))
+      .then((groups) => setApplicationOwners(groups.flat().filter((owner) => owner.active)))
+      .catch(() => setApplicationOwners([]));
 
   const loadPendingSync = () =>
     getPendingSyncEmployees()
@@ -2085,7 +2103,28 @@ export function UsersPage() {
     getAppRoles()
       .then((roles) => setRoleOptions(roles.map((r) => r.name)))
       .catch(() => setRoleOptions([]));
+    void loadApplicationOwners();
   }, []);
+
+  const togglePointPerson = async (user: UserRecord, app: DelegatedApp) => {
+    const key = `${user.id}:${app}`;
+    setOwnerSaving(key);
+    try {
+      const current = applicationOwners.find((owner) => owner.app === app && owner.active);
+      if (current?.userId === user.id) {
+        await revokeApplicationOwner(current.id);
+        toast.success(`${user.name} is no longer the ${ALL_APPS.find((item) => item.key === app)?.label} point person.`);
+      } else {
+        await appointApplicationOwner(app, { userId: user.id });
+        toast.success(`${user.name} is now the ${ALL_APPS.find((item) => item.key === app)?.label} point person.`);
+      }
+      await loadApplicationOwners();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update the point person.");
+    } finally {
+      setOwnerSaving(null);
+    }
+  };
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -2461,6 +2500,9 @@ export function UsersPage() {
               <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 Assigned Applications
               </th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide min-w-[240px]">
+                Module Point Person
+              </th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 Last Active
               </th>
@@ -2495,6 +2537,22 @@ export function UsersPage() {
                   <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold tracking-wide text-gray-700">
                     {user.userId}
                   </span>
+                </td>
+                <td className="px-4 py-3.5" onClick={(event) => event.stopPropagation()}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DELEGATED_APP_DEFS.map((app) => {
+                      const selected = applicationOwners.some((owner) => owner.app === app.key && owner.userId === user.id && owner.active);
+                      const saving = ownerSaving === `${user.id}:${app.key}`;
+                      return <button
+                        key={app.key}
+                        type="button"
+                        disabled={saving || user.status !== "Active"}
+                        onClick={() => void togglePointPerson(user, app.key)}
+                        title={selected ? `Remove as ${app.label} point person` : `Appoint as ${app.label} point person`}
+                        className={`rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors disabled:opacity-40 ${selected ? "border-indigo-600 bg-indigo-600 text-white" : "border-gray-200 bg-white text-gray-500 hover:border-indigo-300 hover:text-indigo-600"}`}
+                      >{saving ? "…" : app.abbr}</button>;
+                    })}
+                  </div>
                 </td>
                 <td className="px-4 py-3.5">
                   <div className="flex items-center gap-2">

@@ -718,9 +718,66 @@ model User {
   passwordHistory UserPasswordHistory[]
   employee        Employee?
   signatories     Signatory[]
+  applicationOwnerships ApplicationOwner[] @relation("ApplicationOwnerUser")
+  appointedApplicationOwners ApplicationOwner[] @relation("ApplicationOwnerAppointer")
+  applicationAssignments ApplicationAssignment[] @relation("ApplicationAssignmentUser")
+  delegatedApplicationAssignments ApplicationAssignment[] @relation("ApplicationAssignmentAssigner")
 
   /// The Active Sessions metric counts by this on every dashboard load.
   @@index([lastSeenAt])
+}
+
+/// An administrator-appointed operational owner for an application. Admin and
+/// ESS are deliberately excluded by the service: Admin remains the control
+/// plane and ESS is personal self-service.
+model ApplicationOwner {
+  id            String   @id @default(cuid())
+  app           String
+  user          User     @relation("ApplicationOwnerUser", fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  appointedBy   User?    @relation("ApplicationOwnerAppointer", fields: [appointedById], references: [id], onDelete: SetNull)
+  appointedById String?
+  canConfigure  Boolean  @default(true)
+  canAssign     Boolean  @default(true)
+  validFrom     DateTime @default(now())
+  validUntil    DateTime?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([app, userId])
+  @@index([app, active])
+}
+
+/// Resource-level responsibility delegated by an application owner. A null
+/// scopeId with scopeType `application` means the whole application; otherwise
+/// the pair identifies a project, store, department, cost centre, or another
+/// application-owned resource.
+model ApplicationAssignment {
+  id           String   @id @default(cuid())
+  app          String
+  user         User     @relation("ApplicationAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  /// Existing process-catalog id (for example p_payroll or p_stock_movements).
+  /// Null is retained only for assignments created before process delegation.
+  processId    String?
+  processName  String?
+  scopeType    String
+  scopeId      String?
+  scopeName    String?
+  responsibility String?
+  permissions  String[] @default([])
+  assignedBy   User?    @relation("ApplicationAssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedById String?
+  validFrom    DateTime @default(now())
+  validUntil   DateTime?
+  status       String   @default("active")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([app, userId, status])
+  @@index([app, processId, userId, status])
+  @@index([app, scopeType, scopeId, status])
 }
 
 model UserRole {

@@ -78,6 +78,7 @@ import { VendorsModule } from './vendors/vendors.module';
 import { OrgUnitsModule } from './org-units/org-units.module';
 import { SignatoriesModule } from './signatories/signatories.module';
 import { PaymentTermsModule } from './payment-terms/payment-terms.module';
+import { ResponsibilitiesModule } from './responsibilities/responsibilities.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 
 @Module({
@@ -127,6 +128,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
         WorkforceAllocationModule,
         ActivityHistoryModule,
         PermissionsModule,
+        ResponsibilitiesModule,
         ReportsModule,
         ResourcePlanningModule,
         ComplianceDocumentsModule,

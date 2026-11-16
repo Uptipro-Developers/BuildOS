@@ -22,6 +22,7 @@ import {
   User,
   Layers,
 } from "lucide-react";
+import { useApplicationResponsibility } from "../../utils/useApplicationResponsibility";
 
 const sidebarSections = [
   {
@@ -202,13 +203,14 @@ const sidebarSections = [
 ];
 
 export function HRLayout() {
+  const { canConfigure } = useApplicationResponsibility("hr");
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
       <AppHeader currentApp="hr" appColor="bg-indigo-700" />
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
           <CollapsibleSidebar
-            sections={sidebarSections}
+            sections={canConfigure ? sidebarSections : sidebarSections.filter((section) => section.label !== "Settings")}
             activeClass="bg-indigo-50 text-indigo-700 font-medium [&_svg]:text-indigo-600"
             baseClass="text-gray-600 hover:bg-gray-50 [&_svg]:text-gray-400"
           />

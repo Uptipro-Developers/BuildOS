@@ -25,6 +25,7 @@ import { useChangelog } from "../../stores/changelogStore";
 import { DataTable, type Column } from "../../components/DataTable";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
+import { ApplicationResponsibilitiesPanel } from "../../components/ApplicationResponsibilitiesPanel";
 import { exportCSV } from "../../utils/exportCSV";
 import type { AccrualTypeConfig } from "./types";
 
@@ -104,7 +105,7 @@ const DELETE_SUBJECTS: Record<ConfigDeleteTarget["kind"], string> = {
   numbering: "numbering configuration for",
 };
 
-const TABS = ["general", "accounts", "tax", "accruals", "numbering"] as const;
+const TABS = ["general", "accounts", "tax", "accruals", "numbering", "people"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -113,6 +114,7 @@ const TAB_LABELS: Record<Tab, string> = {
   tax: "Tax",
   accruals: "Accruals",
   numbering: "Numbering",
+  people: "People & Responsibilities",
 };
 
 const typeColors: Record<TaxType, string> = {
@@ -896,6 +898,7 @@ export function FinanceConfigPage() {
       {tab === "numbering" && (
         <NumberingConfigPanel app="finance" accent="indigo" />
       )}
+      {tab === "people" && <ApplicationResponsibilitiesPanel app="finance" />}
 
       {/* Bank Account Modal */}
       {showBankModal && (

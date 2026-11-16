@@ -151,6 +151,30 @@ export class NotificationDispatchService {
             return user ? [user] : [];
         }
 
+        if (/^store primary contact$/i.test(setting)) {
+            const storeId = String(context.vars?.storeId ?? '').trim();
+            const now = new Date();
+            const scoped = storeId ? await this.prisma.applicationAssignment.findFirst({
+                where: {
+                    app: 'storefront', scopeType: 'store', scopeId: storeId, status: 'active',
+                    validFrom: { lte: now }, OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+                    responsibility: { contains: 'primary', mode: 'insensitive' },
+                },
+                include: { user: { select } },
+            }) : null;
+            if (scoped?.user) return [scoped.user];
+            const owners = await this.prisma.applicationOwner.findMany({
+                where: {
+                    app: 'storefront', active: true, validFrom: { lte: now },
+                    OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+                },
+                include: { user: { select } },
+            });
+            if (owners.length) return owners.map((owner) => owner.user);
+            // Backward-compatible fallback for installations that have not yet
+            // appointed a Storefront point person.
+        }
+
         if (/^store (primary contact|manager)$/i.test(setting)) {
             const storeId = String(context.vars?.storeId ?? '').trim();
             const storeName = String(context.vars?.storeName ?? '').trim();

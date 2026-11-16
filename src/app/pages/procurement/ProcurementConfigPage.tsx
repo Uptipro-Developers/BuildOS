@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
+import { ApplicationResponsibilitiesPanel } from "../../components/ApplicationResponsibilitiesPanel";
 import {
   getProcessCatalog,
   getProcessWorkflows,
@@ -52,7 +53,7 @@ import {
 } from "../../api/payment-terms";
 
 // Stock thresholds belong to each Material and are managed in All Materials.
-const TABS = ["numbering", "paymentTerms", "signatories", "approvals"] as const;
+const TABS = ["numbering", "paymentTerms", "signatories", "approvals", "people"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -60,6 +61,7 @@ const TAB_LABELS: Record<Tab, string> = {
   paymentTerms: "Payment Terms",
   signatories: "Signatories",
   approvals: "Approvals",
+  people: "People & Responsibilities",
 };
 
 const DELIVERY_SPLIT_LABELS: Record<DeliverySplit, string> = {
@@ -1147,6 +1149,7 @@ export function ProcurementConfigPage() {
       {tab === "paymentTerms" && <PaymentTermsPanel />}
       {tab === "signatories" && <SignatoriesPanel />}
       {tab === "approvals" && <ApprovalsPanel />}
+      {tab === "people" && <ApplicationResponsibilitiesPanel app="procurement" />}
     </div>
   );
 }

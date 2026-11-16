@@ -10,6 +10,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { PermissionAction, PermissionsService } from './permissions.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 
 const PERMISSION_KEY = 'requiredProcessPermission';
 
@@ -40,6 +42,7 @@ export class ProcessPermissionGuard implements CanActivate {
     constructor(
         private readonly reflector: Reflector,
         private readonly permissions: PermissionsService,
+        private readonly prisma: PrismaService,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -67,7 +70,40 @@ export class ProcessPermissionGuard implements CanActivate {
                 `Your role does not permit "${required.action}" on this process.`,
             );
         }
+        await this.assertDelegated(userId, required);
         return true;
+    }
+
+    private async assertDelegated(userId: string, required: RequiredPermission) {
+        const process = DEFAULT_PROCESS_CATALOG.find((item) => item.id === required.processId);
+        if (!process || !['construction', 'storefront', 'procurement', 'finance', 'hr'].includes(process.app)) return;
+        const configured = await this.prisma.applicationOwner.findFirst({ where: { app: process.app } });
+        if (!configured) return;
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { role: true, roles: { include: { role: { select: { name: true, isSuper: true } } } } },
+        });
+        const admin = /admin|super/i.test(String(user?.role ?? ''))
+            || Boolean(user?.roles.some((entry) => entry.role.isSuper || /admin|super/i.test(entry.role.name)));
+        if (admin) return;
+        const now = new Date();
+        const owner = await this.prisma.applicationOwner.findFirst({
+            where: { app: process.app, userId, active: true, validFrom: { lte: now }, OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+        });
+        if (owner) return;
+        const assignment = await this.prisma.applicationAssignment.findFirst({
+            where: {
+                app: process.app, userId, status: 'active', validFrom: { lte: now },
+                OR: [{ validUntil: null }, { validUntil: { gt: now } }],
+                AND: [{ OR: [
+                    { processId: required.processId, permissions: { has: required.action } },
+                    { processId: null, scopeType: 'application' },
+                ] }],
+            },
+        });
+        if (!assignment) {
+            throw new ForbiddenException(`You have not been delegated "${required.action}" responsibility for this process.`);
+        }
     }
 }
 
