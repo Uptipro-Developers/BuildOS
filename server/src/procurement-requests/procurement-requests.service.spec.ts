@@ -42,6 +42,12 @@ function makeService() {
             findUnique: jest.fn(() =>
                 Promise.resolve({ prRef: 'PR-0019', mrRef: 'MR-0007', daysToDeliver: 10 }),
             ),
+            findUniqueOrThrow: jest.fn(() =>
+                Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved' }),
+            ),
+            update: jest.fn(({ data }: any) =>
+                Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved', ...data }),
+            ),
             updateMany: jest.fn((args: any) => {
                 purchaseRequestUpdates.push(args);
                 return Promise.resolve({ count: 1 });
@@ -88,6 +94,7 @@ function makeService() {
             ),
         },
         materialRequest: {
+            findMany: jest.fn(() => Promise.resolve([])),
             updateMany: jest.fn((args: any) => {
                 materialRequestUpdates.push(args);
                 return Promise.resolve({ count: 1 });
@@ -215,6 +222,39 @@ describe('creating a purchase request', () => {
         await service.createPR({ title: 'Ikeja', requestedBy: 'Amaka Osei', items: [] });
 
         expect(materialRequestUpdates).toEqual([]);
+    });
+});
+
+describe('updating a purchase request material-request status', () => {
+    it('does not propagate a notes-only edit when the PR status did not change', async () => {
+        const { service, prisma, materialRequestUpdates } = makeService();
+
+        await service.updatePR('pr-1', { notes: 'Clarified delivery address' });
+
+        expect(prisma.materialRequest.findMany).not.toHaveBeenCalled();
+        expect(materialRequestUpdates).toEqual([]);
+    });
+
+    it('updates only unfinished procurement-routed siblings', async () => {
+        const { service, prisma, materialRequestUpdates } = makeService();
+        prisma.purchaseRequest.findUniqueOrThrow.mockResolvedValue({
+            id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'pending_approval',
+        });
+        prisma.purchaseRequest.update.mockResolvedValue({
+            id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved',
+        });
+        prisma.materialRequest.findMany.mockResolvedValue([
+            { id: 'stock-line', status: 'fulfilled_via_storefront', fulfillmentStatus: 'fulfilled_via_storefront', fulfillmentMethod: 'stock_movement', fulfillmentPlan: { procurementQty: 0 } },
+            { id: 'procurement-line', status: 'forwarded_to_procurement', fulfillmentStatus: 'forwarded_to_procurement', fulfillmentMethod: 'procurement', fulfillmentPlan: { procurementQty: 4 } },
+            { id: 'completed-procurement-line', status: 'fulfilled_via_procurement', fulfillmentStatus: 'fulfilled_via_procurement', fulfillmentMethod: 'procurement', fulfillmentPlan: { procurementQty: 2 } },
+        ]);
+
+        await service.updatePR('pr-1', { status: 'approved' });
+
+        expect(materialRequestUpdates).toEqual([{
+            where: { id: { in: ['procurement-line'] } },
+            data: { status: 'procurement_in_progress', fulfillmentStatus: 'procurement_in_progress' },
+        }]);
     });
 });
 

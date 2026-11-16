@@ -102,16 +102,35 @@ export class ProcurementRequestsService {
         });
     }
     async updatePR(id: string, data: any) {
+        const existing = await this.prisma.purchaseRequest.findUniqueOrThrow({ where: { id } });
         const updated = await this.prisma.purchaseRequest.update({ where: { id }, data });
         const status = normaliseStatus(updated.status);
-        if (updated.mrRef && !['draft', 'not_raised', 'pending_approval'].includes(status)) {
+        const statusChanged = status !== normaliseStatus(existing.status);
+        if (updated.mrRef && statusChanged && !['draft', 'not_raised', 'pending_approval'].includes(status)) {
             const requestStatus = status === 'cancelled' || status === 'rejected'
                 ? { status: 'rejected', fulfillmentStatus: 'rejected' }
                 : { status: 'procurement_in_progress', fulfillmentStatus: 'procurement_in_progress' };
-            await this.prisma.materialRequest.updateMany({
+            const siblings = await this.prisma.materialRequest.findMany({
                 where: { OR: [{ reference: updated.mrRef }, { reference: { startsWith: `${updated.mrRef}/` } }] },
-                data: requestStatus,
+                select: { id: true, status: true, fulfillmentStatus: true, fulfillmentMethod: true, fulfillmentPlan: true },
             });
+            const completed = new Set([
+                'fulfilled', 'fulfilled_via_storefront', 'fulfilled_via_procurement',
+                'fulfilled_via_stock_and_procurement',
+            ]);
+            const procurementIds = siblings.filter((request: any) => {
+                const fulfillmentStatus = normaliseStatus(request.fulfillmentStatus || request.status);
+                if (completed.has(fulfillmentStatus)) return false;
+                const procurementQty = Number(request.fulfillmentPlan?.procurementQty ?? 0);
+                return request.fulfillmentMethod === 'procurement'
+                    || (request.fulfillmentMethod === 'mixed' && procurementQty > 0);
+            }).map((request: any) => request.id);
+            if (procurementIds.length) {
+                await this.prisma.materialRequest.updateMany({
+                    where: { id: { in: procurementIds } },
+                    data: requestStatus,
+                });
+            }
         }
         return updated;
     }

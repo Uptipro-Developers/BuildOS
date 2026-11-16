@@ -332,6 +332,19 @@ export class MaterialsService {
         const quantity = Number(data?.qty);
         if (!Number.isFinite(quantity) || quantity <= 0) throw new BadRequestException('Quantity must be greater than zero');
         const type = String(data?.type ?? '').trim().toLowerCase();
+        const movementInput = {
+            materialName: String(data?.materialName ?? '').trim(),
+            unit: String(data?.unit ?? '').trim(),
+            qty: quantity,
+            storeName: String(data?.storeName ?? '').trim(),
+            storeId,
+            reference: String(data?.reference ?? '').trim() || null,
+            projectName: String(data?.projectName ?? '').trim() || null,
+            projectId: String(data?.projectId ?? '').trim() || null,
+            ...(data?.date ? { date: new Date(data.date) } : {}),
+            createdBy: actor?.name || actor?.email || data?.createdBy || 'Unknown user',
+            notes: String(data?.notes ?? '').trim() || null,
+        };
         if (type === 'transfer') {
             const toStoreId = String(data?.toStoreId ?? '').trim();
             const toStoreName = String(data?.toStoreName ?? '').trim();
@@ -352,9 +365,8 @@ export class MaterialsService {
             const direction = String(data?.direction ?? '').toLowerCase();
             if (direction !== 'increase' && direction !== 'decrease') throw new BadRequestException('Choose whether the adjustment increases or decreases stock');
             const movement = await this.prisma.stockMovement.create({ data: {
-                ...data, type: direction === 'increase' ? 'adjustment_in' : 'adjustment_out',
-                qty: quantity, storeId, qtyBefore: item.qty, qtyAfter: item.qty, direction, status: 'pending_approval',
-                createdBy: actor?.name || actor?.email || data.createdBy || 'Unknown user',
+                ...movementInput, type: direction === 'increase' ? 'adjustment_in' : 'adjustment_out',
+                qtyBefore: item.qty, qtyAfter: item.qty, direction, status: 'pending_approval',
             }});
             const amendment = await this.prisma.materialAmendment.create({ data: {
                 entityType: 'StockAdjustment', entityId: item.id, materialName: item.materialName,
@@ -377,7 +389,8 @@ export class MaterialsService {
             if (!item) throw new BadRequestException('This material is not stocked in the selected store');
             const delta = incoming ? quantity : -quantity;
             const after = item.qty + delta;
-            if (after < 0) throw new BadRequestException(`Only ${item.qty} ${item.unit} is available`);
+            const unreserved = Math.max(0, item.qty - Number(item.reservedQty ?? 0));
+            if (outgoing && quantity > unreserved) throw new BadRequestException(`Only ${unreserved} unreserved ${item.unit} is available`);
             const updated = await tx.storeItem.update({ where: { id: item.id }, data: { qty: after } });
             const material = await tx.material.findFirst({ where: { name: item.materialName } });
             if (material) await tx.material.update({ where: { id: material.id }, data: {
@@ -385,9 +398,8 @@ export class MaterialsService {
                 availableQty: Math.max(0, material.availableQty + delta),
             }});
             const movement = await tx.stockMovement.create({ data: {
-                ...data, qty: quantity, type, storeId, storeName: data.storeName,
+                ...movementInput, type,
                 qtyBefore: item.qty, qtyAfter: after, direction: incoming ? 'increase' : 'decrease', status: 'posted',
-                createdBy: actor?.name || actor?.email || data.createdBy || 'Unknown user',
             }});
             await tx.auditLog.create({ data: {
                 userId: actor?.userId || null, entity: 'StoreItem', entityId: item.id, action: 'STOCK_POSTED',
@@ -426,6 +438,19 @@ export class MaterialsService {
             && !['completed', 'rejected', 'cancelled'].includes(String(transfer.status).trim().toLowerCase());
         const result = await this.prisma.$transaction(async (tx) => {
             const alerts: any[] = [];
+            if (shouldPost) {
+                // Atomically claim the completion. A second caller that read the
+                // same Pending status cannot post the ledger again after the first
+                // transaction commits.
+                const claimed = await tx.stockTransfer.updateMany({
+                    where: { id: transfer.id, status: transfer.status },
+                    data: { status: 'Completing' },
+                });
+                if (claimed.count === 0) {
+                    const current = await tx.stockTransfer.findUniqueOrThrow({ where: { id: transfer.id } });
+                    return { updated: current, alerts };
+                }
+            }
             if (shouldRelease) {
                 const lines = Array.isArray(transfer.items) ? transfer.items as any[] : [];
                 for (const line of lines) {
@@ -442,9 +467,16 @@ export class MaterialsService {
                     const source = transfer.fromStoreId
                         ? await tx.storeItem.findFirst({ where: { storeId: transfer.fromStoreId, materialName: line.materialName } })
                         : null;
-                    if (!source || source.qty < qty) throw new BadRequestException(`Insufficient ${line.materialName} in ${transfer.fromStoreName}`);
+                    if (!source) throw new BadRequestException(`Insufficient ${line.materialName} in ${transfer.fromStoreName}`);
+                    const requestLinked = Boolean(line.materialRequestRef);
+                    const available = requestLinked
+                        ? Math.min(source.qty, Number(source.reservedQty ?? 0))
+                        : Math.max(0, source.qty - Number(source.reservedQty ?? 0));
+                    if (available < qty) {
+                        throw new BadRequestException(`Only ${available} ${requestLinked ? 'reserved' : 'unreserved'} ${source.unit} is available`);
+                    }
                     const sourceAfter = source.qty - qty;
-                    const reservedForLine = line.materialRequestRef ? qty : 0;
+                    const reservedForLine = requestLinked ? qty : 0;
                     const updatedSource = await tx.storeItem.update({ where: { id: source.id }, data: {
                         qty: sourceAfter,
                         reservedQty: Math.max(0, source.reservedQty - reservedForLine),
@@ -493,7 +525,9 @@ export class MaterialsService {
             const updated = await tx.stockTransfer.update({
                 where: { id: transfer.id },
                 data: {
-                    ...data,
+                    ...(data?.status !== undefined ? { status: data.status } : {}),
+                    ...(data?.approvedBy !== undefined ? { approvedBy: data.approvedBy } : {}),
+                    ...(data?.notes !== undefined ? { notes: data.notes } : {}),
                     ...(nextStatus === 'completed' && !transfer.completedAt ? { completedAt: new Date() } : {}),
                 },
             });
@@ -932,7 +966,10 @@ export class MaterialsService {
                     const item = await tx.storeItem.findUniqueOrThrow({ where: { id: amendment.entityId } });
                     const delta = Number(values.quantity) * (values.direction === 'decrease' ? -1 : 1);
                     const after = item.qty + delta;
-                    if (after < 0) throw new BadRequestException(`Only ${item.qty} ${item.unit} is available`);
+                    const unreserved = Math.max(0, item.qty - Number(item.reservedQty ?? 0));
+                    if (values.direction === 'decrease' && Number(values.quantity) > unreserved) {
+                        throw new BadRequestException(`Only ${unreserved} unreserved ${item.unit} is available`);
+                    }
                     const updatedItem = await tx.storeItem.update({ where: { id: item.id }, data: { qty: after } });
                     const material = await tx.material.findFirst({ where: { name: item.materialName } });
                     if (material) await tx.material.update({ where: { id: material.id }, data: {
