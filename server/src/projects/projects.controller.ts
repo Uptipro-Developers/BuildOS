@@ -27,7 +27,7 @@ export class ProjectsController {
     }
 
     @Delete(':id')
-    @RequiresProcess('p_projects', 'delete')
+    @RequiresProcess('p_projects', 'delete', { type: 'project', param: 'id' })
     remove(@Param('id') id: string, @Req() req?: any) {
         return this.projectsService.remove(id, this.userId(req));
     }

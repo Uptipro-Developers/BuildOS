@@ -326,7 +326,7 @@ function PRFormModal({
       })
       .catch(() => {});
 
-    getMaterialRequests()
+    getMaterialRequests(undefined, "procurement")
       .then((rows) =>
         setMaterialRequestRefs([
           ...new Set(

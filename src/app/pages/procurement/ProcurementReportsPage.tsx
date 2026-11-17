@@ -37,7 +37,7 @@ export function ProcurementReportsPage() {
       Promise.all([
         getMaterials().then(setMaterials),
         fetchPurchaseOrders().then(setPurchaseOrders),
-        getMaterialRequests().then(setRequests),
+        getMaterialRequests(undefined, "procurement").then(setRequests),
         fetchSuppliers().then(setSuppliers),
       ]),
     [],

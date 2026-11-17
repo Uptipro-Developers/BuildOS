@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResponsibilitiesService } from '../responsibilities/responsibilities.service';
 
@@ -19,14 +19,13 @@ export class ProjectsService {
     }
 
     async findOne(id: string, userId?: string) {
-        if (userId) await this.responsibilities.assertScope(userId, 'construction', 'project', id, 'p_projects');
+        if (userId) await this.responsibilities.assertProcessAction(userId, 'construction', 'p_projects', 'view', 'project', id);
         return this.prisma.project.findUniqueOrThrow({ where: { id } });
     }
 
     async create(data: any, userId?: string) {
         if (userId) {
-            const access = (await this.responsibilities.accessForUser(userId)).find((entry) => entry.app === 'construction');
-            if (access?.configured && !access.canConfigure) throw new ForbiddenException('Only the Projects point person can create projects');
+            await this.responsibilities.assertProcessAction(userId, 'construction', 'p_projects', 'create');
         }
         // Provide safe defaults for required, no-default columns so a partial
         // payload (e.g. from the construction module, which uses a richer
@@ -47,12 +46,12 @@ export class ProjectsService {
     }
 
     async update(id: string, data: any, userId?: string) {
-        if (userId) await this.responsibilities.assertScope(userId, 'construction', 'project', id, 'p_projects');
+        if (userId) await this.responsibilities.assertProcessAction(userId, 'construction', 'p_projects', 'edit', 'project', id);
         return this.prisma.project.update({ where: { id }, data });
     }
 
     async remove(id: string, userId?: string) {
-        if (userId) await this.responsibilities.assertScope(userId, 'construction', 'project', id, 'p_projects');
+        if (userId) await this.responsibilities.assertProcessAction(userId, 'construction', 'p_projects', 'delete', 'project', id);
         return this.prisma.project.delete({ where: { id } });
     }
 }

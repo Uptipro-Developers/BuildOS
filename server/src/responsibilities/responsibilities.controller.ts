@@ -19,6 +19,11 @@ export class ResponsibilitiesController {
         return this.responsibilities.listProcesses(app, this.actor(req));
     }
 
+    @Get('apps/:app/users')
+    listAssignableUsers(@Param('app') app: string, @Req() req: any) {
+        return this.responsibilities.listAssignableUsers(app, this.actor(req));
+    }
+
     @Get('apps/:app/resources/:scopeType')
     listResources(@Param('app') app: string, @Param('scopeType') scopeType: string, @Req() req: any) {
         return this.responsibilities.listResources(app, scopeType, this.actor(req));

@@ -27,7 +27,7 @@ export class ExpensesController {
     }
 
     @Delete(':id')
-    @RequiresProcess('p_expenses', 'delete')
+    @RequiresProcess('p_expenses', 'delete', { type: 'project', entity: 'expenseProject', param: 'id' })
     remove(@Param('id') id: string) {
         return this.expensesService.remove(id);
     }

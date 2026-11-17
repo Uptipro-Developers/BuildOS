@@ -14,10 +14,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_PROCESS_CATALOG } from '../common/process-catalog';
 
 const PERMISSION_KEY = 'requiredProcessPermission';
+const ADMIN_ROLE_NAMES = new Set(['admin', 'administrator', 'superadmin']);
+const canonicalRole = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
 interface RequiredPermission {
     processId: string;
     action: PermissionAction;
+    scope?: {
+        type: 'project' | 'store' | 'department';
+        param?: string;
+        body?: string;
+        entity?: 'expenseProject';
+    };
 }
 
 /**
@@ -70,11 +78,11 @@ export class ProcessPermissionGuard implements CanActivate {
                 `Your role does not permit "${required.action}" on this process.`,
             );
         }
-        await this.assertDelegated(userId, required);
+        await this.assertDelegated(userId, required, request);
         return true;
     }
 
-    private async assertDelegated(userId: string, required: RequiredPermission) {
+    private async assertDelegated(userId: string, required: RequiredPermission, request: Request) {
         const process = DEFAULT_PROCESS_CATALOG.find((item) => item.id === required.processId);
         if (!process || !['construction', 'storefront', 'procurement', 'finance', 'hr'].includes(process.app)) return;
         const configured = await this.prisma.applicationOwner.findFirst({ where: { app: process.app } });
@@ -83,15 +91,15 @@ export class ProcessPermissionGuard implements CanActivate {
             where: { id: userId },
             select: { role: true, roles: { include: { role: { select: { name: true, isSuper: true } } } } },
         });
-        const admin = /admin|super/i.test(String(user?.role ?? ''))
-            || Boolean(user?.roles.some((entry) => entry.role.isSuper || /admin|super/i.test(entry.role.name)));
+        const admin = ADMIN_ROLE_NAMES.has(canonicalRole(user?.role))
+            || Boolean(user?.roles.some((entry) => entry.role.isSuper || ADMIN_ROLE_NAMES.has(canonicalRole(entry.role.name))));
         if (admin) return;
         const now = new Date();
         const owner = await this.prisma.applicationOwner.findFirst({
             where: { app: process.app, userId, active: true, validFrom: { lte: now }, OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
         });
         if (owner) return;
-        const assignment = await this.prisma.applicationAssignment.findFirst({
+        const assignments = await this.prisma.applicationAssignment.findMany({
             where: {
                 app: process.app, userId, status: 'active', validFrom: { lte: now },
                 OR: [{ validUntil: null }, { validUntil: { gt: now } }],
@@ -101,16 +109,36 @@ export class ProcessPermissionGuard implements CanActivate {
                 ] }],
             },
         });
-        if (!assignment) {
+        if (!assignments.length) {
             throw new ForbiddenException(`You have not been delegated "${required.action}" responsibility for this process.`);
         }
+        if (assignments.some((entry) => entry.scopeType === 'application')) return;
+        if (!required.scope) {
+            throw new ForbiddenException('This operation cannot verify a scoped delegation. Ask the module point person for application-wide responsibility.');
+        }
+        const targetScopeId = await this.resolveTargetScope(request, required.scope);
+        if (!targetScopeId || !assignments.some((entry) => entry.scopeType === required.scope!.type && entry.scopeId === targetScopeId)) {
+            throw new ForbiddenException(`This record is outside your delegated ${required.scope.type} scope.`);
+        }
+    }
+
+    private async resolveTargetScope(request: Request, scope: NonNullable<RequiredPermission['scope']>) {
+        if (scope.entity === 'expenseProject') {
+            const id = String((request.params as any)?.[scope.param ?? 'id'] ?? '');
+            if (!id) return null;
+            const expense = await this.prisma.expense.findUnique({ where: { id }, select: { projectId: true } });
+            return expense?.projectId ?? null;
+        }
+        if (scope.param) return String((request.params as any)?.[scope.param] ?? '') || null;
+        if (scope.body) return String((request.body as any)?.[scope.body] ?? '') || null;
+        return null;
     }
 }
 
 /** Requires a VCEAD permission on a process for this endpoint. */
-export function RequiresProcess(processId: string, action: PermissionAction) {
+export function RequiresProcess(processId: string, action: PermissionAction, scope?: RequiredPermission['scope']) {
     return applyDecorators(
-        SetMetadata(PERMISSION_KEY, { processId, action }),
+        SetMetadata(PERMISSION_KEY, { processId, action, scope }),
         UseGuards(ProcessPermissionGuard),
     );
 }

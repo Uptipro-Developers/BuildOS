@@ -110,8 +110,9 @@ export class MaterialsController {
 
     // ── Material Requests ──
     @Get('material-requests')
-    async getAllRequests(@Query('status') status?: string, @Req() req?: any) {
-        return this.svc.findAllRequests(status, await this.storeScope(req, 'p_storefront_material_requests'));
+    async getAllRequests(@Query('status') status?: string, @Query('consumer') consumer?: string, @Req() req?: any) {
+        const scopes = await this.materialRequestScopes(req, consumer);
+        return this.svc.findAllRequests(status, scopes.storeIds, scopes.projectIds);
     }
     @Get('material-requests/:id')
     getRequest(@Param('id') id: string) { return this.svc.findRequest(id); }
@@ -185,6 +186,18 @@ export class MaterialsController {
     private assertStoreScope(req: any, storeId: string, processId?: string) {
         const userId = this.userId(req);
         return userId ? this.responsibilities.assertScope(userId, 'storefront', 'store', storeId, processId) : Promise.resolve();
+    }
+    private async materialRequestScopes(req?: any, consumer?: string) {
+        const userId = this.userId(req);
+        if (!userId) return { storeIds: null, projectIds: null };
+        const procurement = String(consumer ?? '').toLowerCase() === 'procurement';
+        const app = procurement ? 'procurement' : 'storefront';
+        const processId = procurement ? 'p_material_requests' : 'p_storefront_material_requests';
+        const [storeIds, projectIds] = await Promise.all([
+            this.responsibilities.allowedScopeIds(userId, app, 'store', processId),
+            this.responsibilities.allowedScopeIds(userId, app, 'project', processId),
+        ]);
+        return { storeIds, projectIds };
     }
     private async assertStorefrontConfiguration(req: any) {
         const userId = this.userId(req);

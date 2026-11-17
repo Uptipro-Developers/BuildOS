@@ -559,9 +559,17 @@ export class MaterialsService {
     }
 
     // ── Material Requests ──
-    findAllRequests(status?: string, storeIds?: string[] | null) {
+    findAllRequests(status?: string, storeIds?: string[] | null, projectIds?: string[] | null) {
+        const scoped = storeIds !== null && storeIds !== undefined || projectIds !== null && projectIds !== undefined;
+        const scopeFilters = [
+            ...(storeIds?.length ? [{ storeId: { in: storeIds } }] : []),
+            ...(projectIds?.length ? [{ projectId: { in: projectIds } }] : []),
+        ];
         return this.prisma.materialRequest.findMany({
-            where: { ...(status ? { status } : {}), ...(storeIds ? { storeId: { in: storeIds } } : {}) },
+            where: {
+                ...(status ? { status } : {}),
+                ...(scoped ? { OR: scopeFilters.length ? scopeFilters : [{ id: { in: [] } }] } : {}),
+            },
             orderBy: { requestDate: 'desc' },
         });
     }

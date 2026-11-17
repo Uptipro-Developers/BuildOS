@@ -36,6 +36,8 @@ const PROCESS_SCOPE_TYPES: Record<string, string[]> = {
 };
 
 type Actor = { userId: string; name?: string; email?: string };
+const ADMIN_ROLE_NAMES = new Set(['admin', 'administrator', 'superadmin']);
+const canonicalRole = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 
 @Injectable()
 export class ResponsibilitiesService {
@@ -56,8 +58,8 @@ export class ResponsibilitiesService {
             select: { role: true, roles: { include: { role: { select: { name: true, isSuper: true } } } } },
         });
         if (!user) return false;
-        if (/admin|super/i.test(String(user.role ?? ''))) return true;
-        return user.roles.some((entry) => entry.role.isSuper || /admin|super/i.test(entry.role.name));
+        if (ADMIN_ROLE_NAMES.has(canonicalRole(user.role))) return true;
+        return user.roles.some((entry) => entry.role.isSuper || ADMIN_ROLE_NAMES.has(canonicalRole(entry.role.name)));
     }
 
     private activeWhere(now = new Date()) {
@@ -99,6 +101,16 @@ export class ResponsibilitiesService {
 
     listApps() {
         return DELEGATED_APPS.map((app) => ({ app, scopeTypes: APP_SCOPE_TYPES[app] }));
+    }
+
+    async listAssignableUsers(appInput: string, actor: Actor) {
+        const app = this.normalizeApp(appInput);
+        await this.assertMayManage(app, actor, 'assign');
+        return this.prisma.user.findMany({
+            where: { status: { in: ['active', 'Active'] } },
+            select: { id: true, name: true, email: true, role: true, assignedApps: true, status: true },
+            orderBy: { name: 'asc' },
+        });
     }
 
     async listProcesses(appInput: string, actor: Actor) {
@@ -329,7 +341,7 @@ export class ResponsibilitiesService {
             .map((entry) => entry.scopeId as string);
         // A Storefront project responsibility includes the store belonging to
         // that project, so users do not need a duplicate store assignment.
-        if (app === 'storefront' && scopeType === 'store') {
+        if ((app === 'storefront' || app === 'procurement') && scopeType === 'store') {
             const projectIds = relevant
                 .filter((entry) => entry.scopeType === 'project' && entry.scopeId)
                 .map((entry) => entry.scopeId as string);
@@ -349,6 +361,28 @@ export class ResponsibilitiesService {
         if (allowed !== null && !allowed.includes(scopeId)) {
             throw new ForbiddenException(`You are not assigned to this ${scopeType}`);
         }
+    }
+
+    async assertProcessAction(
+        userId: string,
+        appInput: string,
+        processId: string,
+        action: string,
+        scopeType?: string,
+        scopeId?: string,
+    ) {
+        const app = this.normalizeApp(appInput);
+        const access = (await this.accessForUser(userId)).find((entry) => entry.app === app)!;
+        if (access.unrestricted) return;
+        const candidates = access.assignments.filter((entry) =>
+            (!entry.processId || entry.processId === processId)
+            && (!entry.processId || entry.permissions.includes(action)),
+        );
+        const allowed = candidates.some((entry) => {
+            if (entry.scopeType === 'application') return true;
+            return Boolean(scopeType && scopeId && entry.scopeType === scopeType && entry.scopeId === scopeId);
+        });
+        if (!allowed) throw new ForbiddenException(`You have not been delegated "${action}" responsibility for this process and scope`);
     }
 
     private audit(actor: Actor, action: string, entityId: string, oldValue: any, newValue: any) {

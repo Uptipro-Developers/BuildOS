@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Crown, Plus, ShieldCheck, Trash2, UserRoundCog, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { getUsers, type AppUser as AdminUser } from '../api/admin-extras';
 import {
   createApplicationAssignment, getApplicationAssignments, getApplicationOwners,
   getMyApplicationAccess, getResponsibilityProcesses, getResponsibilityResources,
+  getResponsibilityUsers,
   revokeApplicationAssignment, type ApplicationAssignment, type ApplicationOwner,
-  type DelegatedApp, type ResponsibilityProcess,
+  type DelegatedApp, type ResponsibilityProcess, type ResponsibilityUser,
 } from '../api/responsibilities';
 
 const LABELS: Record<DelegatedApp, string> = { construction: 'Projects', storefront: 'Storefront', procurement: 'Procurement', finance: 'Finance', hr: 'HR' };
@@ -14,7 +14,7 @@ const ACTION_LABELS: Record<string, string> = { view: 'View', create: 'Create', 
 type Resource = { id: string; name: string };
 
 export function ApplicationResponsibilitiesPanel({ app }: { app: DelegatedApp }) {
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [users, setUsers] = useState<ResponsibilityUser[]>([]);
   const [owners, setOwners] = useState<ApplicationOwner[]>([]);
   const [assignments, setAssignments] = useState<ApplicationAssignment[]>([]);
   const [processes, setProcesses] = useState<ResponsibilityProcess[]>([]);
@@ -28,7 +28,7 @@ export function ApplicationResponsibilitiesPanel({ app }: { app: DelegatedApp })
     setLoading(true);
     try {
       const [userRows, ownerRows, assignmentRows, access, processRows] = await Promise.all([
-        getUsers(), getApplicationOwners(app), getApplicationAssignments(app), getMyApplicationAccess(), getResponsibilityProcesses(app),
+        getResponsibilityUsers(app), getApplicationOwners(app), getApplicationAssignments(app), getMyApplicationAccess(), getResponsibilityProcesses(app),
       ]);
       setUsers(userRows.filter((user) => String(user.status ?? '').toLowerCase() !== 'inactive'));
       setOwners(ownerRows); setAssignments(assignmentRows); setProcesses(processRows);

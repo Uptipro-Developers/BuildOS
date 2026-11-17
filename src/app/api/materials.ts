@@ -166,8 +166,13 @@ export const updateStockTransfer = (id: string, data: Partial<StockTransfer>) =>
     apiFetch<StockTransfer>(`/stock-transfers/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 
 // Material Requests
-export const getMaterialRequests = (status?: string) =>
-    apiFetch<MaterialRequest[]>(status ? `/material-requests?status=${status}` : '/material-requests');
+export const getMaterialRequests = (status?: string, consumer?: 'storefront' | 'procurement') => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (consumer) params.set('consumer', consumer);
+    const query = params.toString();
+    return apiFetch<MaterialRequest[]>(`/material-requests${query ? `?${query}` : ''}`);
+};
 export const getMaterialRequest = (id: string) => apiFetch<MaterialRequest>(`/material-requests/${id}`);
 export const createMaterialRequest = (data: Partial<MaterialRequest>) =>
     apiFetch<MaterialRequest>('/material-requests', { method: 'POST', body: JSON.stringify(data) });

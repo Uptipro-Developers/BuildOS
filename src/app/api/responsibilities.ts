@@ -34,6 +34,8 @@ export const getResponsibilityResources = (app: DelegatedApp, scopeType: string)
     apiFetch<Array<{ id: string; name: string }>>(`/responsibilities/apps/${app}/resources/${scopeType}`);
 export const getResponsibilityProcesses = (app: DelegatedApp) =>
     apiFetch<ResponsibilityProcess[]>(`/responsibilities/apps/${app}/processes`);
+export const getResponsibilityUsers = (app: DelegatedApp) =>
+    apiFetch<ResponsibilityUser[]>(`/responsibilities/apps/${app}/users`);
 export const appointApplicationOwner = (app: DelegatedApp, data: { userId: string; canConfigure?: boolean; canAssign?: boolean; validUntil?: string | null }) =>
     apiFetch<ApplicationOwner>(`/responsibilities/apps/${app}/owners`, { method: 'POST', body: JSON.stringify(data) });
 export const revokeApplicationOwner = (id: string) => apiFetch<ApplicationOwner>(`/responsibilities/owners/${id}`, { method: 'DELETE' });
