@@ -2,12 +2,14 @@ import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, 
 import { MaterialsService } from './materials.service';
 import { AdminExtrasService } from '../admin-extras/admin-extras.service';
 import { RequiresProcess } from '../permissions/require-permission.decorator';
+import { ResponsibilitiesService } from '../responsibilities/responsibilities.service';
 
 @Controller()
 export class MaterialsController {
     constructor(
         private readonly svc: MaterialsService,
         private readonly adminExtras: AdminExtrasService,
+        private readonly responsibilities: ResponsibilitiesService,
     ) { }
 
     // ── Materials ──
@@ -36,23 +38,37 @@ export class MaterialsController {
 
     // ── Stores ──
     @Get('stores')
-    getAllStores(@Query('type') type?: string) { return this.svc.findAllStores(type); }
+    async getAllStores(@Query('type') type?: string, @Req() req?: any) {
+        return this.svc.findAllStores(type, await this.storeScope(req, 'p_materials'));
+    }
     @Get('stores/:id')
-    getStore(@Param('id') id: string) { return this.svc.findStore(id); }
+    async getStore(@Param('id') id: string, @Req() req?: any) {
+        await this.assertStoreScope(req, id, 'p_materials'); return this.svc.findStore(id);
+    }
     @Post('stores')
-    createStore(@Body() body: any) { return this.svc.createStore(body); }
+    async createStore(@Body() body: any, @Req() req?: any) {
+        await this.assertStorefrontConfiguration(req); return this.svc.createStore(body);
+    }
     @Put('stores/:id')
-    updateStore(@Param('id') id: string, @Body() body: any) { return this.svc.updateStore(id, body); }
+    async updateStore(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        await this.assertStorefrontConfiguration(req); return this.svc.updateStore(id, body);
+    }
     @Delete('stores/:id')
-    deleteStore(@Param('id') id: string) { return this.svc.deleteStore(id); }
+    async deleteStore(@Param('id') id: string, @Req() req?: any) {
+        await this.assertStorefrontConfiguration(req); return this.svc.deleteStore(id);
+    }
 
     // ── Store Items ──
     @Get('store-items')
-    getAllStoreItems() { return this.svc.findAllStoreItems(); }
+    async getAllStoreItems(@Req() req?: any) { return this.svc.findAllStoreItems(await this.storeScope(req, 'p_materials')); }
     @Get('stores/:storeId/items')
-    getStoreItems(@Param('storeId') storeId: string) { return this.svc.findStoreItems(storeId); }
+    async getStoreItems(@Param('storeId') storeId: string, @Req() req?: any) {
+        await this.assertStoreScope(req, storeId, 'p_materials'); return this.svc.findStoreItems(storeId);
+    }
     @Post('store-items')
-    createStoreItem(@Body() body: any) { return this.svc.createStoreItem(body); }
+    async createStoreItem(@Body() body: any, @Req() req?: any) {
+        await this.assertStoreScope(req, String(body?.storeId ?? ''), 'p_materials'); return this.svc.createStoreItem(body);
+    }
     @Put('store-items/:id')
     updateStoreItem(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
         return this.svc.updateStoreItem(id, body, this.actor(req));
@@ -62,9 +78,14 @@ export class MaterialsController {
 
     // ── Stock Movements ──
     @Get('stock-movements')
-    getAllMovements(@Query('storeId') storeId?: string) { return this.svc.findAllMovements(storeId); }
+    async getAllMovements(@Query('storeId') storeId?: string, @Req() req?: any) {
+        if (storeId) await this.assertStoreScope(req, storeId, 'p_stock_movements');
+        return this.svc.findAllMovements(storeId, await this.storeScope(req, 'p_stock_movements'));
+    }
     @Post('stock-movements')
-    createMovement(@Body() body: any, @Req() req?: any) { return this.svc.createMovement(body, this.actor(req)); }
+    async createMovement(@Body() body: any, @Req() req?: any) {
+        await this.assertStoreScope(req, String(body?.storeId ?? ''), 'p_stock_movements'); return this.svc.createMovement(body, this.actor(req));
+    }
 
     // ── Approval-controlled amendments ──
     @Get('material-amendments')
@@ -89,13 +110,20 @@ export class MaterialsController {
 
     // ── Material Requests ──
     @Get('material-requests')
-    getAllRequests(@Query('status') status?: string) { return this.svc.findAllRequests(status); }
+    async getAllRequests(@Query('status') status?: string, @Query('consumer') consumer?: string, @Req() req?: any) {
+        const scopes = await this.materialRequestScopes(req, consumer);
+        return this.svc.findAllRequests(status, scopes.storeIds, scopes.projectIds);
+    }
     @Get('material-requests/:id')
     getRequest(@Param('id') id: string) { return this.svc.findRequest(id); }
     @Post('material-requests/batch')
-    createRequestBatch(@Body() body: any) { return this.svc.createRequestBatch(body); }
+    async createRequestBatch(@Body() body: any, @Req() req?: any) {
+        await this.assertStoreScope(req, String(body?.storeId ?? ''), 'p_storefront_material_requests'); return this.svc.createRequestBatch(body);
+    }
     @Post('material-requests')
-    createRequest(@Body() body: any) { return this.svc.createRequest(body); }
+    async createRequest(@Body() body: any, @Req() req?: any) {
+        await this.assertStoreScope(req, String(body?.storeId ?? ''), 'p_storefront_material_requests'); return this.svc.createRequest(body);
+    }
     /**
      * Status changes to approved/rejected are checked against the Workflow Approval
      * configuration, and a requester may not decide their own request.
@@ -148,6 +176,34 @@ export class MaterialsController {
             name: user.name ?? user.fullName,
             email: user.email,
         };
+    }
+
+    private userId(req?: any) { return String(req?.user?.sub ?? req?.user?.id ?? ''); }
+    private storeScope(req?: any, processId?: string) {
+        const userId = this.userId(req);
+        return userId ? this.responsibilities.allowedScopeIds(userId, 'storefront', 'store', processId) : Promise.resolve(null);
+    }
+    private assertStoreScope(req: any, storeId: string, processId?: string) {
+        const userId = this.userId(req);
+        return userId ? this.responsibilities.assertScope(userId, 'storefront', 'store', storeId, processId) : Promise.resolve();
+    }
+    private async materialRequestScopes(req?: any, consumer?: string) {
+        const userId = this.userId(req);
+        if (!userId) return { storeIds: null, projectIds: null };
+        const procurement = String(consumer ?? '').toLowerCase() === 'procurement';
+        const app = procurement ? 'procurement' : 'storefront';
+        const processId = procurement ? 'p_material_requests' : 'p_storefront_material_requests';
+        const [storeIds, projectIds] = await Promise.all([
+            this.responsibilities.allowedScopeIds(userId, app, 'store', processId),
+            this.responsibilities.allowedScopeIds(userId, app, 'project', processId),
+        ]);
+        return { storeIds, projectIds };
+    }
+    private async assertStorefrontConfiguration(req: any) {
+        const userId = this.userId(req);
+        if (!userId) return;
+        const access = (await this.responsibilities.accessForUser(userId)).find((entry) => entry.app === 'storefront');
+        if (access?.configured && !access.canConfigure) throw new ForbiddenException('Only the Storefront point person can change store configuration');
     }
 
     // ── Material Returns ──

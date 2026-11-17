@@ -269,9 +269,9 @@ function UserPermPane({
                 </button>
 
                 {isExpanded && (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-auto max-h-[55vh]">
                     <table className="w-full text-xs">
-                      <thead className="bg-gray-50 border-y border-gray-100">
+                      <thead className="bg-gray-50 border-y border-gray-100 sticky top-0 z-10">
                         <tr>
                           <th className="text-left px-6 py-2 text-gray-500 font-medium w-48">
                             Process
@@ -644,9 +644,9 @@ export function UserPermissionsPage() {
       </div>
 
       {/* User table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-auto max-h-[70vh]">
         <table className="min-w-[720px] w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
             <tr>
               <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 User

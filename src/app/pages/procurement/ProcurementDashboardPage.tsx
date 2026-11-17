@@ -53,7 +53,7 @@ export function ProcurementDashboardPage() {
     getMaterials()
       .then(setMaterials)
       .catch(() => {});
-    getMaterialRequests()
+    getMaterialRequests(undefined, "procurement")
       .then(setRequests)
       .catch(() => {});
   }, []);

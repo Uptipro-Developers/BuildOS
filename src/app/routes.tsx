@@ -4,6 +4,7 @@ import { guardLazyImport } from "../utils/staleChunkReload";
 import { RootLayout } from "./layouts/RootLayout";
 import { AuthLayout } from "./layouts/AuthLayout";
 import { AppLayout } from "./layouts/AppLayout";
+import { ApplicationSettingsGuard } from "./components/ApplicationSettingsGuard";
 
 // Auth Pages
 import { SignupPage } from "./pages/auth/SignupPage";
@@ -281,7 +282,7 @@ export const router = createBrowserRouter([
               { path: "resource-hub", Component: ResourceHubPage },
               { path: "resource-planning", Component: ResourcePlanningPage },
               { path: "approvals", Component: ConstructionApprovalsPage },
-              { path: "settings", Component: SettingsPage },
+              { path: "settings", element: <ApplicationSettingsGuard app="construction"><SettingsPage /></ApplicationSettingsGuard> },
               { path: "disbursements", Component: DisbursementsPage },
               { path: "communications", Component: CommunicationLogPage },
               {
@@ -335,7 +336,7 @@ export const router = createBrowserRouter([
               { path: "general-ledger", Component: GeneralLedgerPage },
               { path: "ledger", Component: TransactionsLedgerPage },
               { path: "reports", Component: FinanceReportsPage },
-              { path: "config", Component: FinanceConfigPage },
+              { path: "config", element: <ApplicationSettingsGuard app="finance"><FinanceConfigPage /></ApplicationSettingsGuard> },
               { path: "tasks", Component: FinanceTasksPage },
               { path: "my-tasks", Component: FinanceMyTasksPage },
               { path: "process-mapping", Component: ProcessMappingPage },
@@ -374,7 +375,7 @@ export const router = createBrowserRouter([
                 path: "supplier-compliance",
                 Component: SupplierCompliancePage,
               },
-              { path: "config", Component: ProcurementConfigPage },
+              { path: "config", element: <ApplicationSettingsGuard app="procurement"><ProcurementConfigPage /></ApplicationSettingsGuard> },
             ],
           },
           {
@@ -403,7 +404,7 @@ export const router = createBrowserRouter([
               { path: "leave-type-setup", Component: LeaveTypeSetupPage },
               { path: "claim-type-setup", Component: ClaimTypeSetupPage },
               { path: "base-calendar", Component: BaseCalendarPage },
-              { path: "settings", Component: HRSettingsPage },
+              { path: "settings", element: <ApplicationSettingsGuard app="hr"><HRSettingsPage /></ApplicationSettingsGuard> },
               { path: "approvals", Component: HRApprovalsPage },
               { path: "hr-tasks", Component: HRTasksPage },
               { path: "my-tasks", Component: HRMyTasksPage },
@@ -478,7 +479,7 @@ export const router = createBrowserRouter([
               { path: "reports", Component: StorefrontReportsPage },
               { path: "tasks", Component: StorefrontTasksPage },
               { path: "my-tasks", Component: StorefrontMyTasksPage },
-              { path: "config", Component: StorefrontConfigPage },
+              { path: "config", element: <ApplicationSettingsGuard app="storefront"><StorefrontConfigPage /></ApplicationSettingsGuard> },
             ],
           },
         ],

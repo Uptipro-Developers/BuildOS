@@ -828,9 +828,9 @@ export function RolesPage() {
         <p className="text-sm text-gray-500">Loading process catalog...</p>
       )}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto" ref={matrixRef}>
+        <div className="overflow-auto max-h-[70vh]" ref={matrixRef}>
           <table className="min-w-full text-sm border-collapse">
-            <thead>
+            <thead className="sticky top-0 z-30">
               {/* Row 1: App group headers */}
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th
@@ -1214,17 +1214,12 @@ export function RolesPage() {
               procurement: false,
               storefront: false,
               admin: false,
-              ess: true,
+              ess: false,
             };
             const permissions = Object.fromEntries(
               processes.map((p) => [p.id, emptyPerm()]),
             );
-            const navAccess = navPartial([
-              "ess_dashboard",
-              "ess_requests",
-              "ess_submit",
-              "ess_profile",
-            ]);
+            const navAccess: Record<string, boolean> = {};
 
             const created = await createAppRole({
               name,

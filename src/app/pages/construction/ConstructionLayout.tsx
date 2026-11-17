@@ -2,6 +2,7 @@ import { Outlet } from "react-router";
 import { AppHeader } from "../../components/AppHeader";
 import { CollapsibleSidebar } from "../../components/CollapsibleSidebar";
 import type { SidebarSection } from "../../components/CollapsibleSidebar";
+import { useApplicationResponsibility } from "../../utils/useApplicationResponsibility";
 import {
   LayoutDashboard, FolderKanban, Users, BarChart3, Settings,
   Calendar, FileText, Truck, AlertTriangle, GitCompare,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 
 export function ConstructionLayout() {
+  const { canConfigure } = useApplicationResponsibility("construction");
 
   const baseSections: SidebarSection[] = [
     {
@@ -74,7 +76,7 @@ export function ConstructionLayout() {
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
           <CollapsibleSidebar
-            sections={baseSections}
+            sections={canConfigure ? baseSections : baseSections.filter((section) => section.label !== "Settings")}
             activeClass="bg-amber-50 text-amber-700 font-medium [&_svg]:text-amber-600"
             baseClass="text-gray-600 hover:bg-gray-50 hover:text-gray-900 [&_svg]:text-gray-400"
           />

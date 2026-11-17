@@ -41,6 +41,7 @@ import {
 } from "../../api/construction-settings";
 import { useRoles } from "../../contexts/RolesContext";
 import { NumberingConfigPanel } from "../../components/NumberingConfigPanel";
+import { ApplicationResponsibilitiesPanel } from "../../components/ApplicationResponsibilitiesPanel";
 
 const defaultTradeTypes = [
   "Masonry",
@@ -137,6 +138,7 @@ const TABS = [
   "resources",
   "reports",
   "numbering",
+  "people",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -147,6 +149,7 @@ const TAB_LABELS: Record<Tab, string> = {
   resources: "Resources",
   reports: "Reports",
   numbering: "Numbering",
+  people: "People & Responsibilities",
 };
 
 /**
@@ -1613,6 +1616,7 @@ export function SettingsPage() {
         {tab === "numbering" && (
           <NumberingConfigPanel app="construction" accent="orange" />
         )}
+        {tab === "people" && <ApplicationResponsibilitiesPanel app="construction" />}
 
         <div className="flex justify-end">
           <button

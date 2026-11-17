@@ -830,7 +830,7 @@ export function MaterialRequestsPage() {
 
   /** Reloads the list, and hands the caller the rows it just stored. */
   function loadRequests() {
-    return getMaterialRequests()
+    return getMaterialRequests(undefined, "procurement")
       .then((data) => {
         const grouped = groupApiRequests(data);
         setReqList(grouped);

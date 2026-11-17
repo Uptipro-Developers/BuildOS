@@ -461,10 +461,10 @@ export function MaterialsBuilder({
                                         {showReorderLevel && (it.reorderLevel.trim() === "" ||
                                             !Number.isFinite(Number(it.reorderLevel)) ||
                                             Number(it.reorderLevel) < 0) && (
-                                            <p className="text-[11px] text-red-500">
-                                                Reorder threshold is required at item/SKU level.
-                                            </p>
-                                        )}
+                                                <p className="text-[11px] text-red-500">
+                                                    Reorder threshold is required at item/SKU level.
+                                                </p>
+                                            )}
                                         <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
                                             <input
                                                 value={it.aliases}
@@ -500,74 +500,75 @@ export function MaterialsBuilder({
                                             const customKind = d.customKind ?? (d.kind === "Custom" ? "" : d.kind);
                                             const unitOptions = unitOptionsFor(d);
                                             return (
-                                            <div key={d.key} className="flex flex-wrap items-center gap-2">
-                                                <select
-                                                    value={selectedKind}
-                                                    aria-label="Dimension type"
-                                                    onChange={(e) => {
-                                                        const kind = e.target.value;
-                                                        updateDimensionRow(m.key, it.key, d.key, {
-                                                            kind,
-                                                            customKind: kind === "Custom" ? "" : null,
-                                                            unit: "",
-                                                        });
-                                                    }}
-                                                    className="w-32 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                                                >
-                                                    <option value="">— type —</option>
-                                                    {dimensionKinds.map((k) => (
-                                                        <option key={k} value={k}>{k}</option>
-                                                    ))}
-                                                </select>
-                                                {customDimension && (
-                                                    <input
-                                                        value={customKind}
-                                                        onChange={(e) =>
+                                                <div key={d.key} className="flex flex-wrap items-center gap-2">
+                                                    <select
+                                                        value={selectedKind}
+                                                        aria-label="Dimension type"
+                                                        onChange={(e) => {
+                                                            const kind = e.target.value;
                                                             updateDimensionRow(m.key, it.key, d.key, {
-                                                                kind: "Custom",
-                                                                customKind: e.target.value,
-                                                            })
-                                                        }
-                                                        placeholder="Custom dimension name"
-                                                        aria-label="Custom dimension name"
-                                                        className="w-44 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                                                    />
-                                                )}
-                                                <input
-                                                    type="number"
-                                                    value={d.value}
-                                                    onChange={(e) =>
-                                                        updateDimensionRow(m.key, it.key, d.key, { value: e.target.value })
-                                                    }
-                                                    placeholder="Value"
-                                                    className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                                                />
-                                                <select
-                                                    value={d.unit}
-                                                    aria-label="Dimension unit"
-                                                    onChange={(e) =>
-                                                        updateDimensionRow(m.key, it.key, d.key, { unit: e.target.value })
-                                                    }
-                                                    className="w-28 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                                                >
-                                                    <option value="">— unit —</option>
-                                                    {d.unit && !unitOptions.includes(d.unit) && (
-                                                        <option value={d.unit}>{d.unit}</option>
+                                                                kind,
+                                                                customKind: kind === "Custom" ? "" : null,
+                                                                unit: "",
+                                                            });
+                                                        }}
+                                                        className="w-32 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                                    >
+                                                        <option value="">— type —</option>
+                                                        {dimensionKinds.map((k) => (
+                                                            <option key={k} value={k}>{k}</option>
+                                                        ))}
+                                                    </select>
+                                                    {customDimension && (
+                                                        <input
+                                                            value={customKind}
+                                                            onChange={(e) =>
+                                                                updateDimensionRow(m.key, it.key, d.key, {
+                                                                    kind: "Custom",
+                                                                    customKind: e.target.value,
+                                                                })
+                                                            }
+                                                            placeholder="Custom dimension name"
+                                                            aria-label="Custom dimension name"
+                                                            className="w-44 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                                        />
                                                     )}
-                                                    {unitOptions.map((u) => (
-                                                        <option key={u} value={u}>{u}</option>
-                                                    ))}
-                                                </select>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeDimension(m.key, it.key, d.key)}
-                                                    title="Remove dimension"
-                                                    className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
-                                                >
-                                                    <X className="w-3.5 h-3.5" />
-                                                </button>
-                                            </div>
-                                        )})}
+                                                    <input
+                                                        type="number"
+                                                        value={d.value}
+                                                        onChange={(e) =>
+                                                            updateDimensionRow(m.key, it.key, d.key, { value: e.target.value })
+                                                        }
+                                                        placeholder="Value"
+                                                        className="w-24 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                                    />
+                                                    <select
+                                                        value={d.unit}
+                                                        aria-label="Dimension unit"
+                                                        onChange={(e) =>
+                                                            updateDimensionRow(m.key, it.key, d.key, { unit: e.target.value })
+                                                        }
+                                                        className="w-28 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                                    >
+                                                        <option value="">— unit —</option>
+                                                        {d.unit && !unitOptions.includes(d.unit) && (
+                                                            <option value={d.unit}>{d.unit}</option>
+                                                        )}
+                                                        {unitOptions.map((u) => (
+                                                            <option key={u} value={u}>{u}</option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeDimension(m.key, it.key, d.key)}
+                                                        title="Remove dimension"
+                                                        className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            )
+                                        })}
                                         {unitsLoadFailed && (
                                             <p className="text-[11px] text-red-500">
                                                 Units of measurement could not be loaded from Storefront Config.

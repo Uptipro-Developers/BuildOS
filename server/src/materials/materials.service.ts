@@ -105,9 +105,9 @@ export class MaterialsService {
     }
 
     // ── Stores ──
-    async findAllStores(type?: string) {
+    async findAllStores(type?: string, storeIds?: string[] | null) {
         const stores = await this.prisma.store.findMany({
-            where: type ? { type } : {},
+            where: { ...(type ? { type } : {}), ...(storeIds ? { id: { in: storeIds } } : {}) },
             include: { storeItems: true },
             orderBy: { name: 'asc' },
         });
@@ -189,8 +189,9 @@ export class MaterialsService {
     }
 
     // ── Store Items ──
-    async findAllStoreItems() {
+    async findAllStoreItems(storeIds?: string[] | null) {
         const items = await this.prisma.storeItem.findMany({
+            where: storeIds ? { storeId: { in: storeIds } } : {},
             orderBy: { materialName: 'asc' },
         });
         return this.withEffectiveThresholds(items);
@@ -319,9 +320,9 @@ export class MaterialsService {
     }
 
     // ── Stock Movements ──
-    findAllMovements(storeId?: string) {
+    findAllMovements(storeId?: string, storeIds?: string[] | null) {
         return this.prisma.stockMovement.findMany({
-            where: storeId ? { storeId } : {},
+            where: storeId ? { storeId } : storeIds ? { storeId: { in: storeIds } } : {},
             orderBy: { date: 'desc' },
         });
     }
@@ -558,9 +559,17 @@ export class MaterialsService {
     }
 
     // ── Material Requests ──
-    findAllRequests(status?: string) {
+    findAllRequests(status?: string, storeIds?: string[] | null, projectIds?: string[] | null) {
+        const scoped = storeIds !== null && storeIds !== undefined || projectIds !== null && projectIds !== undefined;
+        const scopeFilters = [
+            ...(storeIds?.length ? [{ storeId: { in: storeIds } }] : []),
+            ...(projectIds?.length ? [{ projectId: { in: projectIds } }] : []),
+        ];
         return this.prisma.materialRequest.findMany({
-            where: status ? { status } : {},
+            where: {
+                ...(status ? { status } : {}),
+                ...(scoped ? { OR: scopeFilters.length ? scopeFilters : [{ id: { in: [] } }] } : {}),
+            },
             orderBy: { requestDate: 'desc' },
         });
     }
