@@ -25,7 +25,7 @@ type NotificationRule = {
  * Recipient groups the dispatcher resolves. Anything else is treated as a role
  * name or a list of email addresses, which the field still accepts.
  */
-const RECIPIENT_GROUPS = ["All Users", "Administrators", "The requester"];
+const RECIPIENT_GROUPS = ["All Users", "Administrators", "The requester", "Store Primary Contact", "Store Manager"];
 
 export function NotificationsPage() {
   // The emails the system actually sends, from Admin › Email Configuration.

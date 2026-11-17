@@ -548,14 +548,11 @@ function ConfigureWorkflowModal({
   const hasSelectableProcess =
     !!existing ||
     availableProcesses.some((p) => !configuredProcessIds.has(p.id));
-  const [selectedProcess, setSelectedProcess] = useState(
-    existingProcess?.label ??
-    existing?.process ??
-    firstSelectableProcess?.label ??
+  const [selectedProcessId, setSelectedProcessId] = useState(
+    existingProcess?.id ??
+    existing?.processId ??
+    firstSelectableProcess?.id ??
     "",
-  );
-  const [selectedApp, setSelectedApp] = useState(
-    existingProcess?.app ?? existing?.app ?? firstSelectableProcess?.app ?? "",
   );
   const [wfType, setWfType] = useState<ApprovalType>(
     existing?.workflowType ?? "single",
@@ -590,7 +587,7 @@ function ConfigureWorkflowModal({
 
   const handleSave = async () => {
     const selectedCatalogProcess = availableProcesses.find(
-      (p) => p.label === selectedProcess && p.app === selectedApp,
+      (p) => p.id === selectedProcessId,
     );
     if (!selectedCatalogProcess) {
       setFormError("Please select a valid process.");
@@ -630,8 +627,8 @@ function ConfigureWorkflowModal({
       await onSave({
         id: existing?.id ?? `wf_${Date.now()}`,
         processId: selectedCatalogProcess.id,
-        process: selectedProcess,
-        app: selectedApp,
+        process: selectedCatalogProcess.label,
+        app: selectedCatalogProcess.app,
         workflowType: wfType,
         approver: wfType === "single" ? approver : undefined,
         groupApprovers: wfType === "group" ? groupApprovers : undefined,
@@ -682,13 +679,9 @@ function ConfigureWorkflowModal({
               Process
             </label>
             <select
-              value={selectedProcess}
+              value={selectedProcessId}
               onChange={(e) => {
-                const proc = availableProcesses.find(
-                  (p) => p.label === e.target.value,
-                );
-                setSelectedProcess(e.target.value);
-                setSelectedApp(proc?.app ?? "");
+                setSelectedProcessId(e.target.value);
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
@@ -699,7 +692,7 @@ function ConfigureWorkflowModal({
                 return (
                   <option
                     key={p.id}
-                    value={p.label}
+                    value={p.id}
                     disabled={alreadyConfigured}
                   >
                     [{p.app}] {p.label}

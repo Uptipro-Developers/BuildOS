@@ -79,9 +79,9 @@ const define = (
 
 export const DEFAULT_PROCESS_CATALOG: ProcessCatalogItem[] = [
     // ── Procurement ──────────────────────────────────────────────────────────
-    define('p_material_requests', 'Material Requests', 'procurement',
-        'Requisitions for materials from store or for procurement',
-        FULL, 'materials', '/apps/procurement/material-requests'),
+    define('p_material_requests', 'Material Request Approval', 'procurement',
+        'Approval of material requests forwarded to Procurement by Storefront',
+        ['view', 'edit', 'approve'], 'materials', '/apps/procurement/approvals'),
     define('p_purchase_requests', 'Purchase Requests', 'procurement',
         'Requisitions to procure materials or services',
         FULL, 'procurement-requests', '/apps/procurement/purchase-requests'),
@@ -229,15 +229,14 @@ export const DEFAULT_PROCESS_CATALOG: ProcessCatalogItem[] = [
     // ── Storefront ───────────────────────────────────────────────────────────
     define('p_materials', 'Materials', 'storefront',
         'The material catalogue and stock levels',
-        MANAGED, 'materials', '/apps/storefront/all-materials'),
+        FULL, 'materials', '/apps/storefront/all-materials'),
+    define('p_storefront_material_requests', 'Material Request Approval', 'storefront',
+        'Approval and routing of material requests submitted through ESS',
+        ['view', 'edit', 'approve'], 'materials', '/apps/storefront/approvals'),
     define('p_stock_movements', 'Stock Movements', 'storefront',
         'Transfers, adjustments and issues between stores and sites',
         // Movements are the stock audit trail: recorded and authorised, not edited.
         POSTED, 'materials', '/apps/storefront/stock-movement'),
-    define('p_store_requests', 'Incoming Store Requests', 'storefront',
-        'Requests from sites for materials to be issued',
-        // Raised elsewhere, so there is nothing to create here.
-        ['view', 'edit', 'approve'], 'materials', '/apps/storefront/incoming-requests'),
     define('p_storefront_tasks', 'Store Tasks', 'storefront',
         'Tasks raised and assigned within the Storefront',
         MANAGED, 'tasks', '/apps/storefront/tasks'),

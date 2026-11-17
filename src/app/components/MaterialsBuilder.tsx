@@ -7,9 +7,8 @@ import {
 } from "../api/admin-extras";
 
 /**
- * Shared "Material Name -> item -> dimension" builder — every dimension of
- * every item becomes its own flat Material row on save (see
- * admin-extras.service.ts's buildMaterialCreateInput). Used by both
+ * Shared "Material Name -> item -> optional dimensions" builder. Each item
+ * becomes one catalogue material and its dimensions stay grouped beneath it. Used by both
  * Storefront Config's Add/Edit Category modal and All Materials' Add
  * Material modal (scoped to an already-selected category), so the two stay
  * in lockstep instead of drifting apart.
@@ -34,9 +33,11 @@ export interface ItemFormRow {
     key: string;
     name: string;
     sku: string;
-    /** Applied to every dimension/SKU row created for this item. */
+    aliases: string;
+    imageUrl: string;
+    /** Applied to the item-level material record. */
     reorderLevel: string;
-    /** No unit of its own — every dimension carries its own unit, since that's what a saved row's own unit comes from. Needs at least one dimension to save anything. */
+    /** Optional variants. Materials that do not need dimensions may leave this empty. */
     dimensions: DimensionFormRow[];
 }
 export interface MaterialFormRow {
@@ -50,7 +51,7 @@ export function blankDimension(): DimensionFormRow {
     return { key: nextCatalogFormKey(), kind: "", customKind: null, value: "", unit: "" };
 }
 export function blankItem(): ItemFormRow {
-    return { key: nextCatalogFormKey(), name: "", sku: "", reorderLevel: "", dimensions: [blankDimension()] };
+    return { key: nextCatalogFormKey(), name: "", sku: "", aliases: "", imageUrl: "", reorderLevel: "", dimensions: [] };
 }
 export function blankMaterial(): MaterialFormRow {
     return { key: nextCatalogFormKey(), name: "", classification: "Consumable", items: [blankItem()] };
@@ -99,9 +100,6 @@ export function findIncompleteMaterialRow(
             )) {
                 return `"${itemName}" under "${materialName}" needs a valid reorder threshold.`;
             }
-            if (it.dimensions.length === 0) {
-                return `"${itemName}" under "${materialName}" needs at least one dimension before it can be saved.`;
-            }
             for (const d of it.dimensions) {
                 if (!isDimensionComplete(d)) {
                     return `"${itemName}" under "${materialName}" has a dimension missing a value or a unit.`;
@@ -135,7 +133,6 @@ export function isMaterialsComplete(
                 !Number.isFinite(Number(it.reorderLevel)) ||
                 Number(it.reorderLevel) < 0
             )) return false;
-            if (it.dimensions.length === 0) return false;
             return it.dimensions.every(isDimensionComplete);
         });
     });
@@ -152,7 +149,8 @@ export function materialsToPayload(materials: MaterialFormRow[]): MaterialCatalo
                 .filter((it) => it.name.trim())
                 .map((it) => ({
                     name: it.name.trim(),
-                    sku: it.sku.trim() || undefined,
+                    aliases: it.aliases.split(",").map((alias) => alias.trim()).filter(Boolean),
+                    imageUrl: it.imageUrl || undefined,
                     ...(it.reorderLevel.trim() !== ""
                         ? { reorderLevel: Number(it.reorderLevel) }
                         : {}),
@@ -172,11 +170,16 @@ export function MaterialsBuilder({
     onChange,
     title = "Materials under this category",
     showReorderLevel = false,
+    materialOnly = false,
+    skuPreview,
 }: {
     materials: MaterialFormRow[];
     onChange: (materials: MaterialFormRow[]) => void;
     title?: string;
     showReorderLevel?: boolean;
+    /** Used by All Materials: the material name is also the canonical item name. */
+    materialOnly?: boolean;
+    skuPreview?: (materialIndex: number) => string;
 }) {
     const [configuredUnits, setConfiguredUnits] = useState<UnitOfMeasurement[]>([]);
     const [unitsLoadFailed, setUnitsLoadFailed] = useState(false);
@@ -310,6 +313,15 @@ export function MaterialsBuilder({
         );
     }
 
+    function selectImage(materialKey: string, itemKey: string, file?: File) {
+        if (!file) return;
+        if (!file.type.startsWith("image/")) return;
+        if (file.size > 2 * 1024 * 1024) return;
+        const reader = new FileReader();
+        reader.onload = () => updateItemRow(materialKey, itemKey, { imageUrl: String(reader.result ?? "") });
+        reader.readAsDataURL(file);
+    }
+
     return (
         <div className="border border-gray-200 rounded-xl p-4">
             <div className="flex items-center justify-between mb-1">
@@ -328,12 +340,12 @@ export function MaterialsBuilder({
             <p className="text-xs text-gray-500 mb-3">
                 Each material is classified Consumable (used up) or Reusable
                 (returned to store), and can have as many items (variants)
-                as needed — each item needs at least one dimension, since
-                that's what its stock is tracked against.
+                as needed. Dimensions are optional and remain variants of
+                the same item and SKU.
             </p>
 
             <div className="space-y-3">
-                {materials.map((m) => (
+                {materials.map((m, materialIndex) => (
                     <div key={m.key} className="border border-gray-200 rounded-xl p-4 space-y-3 bg-gray-50/60">
                         <div className="flex items-end gap-3">
                             <div className="flex-1">
@@ -350,6 +362,16 @@ export function MaterialsBuilder({
                                     <p className="text-[11px] text-red-500 mt-1">Material name is required.</p>
                                 )}
                             </div>
+                            {materialOnly && skuPreview && (
+                                <div className="w-44">
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Auto-generated SKU</label>
+                                    <input
+                                        value={skuPreview(materialIndex)}
+                                        disabled
+                                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm font-mono bg-gray-50 text-gray-600"
+                                    />
+                                </div>
+                            )}
                             <div className="w-40">
                                 <label className="block text-xs font-medium text-gray-600 mb-1">
                                     Classification
@@ -367,13 +389,13 @@ export function MaterialsBuilder({
                                     <option value="Reusable">Reusable</option>
                                 </select>
                             </div>
-                            <button
+                            {!materialOnly && <button
                                 type="button"
                                 onClick={() => addItem(m.key)}
                                 className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap py-2"
                             >
                                 <Plus className="w-3.5 h-3.5" /> Item
-                            </button>
+                            </button>}
                             <button
                                 type="button"
                                 onClick={() => removeMaterial(m.key)}
@@ -389,22 +411,20 @@ export function MaterialsBuilder({
                                 {m.items.map((it) => (
                                     <div key={it.key} className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">
-                                            <input
+                                            {!materialOnly && <input
                                                 value={it.name}
                                                 onChange={(e) =>
                                                     updateItemRow(m.key, it.key, { name: e.target.value })
                                                 }
                                                 placeholder="Item name (e.g. Wall)"
                                                 className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                                            />
-                                            <input
-                                                value={it.sku}
-                                                onChange={(e) =>
-                                                    updateItemRow(m.key, it.key, { sku: e.target.value })
-                                                }
-                                                placeholder="SKU (e.g. GT-W-600600)"
-                                                className="flex-1 min-w-[140px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-                                            />
+                                            />}
+                                            {!materialOnly && <input
+                                                value="Auto-generated on save"
+                                                disabled
+                                                aria-label="SKU is auto-generated from the category sequence"
+                                                className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-gray-50 text-gray-500"
+                                            />}
                                             {showReorderLevel && (
                                                 <input
                                                     type="number"
@@ -423,7 +443,7 @@ export function MaterialsBuilder({
                                                 onClick={() => addDimension(m.key, it.key)}
                                                 className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap shrink-0"
                                             >
-                                                <Plus className="w-3.5 h-3.5" /> Dimension
+                                                <Plus className="w-3.5 h-3.5" /> Optional dimension
                                             </button>
                                             <button
                                                 type="button"
@@ -435,7 +455,7 @@ export function MaterialsBuilder({
                                             </button>
                                         </div>
 
-                                        {!it.name.trim() && (
+                                        {!materialOnly && !it.name.trim() && (
                                             <p className="text-[11px] text-red-500">Item name is required.</p>
                                         )}
                                         {showReorderLevel && (it.reorderLevel.trim() === "" ||
@@ -445,10 +465,28 @@ export function MaterialsBuilder({
                                                 Reorder threshold is required at item/SKU level.
                                             </p>
                                         )}
-                                        {it.dimensions.length === 0 && (
-                                            <p className="text-[11px] text-red-500">
-                                                Needs at least one dimension.
-                                            </p>
+                                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
+                                            <input
+                                                value={it.aliases}
+                                                onChange={(e) => updateItemRow(m.key, it.key, { aliases: e.target.value })}
+                                                placeholder="Search aliases, comma separated (e.g. Y12 rebar, Rebar Y12)"
+                                                className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                                            />
+                                            <label className="cursor-pointer text-xs font-medium text-teal-700 border border-teal-200 rounded-lg px-3 py-1.5 hover:bg-teal-50">
+                                                {it.imageUrl ? "Change photo" : "Add photo"}
+                                                <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                    onChange={(e) => selectImage(m.key, it.key, e.target.files?.[0])}
+                                                />
+                                            </label>
+                                        </div>
+                                        {it.imageUrl && (
+                                            <div className="flex items-center gap-2">
+                                                <img src={it.imageUrl} alt="Material preview" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                                                <button type="button" onClick={() => updateItemRow(m.key, it.key, { imageUrl: "" })} className="text-xs text-red-600 hover:underline">Remove photo</button>
+                                            </div>
                                         )}
                                         {it.dimensions.length > 0 &&
                                             it.dimensions.some((d) => !isDimensionComplete(d)) && (

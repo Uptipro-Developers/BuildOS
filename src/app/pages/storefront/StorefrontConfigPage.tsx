@@ -15,6 +15,7 @@ import {
   Link2,
   FolderOpen,
   Hash,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -1193,9 +1194,9 @@ function StockThresholdsPanel() {
                   <option value=" units">Absolute quantity (units)</option>
                 </select>
                 <p className="mt-1 text-[11px] text-gray-400">
-                  A percentage is taken of each item's own reorder level; an
-                  absolute threshold is compared to the quantity on hand. Items
-                  with no reorder level fall back to it as the low-stock line.
+                  A percentage is taken from each store item's recorded opening
+                  quantity. An absolute threshold is compared directly to the
+                  quantity on hand. Material-specific overrides take priority.
                 </p>
               </div>
             </div>
@@ -1580,7 +1581,7 @@ function MaterialCategoriesPanel() {
   const [editing, setEditing] = useState<MaterialCategoryRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MaterialCategoryRecord | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", description: "", color: "teal" });
+  const [form, setForm] = useState({ name: "", description: "", color: "teal", skuPrefix: "", skuStart: "1" });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -1598,13 +1599,13 @@ function MaterialCategoriesPanel() {
 
   function openAdd() {
     setEditing(null);
-    setForm({ name: "", description: "", color: "teal" });
+    setForm({ name: "", description: "", color: "teal", skuPrefix: "", skuStart: "1" });
     setShowModal(true);
   }
 
   function openEdit(c: MaterialCategoryRecord) {
     setEditing(c);
-    setForm({ name: c.name, description: c.description || "", color: c.color });
+    setForm({ name: c.name, description: c.description || "", color: c.color, skuPrefix: c.skuPrefix, skuStart: String(c.skuStart) });
     setShowModal(true);
   }
 
@@ -1627,6 +1628,8 @@ function MaterialCategoriesPanel() {
         name: trimmedName,
         description: form.description.trim(),
         color: form.color,
+        skuPrefix: form.skuPrefix.trim(),
+        skuStart: Math.max(1, Number(form.skuStart) || 1),
       };
       console.log(
         `[MaterialCategory:save] submitting ${editing ? "update" : "create"} payload`,
@@ -1709,6 +1712,7 @@ function MaterialCategoriesPanel() {
               <th className="px-4 py-3 text-left font-medium">Category Name</th>
               <th className="px-4 py-3 text-left font-medium">Description</th>
               <th className="px-4 py-3 text-left font-medium">Materials</th>
+              <th className="px-4 py-3 text-left font-medium">SKU Sequence</th>
               <th className="px-4 py-3 text-left font-medium">Colour</th>
               <th className="px-4 py-3 text-left font-medium w-20"></th>
             </tr>
@@ -1739,6 +1743,9 @@ function MaterialCategoriesPanel() {
                         {c.materials.length} material{c.materials.length === 1 ? "" : "s"}
                       </div>
                     </td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap font-mono text-xs">
+                      {c.skuPrefix}{String(c.skuNext).padStart(Math.max(3, String(c.skuStart).length), "0")}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls.bg} ${cls.text}`}
@@ -1768,7 +1775,7 @@ function MaterialCategoriesPanel() {
                   </tr>
                   {isExpanded && (
                     <tr>
-                      <td colSpan={5} className="bg-gray-50 px-4 py-4">
+                      <td colSpan={6} className="bg-gray-50 px-4 py-4">
                         {c.materials.length === 0 ? (
                           <p className="text-xs text-gray-400 italic">No materials added yet.</p>
                         ) : (
@@ -1853,6 +1860,30 @@ function MaterialCategoriesPanel() {
                   placeholder="Brief description of materials in this category"
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 resize-none"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">SKU Prefix</label>
+                  <input
+                    value={form.skuPrefix}
+                    onChange={(e) => setForm((p) => ({ ...p, skuPrefix: e.target.value.toUpperCase() }))}
+                    placeholder="Auto from category, e.g. ELE-"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm uppercase outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Starting Number</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.skuStart}
+                    onChange={(e) => setForm((p) => ({ ...p, skuStart: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <p className="col-span-2 text-xs text-gray-500">
+                  New materials receive the next SKU automatically. Preview: <span className="font-mono text-gray-700">{(form.skuPrefix.trim().toUpperCase() || "AUTO-")}{String(Math.max(1, Number(form.skuStart) || 1)).padStart(3, "0")}</span>
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-2">
@@ -1942,10 +1973,10 @@ export function StorefrontConfigPage() {
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const [tab, setTab] = useState<
-    "levels" | "stores" | "units" | "categories" | "numbering"
+    "levels" | "stores" | "thresholds" | "units" | "categories" | "numbering"
   >(() =>
     (
-      ["levels", "stores", "units", "categories", "numbering"] as const
+      ["levels", "stores", "thresholds", "units", "categories", "numbering"] as const
     ).includes(requestedTab as any)
       ? (requestedTab as "stores")
       : "levels",
@@ -1972,6 +2003,7 @@ export function StorefrontConfigPage() {
         {([
           ["levels", "Store Levels", <Layers key="l" className="w-4 h-4" />],
           ["stores", "Stores", <Store key="st" className="w-4 h-4" />],
+          ["thresholds", "Stock Thresholds", <AlertTriangle key="th" className="w-4 h-4" />],
           ["units", "Units of Measurement", <Ruler key="r" className="w-4 h-4" />],
           ["categories", "Material Categories", <Tag key="t" className="w-4 h-4" />],
           ["numbering", "Module Numbering", <Hash key="n" className="w-4 h-4" />],
@@ -1985,6 +2017,7 @@ export function StorefrontConfigPage() {
 
       {tab === "levels" && <StoreLevelsPanel />}
       {tab === "stores" && <StoresPanel />}
+      {tab === "thresholds" && <StockThresholdsPanel />}
       {tab === "units" && <UnitsOfMeasurementPanel />}
       {tab === "categories" && <MaterialCategoriesPanel />}
       {/* Shared panel. The local copy filtered with `cfg.module.match(/^Storefront/)`

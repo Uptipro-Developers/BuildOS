@@ -62,6 +62,30 @@ export const NOTIFICATION_EVENTS: NotificationEventDef[] = [
         app: 'procurement',
         description: 'A purchase order has been created.',
     },
+    {
+        key: 'stock.low',
+        label: 'Low stock',
+        app: 'storefront',
+        description: 'A material has crossed its low-stock threshold in a store.',
+    },
+    {
+        key: 'stock.out',
+        label: 'Out of stock',
+        app: 'storefront',
+        description: 'A material has crossed its out-of-stock threshold in a store.',
+    },
+    {
+        key: 'stock.restored',
+        label: 'Stock restored',
+        app: 'storefront',
+        description: 'A low or out-of-stock material has returned to an in-stock level.',
+    },
+    {
+        key: 'material-amendment.submitted',
+        label: 'Material amendment submitted',
+        app: 'storefront',
+        description: 'A change to an established material or store item needs approval.',
+    },
 ];
 
 export const NOTIFICATION_EVENT_KEYS = NOTIFICATION_EVENTS.map((e) => e.key);
@@ -71,4 +95,6 @@ export const NOTIFICATION_RECIPIENT_GROUPS = [
     'All Users',
     'Administrators',
     'The requester',
+    'Store Primary Contact',
+    'Store Manager',
 ] as const;

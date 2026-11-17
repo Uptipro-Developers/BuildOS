@@ -6,8 +6,8 @@ import { AdminExtrasService } from './admin-extras.service';
  * Goods Receipt/Stock Movement already use — a row created here is real
  * inventory, not disposable catalog-only data. There is no Type table
  * underneath any more: the builder groups input as Material Name → item →
- * dimensions, but every dimension of every item becomes its own flat
- * Material row on save, named "<Material Name> — <item name> (<value+unit>)".
+ * optional dimensions. Every item becomes one Material row; its dimensions
+ * are variants on that row and its SKU is allocated from the category.
  */
 
 function makeService() {
@@ -16,6 +16,9 @@ function makeService() {
         name: 'Concrete & Cement',
         description: 'Cement, aggregates and blocks',
         color: 'teal',
+        skuPrefix: 'CON-',
+        skuStart: 1,
+        skuNext: 1,
     };
 
     let materialSeq = 0;
@@ -27,7 +30,12 @@ function makeService() {
             findUniqueOrThrow: jest.fn(() => Promise.resolve(category)),
             findFirst: jest.fn(() => Promise.resolve(null)),
             create: jest.fn(({ data }: any) => Promise.resolve({ id: 'cat-new', ...data })),
-            update: jest.fn(({ data }: any) => Promise.resolve({ ...category, ...data })),
+            update: jest.fn(({ data }: any) => {
+                if (data?.skuNext?.increment) {
+                    return Promise.resolve({ ...category, skuNext: category.skuNext + data.skuNext.increment });
+                }
+                return Promise.resolve({ ...category, ...data });
+            }),
             delete: jest.fn(() => Promise.resolve(category)),
         },
         material: {
@@ -69,7 +77,7 @@ describe('material categories', () => {
         await expect(service.createMaterialCategory({})).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('flattens each dimension of each item into its own Material row, concatenating the name', async () => {
+    it('stores one Material row per item with optional dimensions and an automatic SKU', async () => {
         const { service, prisma } = makeService();
         await service.createMaterialCategory({
             name: ' Concrete & Cement ',
@@ -96,49 +104,40 @@ describe('material categories', () => {
         });
 
         expect(prisma.materialCategory.create).toHaveBeenCalledWith({
-            data: { name: 'Concrete & Cement', description: 'Cement and blocks', color: 'teal' },
+            data: { name: 'Concrete & Cement', description: 'Cement and blocks', color: 'teal', skuPrefix: 'CON-', skuStart: 1, skuNext: 1 },
         });
-        expect(prisma.material.create).toHaveBeenCalledTimes(2);
+        expect(prisma.material.create).toHaveBeenCalledTimes(1);
         expect(prisma.material.create).toHaveBeenCalledWith({
             data: {
                 categoryId: 'cat-new',
                 category: 'Concrete & Cement',
                 materialType: 'Consumable',
-                name: 'Iron Rod — Deformed Bar (12mm)',
+                name: 'Iron Rod — Deformed Bar',
                 materialGroupName: 'Iron Rod',
                 itemName: 'Deformed Bar',
-                sku: 'IR-DB',
+                sku: 'CON-001',
+                dimensions: [
+                    { kind: 'Length', value: 12, unit: 'mm' },
+                    { kind: 'Length', value: 16, unit: 'mm' },
+                ],
                 kind: 'Length',
                 value: 12,
                 unit: 'mm',
             },
         });
-        expect(prisma.material.create).toHaveBeenCalledWith({
-            data: {
-                categoryId: 'cat-new',
-                category: 'Concrete & Cement',
-                materialType: 'Consumable',
-                name: 'Iron Rod — Deformed Bar (16mm)',
-                materialGroupName: 'Iron Rod',
-                itemName: 'Deformed Bar',
-                sku: 'IR-DB',
-                kind: 'Length',
-                value: 16,
-                unit: 'mm',
-            },
-        });
     });
 
-    it('refuses an item that has a name but no dimensions', async () => {
-        const { service } = makeService();
-        await expect(
-            service.createMaterialCategory({
+    it('allows an item that has no dimensions', async () => {
+        const { service, prisma } = makeService();
+        await service.createMaterialCategory({
                 name: 'Timber',
                 materials: [
                     { name: 'Plywood', classification: 'Consumable', items: [{ name: 'Sheet', dimensions: [] }] },
                 ],
-            }),
-        ).rejects.toBeInstanceOf(BadRequestException);
+        });
+        expect(prisma.material.create).toHaveBeenCalledWith({
+            data: expect.objectContaining({ name: 'Plywood — Sheet', dimensions: [], kind: null, value: null, unit: null }),
+        });
     });
 
     it('refuses an item with no name, even if it has dimensions', async () => {
@@ -301,10 +300,11 @@ describe('material categories', () => {
                 // No name in the patch, so the existing category's name is used.
                 category: 'Concrete & Cement',
                 materialType: 'Consumable',
-                name: 'Concrete Block — Solid Block (9kg)',
+                name: 'Concrete Block — Solid Block',
                 materialGroupName: 'Concrete Block',
                 itemName: 'Solid Block',
-                sku: 'BLK-SLD-9',
+                sku: 'CON-001',
+                dimensions: [{ kind: 'Weight', value: 9, unit: 'kg' }],
                 kind: 'Weight',
                 value: 9,
                 unit: 'kg',
@@ -368,10 +368,11 @@ describe('material categories', () => {
                 categoryId: 'cat-1',
                 category: 'Concrete & Cement',
                 materialType: 'Consumable',
-                name: 'Iron Rod — Deformed Bar (12mm)',
+                name: 'Iron Rod — Deformed Bar',
                 materialGroupName: 'Iron Rod',
                 itemName: 'Deformed Bar',
-                sku: 'IR-DB',
+                sku: 'CON-001',
+                dimensions: [{ kind: 'Length', value: 12, unit: 'mm' }],
                 reorderLevel: 25,
                 kind: 'Length',
                 value: 12,
@@ -394,6 +395,7 @@ describe('material categories', () => {
         const { service } = makeService();
         await expect(service.addMaterialsToCategory('cat-1', { materials: [] })).rejects.toBeInstanceOf(BadRequestException);
     });
+
 });
 
 describe('All Materials — catalogue-aware stock entry', () => {
@@ -406,6 +408,8 @@ describe('All Materials — catalogue-aware stock entry', () => {
                     { name: { contains: 'cem', mode: 'insensitive' } },
                     { materialGroupName: { contains: 'cem', mode: 'insensitive' } },
                     { itemName: { contains: 'cem', mode: 'insensitive' } },
+                    { sku: { contains: 'cem', mode: 'insensitive' } },
+                    { aliases: { has: 'cem' } },
                 ],
             },
             orderBy: { name: 'asc' },

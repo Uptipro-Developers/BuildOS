@@ -8,6 +8,7 @@ import {
   approveItem,
   rejectItem,
 } from "../../api/approvals";
+import { updateMaterialRequest } from "../../api/materials";
 import {
   CheckCircle,
   XCircle,
@@ -121,8 +122,11 @@ export function ProcurementApprovalsPage() {
   function getStatus(a: ProcApproval): ApprovalStatus {
     return approvalStates[a.id] ?? a.status;
   }
-  function approve(id: string) {
-    approveItem(id)
+  function approve(item: ProcApproval) {
+    const action = item.type === "Material Request"
+      ? updateMaterialRequest(item.id, { status: "approved", fulfillmentMethod: "procurement" })
+      : approveItem(item.id);
+    action
       .then(() => {
         toast.success("Approved.");
         getApprovals("procurement")
@@ -134,8 +138,11 @@ export function ProcurementApprovalsPage() {
         console.error(err);
       });
   }
-  function reject(id: string) {
-    rejectItem(id)
+  function reject(item: ProcApproval) {
+    const action = item.type === "Material Request"
+      ? updateMaterialRequest(item.id, { status: "rejected" })
+      : rejectItem(item.id);
+    action
       .then(() => {
         toast.success("Rejected.");
         getApprovals("procurement")
@@ -314,7 +321,7 @@ export function ProcurementApprovalsPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          approve(a.id);
+                          approve(a);
                         }}
                         className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700"
                       >
@@ -323,7 +330,7 @@ export function ProcurementApprovalsPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          reject(a.id);
+                          reject(a);
                         }}
                         className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700"
                       >

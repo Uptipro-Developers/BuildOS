@@ -9,8 +9,12 @@ export type StockStatus = "In Stock" | "Low Stock" | "Out of Stock";
 export interface StockLine {
   /** Quantity on hand. */
   qty: number;
+  /** Stable baseline used when a configured store default is a percentage. */
+  openingQty?: number;
   /** The material's own reorder level; the reference a % threshold applies to. */
   reorderLevel?: number;
+  /** Explicit effective out-of-stock level returned by the store-item API. */
+  outOfStockLevel?: number;
 }
 
 /**
@@ -28,7 +32,7 @@ export function thresholdLevels(
 ): { low: number; out: number } {
   const reorderLevel = Number(line.reorderLevel ?? 0);
 
-  if (!threshold) return { low: reorderLevel, out: 0 };
+  if (!threshold) return { low: reorderLevel, out: Number(line.outOfStockLevel ?? 0) };
 
   const isPercent = String(threshold.unit ?? "").trim() === "%";
   if (!isPercent) {
@@ -38,13 +42,14 @@ export function thresholdLevels(
     };
   }
 
-  // A percentage of nothing is nothing, and would flag every item as out of
-  // stock. Items with no reorder level keep the unconfigured behaviour.
-  if (reorderLevel <= 0) return { low: reorderLevel, out: 0 };
+  const baseline = Number(line.openingQty ?? reorderLevel);
+  // A percentage of nothing is nothing. Items without an opening balance keep
+  // the legacy reorder-level fallback.
+  if (baseline <= 0) return { low: reorderLevel, out: Number(line.outOfStockLevel ?? 0) };
 
   return {
-    low: (reorderLevel * Number(threshold.lowStockQty ?? 0)) / 100,
-    out: (reorderLevel * Number(threshold.outOfStockQty ?? 0)) / 100,
+    low: (baseline * Number(threshold.lowStockQty ?? 0)) / 100,
+    out: (baseline * Number(threshold.outOfStockQty ?? 0)) / 100,
   };
 }
 

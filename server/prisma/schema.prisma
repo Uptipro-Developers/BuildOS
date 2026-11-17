@@ -859,6 +859,11 @@ model Material {
   /// this row (e.g. { kind: "Length", value: 12, unit: "mm" }) — one row per
   /// dimension, no separate Type table underneath any more.
   sku              String?
+  /// All dimensions/variants attached to this canonical catalogue material.
+  /// kind/value/unit remain populated from the first dimension for legacy API consumers.
+  dimensions       Json     @default("[]")
+  aliases          String[] @default([])
+  imageUrl         String?
   kind             String?
   value            Float?
   totalQty         Float    @default(0)
@@ -897,6 +902,9 @@ model MaterialCategory {
   name        String
   description String?
   color       String   @default("teal")
+  skuPrefix   String   @default("")
+  skuStart    Int      @default(1)
+  skuNext     Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -923,7 +931,15 @@ model StoreItem {
   category     String
   unit         String
   qty          Float     @default(0)
+  /// Quantity committed to approved requests but not yet posted as a transfer.
+  reservedQty  Float     @default(0)
+  openingQty   Float     @default(0)
   reorderLevel Float     @default(0)
+  /// Optional store-item overrides. Null means inherit the owning store's
+  /// configured default; zero is a valid explicit threshold.
+  lowStockThreshold  Float?
+  outOfStockThreshold Float?
+  alertState          String    @default("in_stock")
   unitCost     Float     @default(0)
   lastReceived DateTime?
   bin          String?
@@ -939,6 +955,13 @@ model StockMovement {
   materialName String
   unit         String
   qty          Float
+  /// Immutable ledger balances around this posting. Legacy rows may be null.
+  qtyBefore    Float?
+  qtyAfter     Float?
+  direction    String?
+  status       String   @default("posted")
+  relatedType  String?
+  relatedId    String?
   storeName    String
   storeId      String?
   reference    String?
@@ -948,6 +971,31 @@ model StockMovement {
   createdBy    String
   notes        String?
   createdAt    DateTime @default(now())
+}
+
+/// A proposed change to an established catalogue/store record. The live row is
+/// unchanged until an authorised reviewer approves this record.
+model MaterialAmendment {
+  id           String   @id @default(cuid())
+  entityType   String
+  entityId     String
+  materialName String
+  storeId      String?
+  storeName    String?
+  oldValue     Json
+  proposedValue Json
+  reason       String?
+  status       String   @default("pending")
+  requestedBy  String
+  requestedById String?
+  reviewedBy   String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([entityType, entityId])
 }
 
 model StockTransfer {
@@ -990,10 +1038,25 @@ model MaterialRequest {
   neededBy     DateTime?
   approvedAt   DateTime?
   notes        String?
+  /// Required visual reference when the requester is asking for a material
+  /// that does not yet exist in the catalogue.
+  imageUrl     String?
+  isNewMaterial Boolean @default(false)
 
   /// Reference of the PurchaseRequest raised from this request, so the material
   /// request can show what became of it instead of stopping at "In Procurement".
   prRef String?
+
+  /// Exactly one operational route is selected when the request is approved.
+  fulfillmentMethod String?
+  fulfillmentStatus String?
+  sourceStoreId      String?
+  sourceStoreName    String?
+  stockTransferRef   String?
+  /// Per-line source-store allocations plus any quantity sent to Procurement.
+  fulfillmentPlan    Json?
+  /// A split request may create one transfer per supplying store.
+  stockTransferRefs  String[] @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

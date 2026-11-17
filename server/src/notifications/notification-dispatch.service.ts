@@ -86,7 +86,7 @@ export class NotificationDispatchService {
                     await this.createInAppNotifications(recipients, event, context);
                 }
                 if (channels.includes('Email')) {
-                    await this.sendEmails(recipients, context, mail);
+                    await this.sendEmails(recipients, event, context, mail);
                 }
                 // SMS has no provider configured; saying so beats silently
                 // dropping the channel.
@@ -149,6 +149,31 @@ export class NotificationDispatchService {
                 select,
             });
             return user ? [user] : [];
+        }
+
+        if (/^store (primary contact|manager)$/i.test(setting)) {
+            const storeId = String(context.vars?.storeId ?? '').trim();
+            const storeName = String(context.vars?.storeName ?? '').trim();
+            const store = storeId
+                ? await this.prisma.store.findUnique({ where: { id: storeId }, select: { manager: true } })
+                : storeName
+                  ? await this.prisma.store.findFirst({ where: { name: storeName }, select: { manager: true } })
+                  : null;
+            const manager = String(store?.manager ?? '').trim();
+            if (!manager) return [];
+            const user = await this.prisma.user.findFirst({
+                where: {
+                    OR: [
+                        { email: { equals: manager, mode: 'insensitive' } },
+                        { name: { equals: manager, mode: 'insensitive' } },
+                    ],
+                },
+                select,
+            });
+            if (user) return [user];
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(manager)
+                ? [{ id: '', email: manager, name: manager }]
+                : [];
         }
 
         const emails = setting
@@ -229,6 +254,7 @@ export class NotificationDispatchService {
 
     private async sendEmails(
         recipients: { email: string }[],
+        event: string,
         context: NotificationEventContext,
         mail: { from?: string; cc: string[]; extraTo: string[] },
     ): Promise<void> {
@@ -241,7 +267,12 @@ export class NotificationDispatchService {
         );
         if (to.length === 0) return;
 
-        const composed = await this.emailTemplates.compose(context.title, {
+        const trigger = event === 'stock.low' || event === 'stock.out' || event === 'stock.restored'
+            ? 'Low Stock Alert'
+            : event === 'material-amendment.submitted'
+              ? 'Stock Adjustment Made'
+              : context.title;
+        const composed = await this.emailTemplates.compose(trigger, {
             ...(context.vars ?? {}),
             title: context.title,
             message: context.message,

@@ -6,9 +6,12 @@ import {
   updateMaterial,
   deleteMaterial,
   getStores,
+  getStoreItems,
+  createStoreItem,
   createMaterialRequest,
   getMaterialRequests,
   Store,
+  type StoreItem,
   DIMENSION_UNITS,
 } from "../../api/materials";
 import { getReferenceData } from "../../api/reference-data";
@@ -33,6 +36,7 @@ import {
 } from "../../utils/generalSettings";
 import { stockStatusFor } from "../../utils/stockThresholds";
 import { useAuthUser } from "../../utils/useAuthUser";
+import { ReferenceLink } from "../../components/ReferencePreview";
 import {
   Plus,
   Search,
@@ -48,6 +52,7 @@ import {
   RefreshCw,
   ArrowRightLeft,
   Package,
+  Upload,
 } from "lucide-react";
 
 type MaterialStatus = "In Stock" | "Low Stock" | "Out of Stock";
@@ -72,6 +77,10 @@ interface Material {
   storeId?: string | null;
   storeName?: string | null;
   createdAt?: string;
+  imageUrl?: string | null;
+  sku?: string | null;
+  dimensions: { kind: string; value?: number | string | null; unit?: string | null }[];
+  effectiveStatus?: MaterialStatus;
 }
 
 const BLANK: Omit<Material, "id"> = {
@@ -86,6 +95,8 @@ const BLANK: Omit<Material, "id"> = {
   storeId: null,
   storeName: null,
   materialType: "Consumable",
+  dimensions: [],
+  imageUrl: null,
 };
 
 /**
@@ -94,6 +105,7 @@ const BLANK: Omit<Material, "id"> = {
  * keeps that rule identical to the per-store screens.
  */
 function getStatus(m: Material): MaterialStatus {
+  if (m.effectiveStatus) return m.effectiveStatus;
   return stockStatusFor({ qty: m.availableQty, reorderLevel: m.reorderLevel });
 }
 
@@ -284,6 +296,8 @@ function AddMaterialModal({
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<MaterialCategoryRecord | null>(null);
   const [materials, setMaterials] = useState<MaterialFormRow[]>([blankMaterial()]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [stockByMaterial, setStockByMaterial] = useState<Record<string, Record<string, string>>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -291,6 +305,9 @@ function AddMaterialModal({
       .then(setCategories)
       .catch(() => setCategories([]))
       .finally(() => setLoadingCategories(false));
+  }, []);
+  useEffect(() => {
+    getStores().then(setStores).catch(() => setStores([]));
   }, []);
 
   const q = query.trim().toLowerCase();
@@ -309,18 +326,30 @@ function AddMaterialModal({
     setMaterials([blankMaterial()]);
   }
 
-  const materialsComplete = isMaterialsComplete(materials, {
-    requireReorderLevel: true,
-  });
+  function updateMaterialRows(next: MaterialFormRow[]) {
+    setMaterials(next.map((material) => ({
+      ...material,
+      items: [{
+        ...(material.items[0] ?? blankMaterial().items[0]),
+        name: material.name,
+      }],
+    })));
+  }
+
+  function generatedSku(materialIndex: number) {
+    if (!selectedCategory) return "";
+    const number = selectedCategory.skuNext + materialIndex;
+    return `${selectedCategory.skuPrefix}${String(number).padStart(Math.max(3, String(selectedCategory.skuStart).length), "0")}`;
+  }
+
+  const materialsComplete = isMaterialsComplete(materials);
   const hasAtLeastOneMaterial = materials.some((m) => m.name.trim());
   const canSave =
     Boolean(selectedCategory) && !saving && materialsComplete && hasAtLeastOneMaterial;
 
   async function save() {
     if (!selectedCategory) return;
-    const incomplete = findIncompleteMaterialRow(materials, {
-      requireReorderLevel: true,
-    });
+    const incomplete = findIncompleteMaterialRow(materials);
     if (incomplete) {
       toast.error(incomplete);
       return;
@@ -333,8 +362,26 @@ function AddMaterialModal({
     setSaving(true);
     try {
       const updated = await addMaterialsToCategory(selectedCategory.id, { materials: payload });
+      for (const material of materials) {
+        const created = updated.materials.find((row) => row.name.trim().toLowerCase() === material.name.trim().toLowerCase());
+        if (!created) continue;
+        const unit = created.unit || created.dimensions?.[0]?.unit || "Units";
+        await Promise.all(Object.entries(stockByMaterial[material.key] ?? {})
+          .map(([storeId, qty]) => ({ storeId, qty: Number(qty) }))
+          .filter((entry) => Number.isFinite(entry.qty) && entry.qty > 0)
+          .map((entry) => createStoreItem({
+            storeId: entry.storeId,
+            materialName: created.name,
+            category: selectedCategory.name,
+            unit,
+            qty: entry.qty,
+            openingQty: entry.qty,
+            unitCost: created.unitCost ?? 0,
+            reorderLevel: created.reorderLevel ?? 0,
+          })));
+      }
       onSaved(updated.materials);
-      toast.success(`Added new materials to "${selectedCategory.name}".`);
+      toast.success(`Added new materials under "${selectedCategory.name}".`);
       onClose();
     } catch (err: any) {
       toast.error(err?.message || "Failed to add materials.");
@@ -455,10 +502,36 @@ function AddMaterialModal({
 
               <MaterialsBuilder
                 materials={materials}
-                onChange={setMaterials}
+                onChange={updateMaterialRows}
                 title={`Add materials to ${selectedCategory.name}`}
-                showReorderLevel
+                materialOnly
+                skuPreview={generatedSku}
               />
+
+              <section className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-3 py-2.5 bg-gray-50 border-b border-gray-200">
+                  <p className="text-xs font-semibold text-gray-700">Opening stock distribution</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">Enter how many units of each new material belong to each store. The organization total is calculated automatically.</p>
+                </div>
+                <div className="p-3 space-y-3">
+                  {materials.filter((material) => material.name.trim()).map((material) => (
+                    <div key={material.key} className="rounded-lg border border-gray-100 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold text-gray-800">{material.name}</p>
+                        <span className="text-[11px] text-blue-700">Total: {Object.values(stockByMaterial[material.key] ?? {}).reduce((sum, qty) => sum + (Number(qty) || 0), 0)}</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {stores.map((store) => <label key={store.id} className="text-[11px] text-gray-600">
+                          {store.name}
+                          <input type="number" min="0" step="any" value={stockByMaterial[material.key]?.[store.id] ?? ""}
+                            onChange={(event) => setStockByMaterial((current) => ({ ...current, [material.key]: { ...(current[material.key] ?? {}), [store.id]: event.target.value } }))}
+                            placeholder="0" className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm" />
+                        </label>)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
 
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-2">
@@ -485,11 +558,24 @@ function AddMaterialModal({
                       <tbody className="divide-y divide-gray-100">
                         {selectedCategory.materials.map((row) => (
                           <tr key={row.id}>
-                            <td className="px-3 py-2 text-gray-900 font-medium">{row.name}</td>
+                            <td className="px-3 py-2 text-gray-900 font-medium">
+                              <span>{row.name}</span>
+                              {row.dimensions.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {row.dimensions.map((dimension, index) => (
+                                    <span key={`${dimension.kind}-${index}`} className="text-[10px] font-normal text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">
+                                      {[dimension.value, dimension.unit, dimension.kind].filter((value) => value !== null && value !== undefined && value !== "").join(" ")}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-gray-600">{row.classification}</td>
                             <td className="px-3 py-2 text-gray-600">{row.sku || "—"}</td>
                             <td className="px-3 py-2 text-gray-600">
-                              {[row.value, row.unit, row.kind].filter(Boolean).join(" ") || "—"}
+                              {row.dimensions.length
+                                ? row.dimensions.map((dimension) => [dimension.value, dimension.unit, dimension.kind].filter(Boolean).join(" ")).join(", ")
+                                : "—"}
                             </td>
                             <td className="px-3 py-2 text-right text-gray-700">
                               {formatNumberByGeneralSettings(row.totalQty)}
@@ -583,7 +669,12 @@ export function AllMaterialsPage() {
   const [configuredCategories, setConfiguredCategories] = useState<string[]>(
     [],
   );
+  const [categoryRecords, setCategoryRecords] = useState<MaterialCategoryRecord[]>([]);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const importRef = useRef<HTMLInputElement>(null);
   const [stores, setStores] = useState<Store[]>([]);
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+  const [storeQuantities, setStoreQuantities] = useState<Record<string, string>>({});
 
   const toMaterial = (m: any): Material => ({
     id: m.id,
@@ -607,16 +698,23 @@ export function AllMaterialsPage() {
     storeId: m.storeId ?? null,
     storeName: m.storeName ?? null,
     createdAt: m.createdAt,
+    imageUrl: m.imageUrl ?? null,
+    sku: m.sku ?? null,
+    dimensions: Array.isArray(m.dimensions) ? m.dimensions : [],
   });
 
   useEffect(() => {
     getMaterialCategories()
-      .then((list) =>
+      .then((list) => {
+        setCategoryRecords(list);
         setConfiguredCategories(
           list.map((c) => c.name).filter(Boolean),
-        ),
-      )
-      .catch(() => setConfiguredCategories([]));
+        );
+      })
+      .catch(() => {
+        setCategoryRecords([]);
+        setConfiguredCategories([]);
+      });
     getStores()
       .then(setStores)
       .catch(() => setStores([]));
@@ -629,9 +727,22 @@ export function AllMaterialsPage() {
       // Request-state decoration should not prevent the inventory itself from
       // loading if this secondary endpoint is temporarily unavailable.
       getMaterialRequests().catch(() => []),
+      getStoreItems().catch(() => []),
     ])
-      .then(([materialData, refs, materialRequests]) => {
-        setMaterials(materialData.map(toMaterial));
+      .then(([materialData, refs, materialRequests, loadedStoreItems]) => {
+        setStoreItems(loadedStoreItems);
+        const severity: Record<MaterialStatus, number> = { "In Stock": 0, "Low Stock": 1, "Out of Stock": 2 };
+        const statusByName = new Map<string, MaterialStatus>();
+        loadedStoreItems.forEach((item) => {
+          const status = stockStatusFor({ qty: item.qty, reorderLevel: item.reorderLevel, outOfStockLevel: item.outOfStockLevel });
+          const key = item.materialName.trim().toLowerCase();
+          const current = statusByName.get(key);
+          if (!current || severity[status] > severity[current]) statusByName.set(key, status);
+        });
+        setMaterials(materialData.map((row) => {
+          const material = toMaterial(row);
+          return { ...material, effectiveStatus: statusByName.get(material.name.trim().toLowerCase()) };
+        }));
         setProjectOptions(refs.projects.map((p) => p.name));
 
         const activeRequestMaterialIds = materialRequests.reduce(
@@ -685,6 +796,9 @@ export function AllMaterialsPage() {
     setEditTarget(m);
     const { id: _id, ...rest } = m;
     setForm(rest);
+    setStoreQuantities(Object.fromEntries(
+      stores.map((store) => [store.id, String(storeItems.find((item) => item.storeId === store.id && item.materialName.toLowerCase() === m.name.toLowerCase())?.qty ?? "")]),
+    ));
     setShowModal(true);
   }
   // The modal used to close before the request resolved, and failures only hit
@@ -692,14 +806,29 @@ export function AllMaterialsPage() {
   // silently reappeared unchanged on the next load.
   async function save() {
     const name = form.name;
-    const payload = form;
+    const { totalQty: _totalQty, availableQty: _availableQty, reservedQty: _reservedQty, storeId: _storeId, storeName: _storeName, ...payload } = form;
     try {
       if (editTarget) {
         const updated = await updateMaterial(editTarget.id, payload);
+        const existingStoreIds = new Set(storeItems.filter((item) => item.materialName.toLowerCase() === editTarget.name.toLowerCase()).map((item) => item.storeId));
+        const newBalances = Object.entries(storeQuantities)
+          .map(([storeId, qty]) => ({ storeId, qty: Number(qty) }))
+          .filter((entry) => entry.qty > 0 && !existingStoreIds.has(entry.storeId));
+        const createdItems = await Promise.all(newBalances.map((entry) => createStoreItem({
+          storeId: entry.storeId,
+          materialName: updated.name,
+          category: updated.category,
+          unit: updated.unit || form.unit || form.dimensions?.[0]?.unit || "Units",
+          qty: entry.qty,
+          openingQty: entry.qty,
+          unitCost: updated.unitCost,
+          reorderLevel: updated.reorderLevel,
+        })));
+        if (createdItems.length) setStoreItems((current) => [...current, ...createdItems]);
         setMaterials((prev) =>
           prev.map((m) => (m.id === updated.id ? toMaterial(updated) : m)),
         );
-        toast.success(`"${name}" updated.`);
+        toast.success(`Changes to "${name}" were submitted for approval.`);
       } else {
         const newMat = await createMaterial(payload);
         setMaterials((prev) => [...prev, toMaterial(newMat)]);
@@ -708,6 +837,7 @@ export function AllMaterialsPage() {
       setShowModal(false);
       setForm({ ...BLANK });
       setEditTarget(null);
+      setStoreQuantities({});
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to save the material.",
@@ -822,6 +952,83 @@ export function AllMaterialsPage() {
     exportCSV("materials", rows[0] as string[], rows.slice(1));
   }
 
+  async function downloadImportTemplate() {
+    const XLSX = await import("xlsx");
+    const rows = [{
+      Category: categoryRecords[0]?.name || "Concrete & Cement",
+      "Material Name": "Example material",
+      Classification: "Consumable",
+      Dimensions: "Length:12:mm;Thickness:18:mm",
+      Aliases: "Alternative name|Common name",
+    }];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Materials");
+    XLSX.writeFile(workbook, "buildos-material-import-template.xlsx");
+  }
+
+  async function importMaterials(file?: File) {
+    if (!file) return;
+    setImportErrors([]);
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      const errors: string[] = [];
+      const batches = new Map<string, MaterialFormRow[]>();
+      rows.forEach((row, index) => {
+        const categoryName = String(row.Category ?? "").trim();
+        const materialName = String(row["Material Name"] ?? row.Material ?? "").trim();
+        const category = categoryRecords.find((item) => item.name.toLowerCase() === categoryName.toLowerCase());
+        if (!category) errors.push(`Row ${index + 2}: category "${categoryName || "blank"}" was not found.`);
+        if (!materialName) errors.push(`Row ${index + 2}: Material Name is required.`);
+        if (!category || !materialName) return;
+        const dimensions = String(row.Dimensions ?? "").split(";").map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+          const [kind, value, unit] = entry.split(":").map((part) => part.trim());
+          return { key: `import-${index}-${kind}`, kind, customKind: null, value, unit };
+        });
+        if (dimensions.some((dimension) => !dimension.kind || !dimension.value || !dimension.unit || !Number.isFinite(Number(dimension.value)))) {
+          errors.push(`Row ${index + 2}: dimensions must use Type:Value:Unit separated by semicolons.`);
+          return;
+        }
+        const classification = String(row.Classification).toLowerCase() === "reusable" ? "Reusable" : "Consumable";
+        const material: MaterialFormRow = {
+          key: `import-material-${index}`,
+          name: materialName,
+          classification,
+          items: [{
+            key: `import-item-${index}`,
+            name: materialName,
+            sku: "",
+            aliases: String(row.Aliases ?? "").split("|").map((value) => value.trim()).filter(Boolean).join(", "),
+            imageUrl: "",
+            reorderLevel: "",
+            dimensions,
+          }],
+        };
+        batches.set(category.id, [...(batches.get(category.id) ?? []), material]);
+      });
+      if (errors.length) {
+        setImportErrors(errors);
+        toast.error(`${errors.slice(0, 3).join(" ")}${errors.length > 3 ? ` (+${errors.length - 3} more)` : ""}`);
+        return;
+      }
+      if (!rows.length) throw new Error("The import file has no material rows.");
+      for (const [categoryId, batch] of batches) {
+        await addMaterialsToCategory(categoryId, { materials: materialsToPayload(batch) });
+      }
+      const activeMaterials = await getMaterials();
+      setMaterials(activeMaterials.map(toMaterial));
+      setImportErrors([]);
+      toast.success(`${rows.length} material${rows.length === 1 ? "" : "s"} imported successfully.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not import materials.");
+    } finally {
+      if (importRef.current) importRef.current.value = "";
+    }
+  }
+
+
   const low = materials.filter((m) => getStatus(m) !== "In Stock").length;
   const reusable = materials.filter((m) => m.materialType === "Reusable");
   const allocated = reusable.filter(
@@ -849,6 +1056,25 @@ export function AllMaterialsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            ref={importRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(event) => void importMaterials(event.target.files?.[0])}
+          />
+          <button
+            onClick={() => void downloadImportTemplate()}
+            className="flex items-center gap-2 border border-gray-200 bg-white text-gray-700 text-sm px-3 py-2 rounded-xl hover:bg-gray-50"
+          >
+            <Download className="w-4 h-4" /> Template
+          </button>
+          <button
+            onClick={() => importRef.current?.click()}
+            className="flex items-center gap-2 border border-gray-200 bg-white text-gray-700 text-sm px-3 py-2 rounded-xl hover:bg-gray-50"
+          >
+            <Upload className="w-4 h-4" /> Import Materials
+          </button>
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-2 border border-gray-200 bg-white text-gray-700 text-sm px-3 py-2 rounded-xl hover:bg-gray-50"
@@ -863,6 +1089,20 @@ export function AllMaterialsPage() {
           </button>
         </div>
       </div>
+
+      {importErrors.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-red-800">Material import needs corrections</p>
+              <ul className="mt-2 space-y-1 text-xs text-red-700 list-disc list-inside">
+                {importErrors.map((error) => <li key={error}>{error}</li>)}
+              </ul>
+            </div>
+            <button onClick={() => setImportErrors([])} className="text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
@@ -964,12 +1204,12 @@ export function AllMaterialsPage() {
               <th className="px-4 py-3 text-left font-medium">Material Name</th>
               <th className="px-4 py-3 text-left font-medium">Type</th>
               <th className="px-4 py-3 text-left font-medium">Category</th>
-              <th className="px-4 py-3 text-left font-medium">Store</th>
+              <th className="px-4 py-3 text-left font-medium">Coverage</th>
               <th className="px-4 py-3 text-left font-medium">Unit</th>
               <th className="px-4 py-3 text-right font-medium">Total Qty</th>
               <th className="px-4 py-3 text-right font-medium">Available</th>
               <th className="px-4 py-3 text-right font-medium">Reserved</th>
-              <th className="px-4 py-3 text-right font-medium">Reorder Threshold</th>
+              <th className="px-4 py-3 text-left font-medium">Stock Threshold</th>
               <th className="px-4 py-3 text-right font-medium">Unit Cost</th>
               <th className="px-4 py-3 text-left font-medium">Stock Status</th>
               <th className="px-4 py-3 text-left font-medium">Allocation</th>
@@ -997,13 +1237,44 @@ export function AllMaterialsPage() {
                       {displayId}
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-900">
-                      <span>{m.name}</span>
-                      {m.allocatedTo && (
-                        <p className="text-xs text-blue-500 mt-0.5">
-                          → {m.allocatedTo}
-                          {m.allocatedProject ? ` · ${m.allocatedProject}` : ""}
-                        </p>
-                      )}
+                      <div className="flex items-start gap-3">
+                        {m.imageUrl ? (
+                          <img
+                            src={m.imageUrl}
+                            alt={`${m.name} material`}
+                            className="w-10 h-10 shrink-0 rounded-lg object-cover border border-gray-200 bg-gray-50"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 shrink-0 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center" aria-hidden="true">
+                            <Package className="w-4 h-4 text-gray-300" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <ReferenceLink reference={m.sku || m.id} className="text-sm font-medium block truncate !text-gray-900 hover:!text-gray-900">{m.name}</ReferenceLink>
+                          {m.sku && <ReferenceLink reference={m.sku} className="text-[10px] block mt-0.5 !text-gray-900 hover:!text-gray-900">{m.sku}</ReferenceLink>}
+                          {m.dimensions.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {m.dimensions.map((dimension, dimensionIndex) => (
+                                <span
+                                  key={`${dimension.kind}-${dimensionIndex}`}
+                                  className="text-[10px] font-normal text-gray-500 bg-gray-100 rounded px-1.5 py-0.5"
+                                >
+                                  {[dimension.value, dimension.unit, dimension.kind]
+                                    .filter((value) => value !== null && value !== undefined && value !== "")
+                                    .join(" ")}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {m.allocatedTo && (
+                            <p className="text-xs text-blue-500 mt-0.5">
+                              → {m.allocatedTo}
+                              {m.allocatedProject ? ` · ${m.allocatedProject}` : ""}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -1018,7 +1289,7 @@ export function AllMaterialsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{m.category}</td>
-                    <td className="px-4 py-3 text-gray-600">{m.storeName || "—"}</td>
+                    <td className="px-4 py-3 text-gray-600">All stores</td>
                     <td className="px-4 py-3 text-gray-600">{m.unit}</td>
                     <td className="px-4 py-3 text-right font-medium text-gray-900">
                       {formatNumberByGeneralSettings(m.totalQty)}
@@ -1029,8 +1300,8 @@ export function AllMaterialsPage() {
                     <td className="px-4 py-3 text-right text-gray-600">
                       {formatNumberByGeneralSettings(m.reservedQty)}
                     </td>
-                    <td className="px-4 py-3 text-right text-gray-600">
-                      {formatNumberByGeneralSettings(m.reorderLevel)}
+                    <td className="px-4 py-3 text-left text-xs text-gray-500">
+                      Configured per store
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600">
                       {getCurrencySymbol()}
@@ -1169,28 +1440,29 @@ export function AllMaterialsPage() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Store
-                </label>
-                <select
-                  value={form.storeId ?? ""}
-                  onChange={(e) => {
-                    const store = stores.find((s) => s.id === e.target.value);
-                    setForm({
-                      ...form,
-                      storeId: store?.id ?? null,
-                      storeName: store?.name ?? null,
-                    });
-                  }}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                >
-                  <option value="">— Not attached to a store —</option>
-                  {stores.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
+              {editTarget && (
+                <section className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-3 py-2.5 bg-gray-50 border-b border-gray-200">
+                    <p className="text-xs font-semibold text-gray-700">Stock distribution by store</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">Add an opening balance to stores that do not yet hold this material. Existing balances are changed through stock movements.</p>
+                  </div>
+                  <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {stores.map((store) => {
+                      const existing = storeItems.find((item) => item.storeId === store.id && item.materialName.toLowerCase() === editTarget.name.toLowerCase());
+                      return <label key={store.id} className="rounded-lg border border-gray-100 p-2.5">
+                        <span className="block text-xs font-medium text-gray-700 mb-1">{store.name}</span>
+                        <input type="number" min="0" step="any" disabled={Boolean(existing)} value={storeQuantities[store.id] ?? ""}
+                          onChange={(event) => setStoreQuantities((current) => ({ ...current, [store.id]: event.target.value }))}
+                          placeholder="0" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm disabled:bg-gray-100" />
+                        {existing && <span className="text-[10px] text-gray-400">Current balance · ledger controlled</span>}
+                      </label>;
+                    })}
+                  </div>
+                  <div className="px-3 py-2 bg-blue-50 text-xs text-blue-800">
+                    Organization total after additions: {stores.reduce((sum, store) => sum + (Number(storeQuantities[store.id]) || 0), 0)} {form.unit}
+                  </div>
+                </section>
+              )}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Material Name
@@ -1229,7 +1501,6 @@ export function AllMaterialsPage() {
                   ["availableQty", "Available Qty", "number"],
                   ["reservedQty", "Reserved Qty", "number"],
                   ["unitCost", `Unit Cost (${getCurrencySymbol()})`, "number"],
-                  ["reorderLevel", "Reorder Level", "number"],
                 ] as const
               ).map(([key, label, type]) => (
                 <div key={key}>
@@ -1239,6 +1510,7 @@ export function AllMaterialsPage() {
                   <input
                     type={type}
                     value={(form as Record<string, unknown>)[key] as string}
+                    disabled={Boolean(editTarget && ["totalQty", "availableQty", "reservedQty"].includes(key))}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -1248,8 +1520,11 @@ export function AllMaterialsPage() {
                             : e.target.value,
                       })
                     }
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100 disabled:text-gray-500"
                   />
+                  {editTarget && ["totalQty", "availableQty", "reservedQty"].includes(key) && (
+                    <p className="mt-1 text-[11px] text-gray-400">Updated only through posted stock transactions.</p>
+                  )}
                 </div>
               ))}
               {form.materialType === "Reusable" && (
@@ -1427,15 +1702,10 @@ export function AllMaterialsPage() {
       {showAddModal && (
         <AddMaterialModal
           onClose={() => setShowAddModal(false)}
-          onSaved={(updatedList) => {
-            setMaterials((prev) => {
-              let next = prev;
-              for (const updated of updatedList) {
-                const idx = next.findIndex((m) => m.id === updated.id);
-                next = idx === -1 ? [...next, toMaterial(updated)] : next.map((m, i) => (i === idx ? toMaterial(updated) : m));
-              }
-              return next;
-            });
+          onSaved={() => {
+            getMaterials()
+              .then((rows) => setMaterials(rows.map(toMaterial)))
+              .catch(() => toast.error("Material was saved, but the organization totals could not be refreshed."));
           }}
         />
       )}
