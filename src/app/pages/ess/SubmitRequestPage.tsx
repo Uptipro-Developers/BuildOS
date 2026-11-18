@@ -39,7 +39,8 @@ import { getProcessWorkflows, type ProcessWorkflow } from "../../api/admin-extra
 import { allocateNumber } from "../../api/numbering";
 import { useHRConfig } from "../../store/hrConfig";
 import { createExpense } from "../../api/expenses";
-import { createLeaveRequest } from "../../api/leave-requests";
+import { createLeaveRequest, getLeaveBalance, type LeaveBalance } from "../../api/leave-requests";
+import { fetchEmployees } from "../../api/employees";
 import { createMaterialRequest, createMaterialRequestBatch } from "../../api/materials";
 import { fetchProjects } from "../../api/projects";
 import { useAuthUser } from "../../utils/useAuthUser";
@@ -1348,6 +1349,9 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [handoverEmployeeId, setHandoverEmployeeId] = useState("");
+  const [employees, setEmployees] = useState<{ id: string; name: string; department: string }[]>([]);
+  const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -1355,16 +1359,31 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
 
   const workingDays = countWorkingDays(startDate, endDate);
 
+  useEffect(() => {
+    fetchEmployees({ status: "active" }).then((rows) => setEmployees(rows.filter((employee: any) => employee.id !== authUser.employeeId).map((employee: any) => ({ id: employee.id, name: `${employee.firstName} ${employee.lastName}`.trim(), department: employee.department })))).catch(() => setEmployees([]));
+  }, [authUser.employeeId]);
+
+  useEffect(() => {
+    const leaveTypeId = leaveTypes.find((type) => type.name === leaveType)?.id;
+    if (!authUser.employeeId || !leaveTypeId) { setBalance(null); return; }
+    getLeaveBalance(authUser.employeeId, leaveTypeId).then((value) => setBalance(Array.isArray(value) ? null : value)).catch(() => setBalance(null));
+  }, [authUser.employeeId, leaveType, leaveTypes]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!leaveType) errs.leaveType = "Required";
     if (!startDate) errs.startDate = "Required";
     if (!endDate) errs.endDate = "Required";
+    if (!handoverEmployeeId) errs.handoverEmployeeId = "Select a handover employee";
     if (startDate && endDate && endDate < startDate)
       errs.endDate = "End date must be after start date";
     if (Object.keys(errs).length) {
       setErrors(errs);
+      return;
+    }
+    if (balance && workingDays > balance.availableDays) {
+      setErrors({ leaveType: `Only ${balance.availableDays} days remain for this leave type` });
       return;
     }
     const leaveTypeId = leaveTypes.find((t) => t.name === leaveType)?.id ?? "";
@@ -1394,6 +1413,7 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
         endDate: new Date(endDate).toISOString(),
         days: workingDays,
         reason: notes,
+        handoverEmployeeId,
       });
       onSuccess(created?.data?.id ?? created?.id ?? "LEAVE");
     } catch (err) {
@@ -1432,6 +1452,10 @@ function LeaveForm({ onSuccess }: { onSuccess: (id: string) => void }) {
             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
           </div>
         </div>
+
+        {balance && <div className={`rounded-lg border px-4 py-3 ${workingDays > balance.availableDays ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50"}`}><p className="text-sm font-semibold text-gray-800">{balance.availableDays} of {balance.totalAllowed} days remaining</p><p className="mt-0.5 text-xs text-gray-600">{balance.usedDays} used{balance.employeeGrade ? ` · Grade ${balance.employeeGrade}` : ""}</p></div>}
+
+        <div><label className="block text-sm font-medium text-gray-700 mb-1">Handover To<span className="text-red-500">*</span></label><div className="relative"><select value={handoverEmployeeId} onChange={(event) => { setHandoverEmployeeId(event.target.value); setErrors((current) => ({ ...current, handoverEmployeeId: "" })); }} className={`w-full appearance-none rounded-md border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.handoverEmployeeId ? "border-red-400" : "border-gray-300"}`}><option value="">Select active employee…</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}{employee.department ? ` — ${employee.department}` : ""}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /></div>{errors.handoverEmployeeId && <p className="mt-1 text-xs text-red-500">{errors.handoverEmployeeId}</p>}</div>
 
         {/* Date range */}
         <div className="grid grid-cols-2 gap-4">

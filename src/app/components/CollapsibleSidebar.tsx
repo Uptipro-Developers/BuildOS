@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { usePermissions } from "../utils/usePermissions";
 
 export interface SidebarItem {
@@ -25,6 +25,7 @@ interface CollapsibleSidebarProps {
 
 export function CollapsibleSidebar({ sections, activeClass, baseClass }: CollapsibleSidebarProps) {
   const { canNav } = usePermissions();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("buildos-sidebar-collapsed") === "true");
 
   // Layer 2 (navigation) enforcement happens here rather than in each of the
   // seven app layouts, so a role's navigation config gates every app from one
@@ -57,8 +58,13 @@ export function CollapsibleSidebar({ sections, activeClass, baseClass }: Collaps
     setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
   }
 
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => { const next = !current; localStorage.setItem("buildos-sidebar-collapsed", String(next)); return next; });
+  }
+
   return (
-    <nav className="p-3 pt-4 space-y-1">
+    <nav className={`relative h-full flex-shrink-0 space-y-1 overflow-y-auto p-3 pt-12 transition-[width] duration-200 ${sidebarCollapsed ? "w-16" : "w-56"}`}>
+      <button onClick={toggleSidebar} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} className="absolute right-3 top-3 rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}</button>
       {visibleSections.map((section) => {
         const isOpen = !section.label || openSections[section.label];
 
@@ -71,12 +77,13 @@ export function CollapsibleSidebar({ sections, activeClass, baseClass }: Collaps
                   key={item.href}
                   to={item.href}
                   end={item.end}
+                  title={sidebarCollapsed ? item.label : undefined}
                   className={({ isActive }) =>
-                    `flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors ${isActive ? activeClass : baseClass}`
+                    `flex items-center rounded-md px-2 py-1.5 text-sm transition-colors ${sidebarCollapsed ? "justify-center" : "gap-2.5"} ${isActive ? activeClass : baseClass}`
                   }
                 >
                   {item.icon}
-                  {item.label}
+                  {!sidebarCollapsed && item.label}
                 </NavLink>
               ))}
             </div>
@@ -86,7 +93,7 @@ export function CollapsibleSidebar({ sections, activeClass, baseClass }: Collaps
         return (
           <div key={section.label} className="mb-1">
             {/* Section header — clickable */}
-            <button
+            {!sidebarCollapsed && <button
               onClick={() => toggle(section.label)}
               className="w-full flex items-center justify-between px-2 py-1 rounded-md hover:bg-gray-50 transition-colors group"
             >
@@ -96,22 +103,23 @@ export function CollapsibleSidebar({ sections, activeClass, baseClass }: Collaps
               {isOpen
                 ? <ChevronDown  className="w-3 h-3 text-gray-300 group-hover:text-gray-400" />
                 : <ChevronRight className="w-3 h-3 text-gray-300 group-hover:text-gray-400" />}
-            </button>
+            </button>}
 
             {/* Section items */}
-            {isOpen && (
+            {(sidebarCollapsed || isOpen) && (
               <div className="mt-0.5 mb-2 space-y-0.5">
                 {section.items.map((item) => (
                   <NavLink
                     key={item.href}
                     to={item.href}
                     end={item.end}
+                    title={sidebarCollapsed ? item.label : undefined}
                     className={({ isActive }) =>
-                      `flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors ${isActive ? activeClass : baseClass}`
+                      `flex items-center rounded-md px-2 py-1.5 text-sm transition-colors ${sidebarCollapsed ? "justify-center" : "gap-2.5"} ${isActive ? activeClass : baseClass}`
                     }
                   >
                     {item.icon}
-                    {item.label}
+                    {!sidebarCollapsed && item.label}
                   </NavLink>
                 ))}
               </div>

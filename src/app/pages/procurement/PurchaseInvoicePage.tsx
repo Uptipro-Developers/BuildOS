@@ -1,5 +1,6 @@
 import { notifyLoadFailure } from "../../utils/loadFailure";
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router";
 import { toast } from "sonner";
 import {
   Plus,
@@ -26,6 +27,7 @@ import {
   updatePurchaseInvoice,
   cancelPurchaseInvoice,
   sendPurchaseInvoiceForApproval,
+  recordPurchaseInvoicePayment,
   PurchaseInvoice as ApiPurchaseInvoice,
 } from "../../api/procurement-requests";
 import { getPurchaseOrder, type MappedPurchaseOrder } from "../../api/purchase-orders";
@@ -100,6 +102,8 @@ interface PurchaseInvoice {
   lines: InvoiceLine[];
   /** Set once the invoice is sent for approval; read-only once posted. */
   postingDraft: PostingDraft | null;
+  paidAmount: number;
+  paymentHistory: { amount: number; date: string; method: string; reference: string; recordedBy?: string }[];
 }
 
 function fromApi(r: ApiPurchaseInvoice): PurchaseInvoice {
@@ -117,6 +121,8 @@ function fromApi(r: ApiPurchaseInvoice): PurchaseInvoice {
     /** Set when the invoice came from a purchase order, which is the normal case. */
     poRefRaw: r.poRef ?? "",
     total: r.total ?? 0,
+    paidAmount: r.paidAmount ?? 0,
+    paymentHistory: r.paymentHistory ?? [],
     lines: Array.isArray(r.lines)
       ? (
         r.lines as {
@@ -190,18 +196,20 @@ function isOverdue(inv: PurchaseInvoice) {
  */
 function amountDue(inv: PurchaseInvoice) {
   const total = lineTotal(inv.lines);
-  return inv.status === "approved" || inv.status === "paid" ? total : 0;
+  return ["approved", "partially_paid", "paid"].includes(inv.status)
+    ? Math.max(0, total - inv.paidAmount)
+    : 0;
 }
 
 function balanceOf(inv: PurchaseInvoice) {
   const total = lineTotal(inv.lines);
-  return inv.status === "approved" || inv.status === "paid" ? 0 : total;
+  return Math.max(0, total - inv.paidAmount);
 }
 
 /** A line's share of the invoice's Amount Due, following the same rule. */
 function lineDue(line: InvoiceLine, inv: PurchaseInvoice) {
-  return inv.status === "approved" || inv.status === "paid"
-    ? line.qty * line.unitPrice
+  return ["approved", "partially_paid", "paid"].includes(inv.status)
+    ? Math.max(0, line.qty * line.unitPrice * (1 - inv.paidAmount / Math.max(lineTotal(inv.lines), 1)))
     : 0;
 }
 
@@ -441,7 +449,7 @@ function PostPreviewModal({
   total: number;
   posting: boolean;
   onClose: () => void;
-  onConfirm: (payload?: { date: string; method: string; lines: JournalLineInput[] }) => void;
+  onConfirm: (payload: { date: string; method: string; lines: JournalLineInput[]; amount: number }) => void;
 }) {
   const draft = invoice.postingDraft;
 
@@ -449,6 +457,7 @@ function PostPreviewModal({
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState("Bank Transfer");
   const [lines, setLines] = useState<JournalLineInput[]>([]);
+  const [amount, setAmount] = useState(total);
 
   useEffect(() => {
     if (draft) return;
@@ -484,6 +493,16 @@ function PostPreviewModal({
   }, [draft, invoice.invoiceNo, invoice.supplier, total]);
 
   const { balanced } = journalTotals(lines);
+  const basePostingLines = draft ? draft.lines : lines;
+  const approvedTotal = basePostingLines.reduce(
+    (sum, line) => sum + Number(line.debit || 0),
+    0,
+  ) || total;
+  const postingLines = basePostingLines.map((line) => ({
+      ...line,
+      debit: Number(line.debit || 0) * amount / approvedTotal,
+      credit: Number(line.credit || 0) * amount / approvedTotal,
+    }));
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 py-6 overflow-y-auto">
@@ -510,6 +529,21 @@ function PostPreviewModal({
         </div>
 
         <div className="px-6 py-5 space-y-5">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+              Payment amount (outstanding {fmt(total)})
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              max={total}
+              step="0.01"
+              value={amount}
+              onChange={(event) => setAmount(Number(event.target.value))}
+              className="w-full max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="mt-1 text-xs text-gray-500">Enter less than the balance to record a part payment.</p>
+          </div>
           {draft ? (
             <>
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
@@ -568,7 +602,7 @@ function PostPreviewModal({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {draft.lines.map((l) => (
+                      {postingLines.map((l) => (
                         <tr key={l.id}>
                           <td className="px-3 py-2 text-gray-700">{l.account || "—"}</td>
                           <td className="px-3 py-2 text-right text-gray-900">
@@ -672,8 +706,13 @@ function PostPreviewModal({
               Cancel
             </button>
             <button
-              onClick={() => onConfirm(draft ? undefined : { date, method, lines })}
-              disabled={posting || (!draft && !balanced)}
+              onClick={() => onConfirm({
+                date: draft?.date || date,
+                method: draft?.method || method,
+                lines: postingLines,
+                amount,
+              })}
+              disabled={posting || amount <= 0 || amount > total || (!draft && !balanced)}
               className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40 flex items-center gap-2"
             >
               <BookOpen className="w-4 h-4" />
@@ -687,6 +726,8 @@ function PostPreviewModal({
 }
 
 export function PurchaseInvoicePage() {
+  const location = useLocation();
+  const isFinanceView = location.pathname.startsWith("/apps/finance/");
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -944,21 +985,21 @@ export function PurchaseInvoicePage() {
    * set for an invoice that reached "approved" with no draft on file, whose
    * modal fell back to letting the user fill it in there instead.
    */
-  async function confirmPay(override?: {
+  async function confirmPay(payment: {
     date: string;
     method: string;
     lines: JournalLineInput[];
+    amount: number;
   }) {
     const inv = payTarget;
-    const draft = override ?? inv?.postingDraft;
-    if (!inv || !draft || posting) return;
+    if (!inv || posting) return;
     setPosting(true);
     try {
       const entry = await postJournalEntry({
         description: `Payment to ${inv.supplier} — ${inv.invoiceNo}`,
-        date: draft.date,
+        date: payment.date,
         createdBy: getAuthUserName() || "Current User",
-        lines: draft.lines,
+        lines: payment.lines,
         // The invoice number is the payment reference throughout: it is what
         // the General Ledger cites, and what a ledger line traces back through
         // to reach this invoice.
@@ -968,11 +1009,16 @@ export function PurchaseInvoicePage() {
         sourceId: inv.id,
       });
       setPayTarget(null);
-      await updateStatus(
-        inv.id,
-        "paid",
-        `Paid via ${draft.method}. Posted to the ledger as ${entry.reference}.`,
-      );
+      const updated = await recordPurchaseInvoicePayment(inv.id, {
+        amount: payment.amount,
+        date: payment.date,
+        method: payment.method,
+        reference: entry.reference,
+        recordedBy: getAuthUserName() || "Current User",
+        notes: `Paid via ${payment.method}. Posted to the ledger as ${entry.reference}.`,
+      });
+      setInvoices((prev) => prev.map((row) => row.id === inv.id ? fromApi(updated) : row));
+      toast.success(payment.amount < amountDue(inv) ? "Part payment recorded." : "Payment completed.");
       logChange({
         module: "Finance",
         action: "Posted",
@@ -1077,7 +1123,7 @@ export function PurchaseInvoicePage() {
           <RowActionNote>Awaiting approval</RowActionNote>
         </>
       )}
-      {inv.status === "approved" && (
+      {(inv.status === "approved" || inv.status === "partially_paid") && (
         <>
           <RowAction
             icon={<Banknote className="w-3.5 h-3.5" />}
@@ -1105,8 +1151,8 @@ export function PurchaseInvoicePage() {
 
   /** The line items panel shown beneath a row once its Lines chevron is opened. */
   function renderLineItemsPanel(inv: PurchaseInvoice) {
-    const editable = Boolean(editingLines) && inv.status === "pending_review";
-    const displayLines = editable ? editingLines! : inv.lines;
+    const editable = false;
+    const displayLines = inv.lines;
     return (
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -1124,7 +1170,7 @@ export function PurchaseInvoicePage() {
               <th className="pb-2 text-right font-medium">Qty</th>
               <th className="pb-2 text-right font-medium">Unit</th>
               <th className="pb-2 text-right font-medium">
-                Finance Unit Price{editable ? " *" : ""}
+                PO Unit Price
               </th>
               <th className="pb-2 text-right font-medium">Line Total</th>
               <th className="pb-2 text-right font-medium">Line Due</th>
@@ -1362,17 +1408,17 @@ export function PurchaseInvoicePage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Purchase Invoices
+            {isFinanceView ? "PO Payments" : "Purchase Invoices"}
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Track and manage supplier invoices
+            {isFinanceView ? "Review purchase orders and record full or part payments" : "Track and manage supplier invoices"}
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => { setForm({ ...BLANK_FORM, lines: [BLANK_LINE()] }); setShowModal(true); }}
+          {!isFinanceView && <button onClick={() => { setForm({ ...BLANK_FORM, lines: [BLANK_LINE()] }); setShowModal(true); }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 text-white rounded-xl text-sm hover:bg-blue-800">
             <Plus className="w-4 h-4" /> New Invoice
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -1672,10 +1718,10 @@ export function PurchaseInvoicePage() {
       {payTarget && (
         <PostPreviewModal
           invoice={payTarget}
-          total={lineTotal(payTarget.lines) || payTarget.total}
+          total={amountDue(payTarget)}
           posting={posting}
           onClose={() => setPayTarget(null)}
-          onConfirm={(override) => void confirmPay(override)}
+          onConfirm={(payment) => void confirmPay(payment)}
         />
       )}
 

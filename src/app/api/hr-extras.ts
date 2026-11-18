@@ -7,21 +7,29 @@ export interface AttendanceRecord {
     // recorded time when someone is re-marked absent or on leave.
     clockIn?: string | null; clockOut?: string | null; hoursWorked?: number;
     status: string; notes?: string; createdAt: string;
+    projectId?: string; projectName?: string; source?: string; partnerId?: string; partnerName?: string;
 }
 export interface PayrollPeriod {
     id: string; name: string; startDate: string; endDate: string;
-    status: string; payrollRuns?: PayrollRun[]; createdAt: string;
+    status: string; salaryFrequencyId?: string; salaryFrequencyName?: string;
+    payrollRuns?: PayrollRun[]; createdAt: string;
 }
 export interface PayrollRun {
     id: string; periodId: string; periodName: string; month: number;
     year: number; status: string; totalGross: number; totalNet: number;
     employeeCount: number; processedBy?: string; processedAt?: string;
+    scope?: 'company' | 'project'; projectId?: string; projectName?: string;
+    salaryFrequencyId?: string; salaryFrequencyName?: string;
     entries?: PayrollEntry[]; createdAt: string;
 }
 export interface PayrollEntry {
     id: string; runId: string; employeeId: string; employeeName: string;
     department?: string; grossPay: number; deductions: number; netPay: number;
     tax: number; pension: number; allowances: number; status: string;
+}
+export interface PayrollInput {
+    id: string; employeeId: string; employeeName: string; type: string; amount: number;
+    quantity: number; effectiveDate: string; notes?: string; status: string; payrollRunId?: string;
 }
 export interface Payslip {
     id: string; employeeId: string; employeeName: string; department?: string;
@@ -64,6 +72,8 @@ export const updateAttendanceRecord = (id: string, data: Partial<AttendanceRecor
     apiFetch<AttendanceRecord>(`/attendance/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteAttendanceRecord = (id: string) =>
     apiFetch<void>(`/attendance/${id}`, { method: 'DELETE' });
+export const uploadProjectAttendance = (data: { projectId: string; rows: Array<Record<string, unknown>> }) =>
+    apiFetch<{ imported: number; records: AttendanceRecord[]; errors: { row: number; message: string }[] }>('/attendance/project-upload', { method: 'POST', body: JSON.stringify(data) });
 
 // Payroll Periods
 export const getPayrollPeriods = () => apiFetch<PayrollPeriod[]>('/payroll-periods');
@@ -71,9 +81,9 @@ export const getPayrollPeriods = () => apiFetch<PayrollPeriod[]>('/payroll-perio
  * The period that follows the last one, dated from the payroll frequency
  * configured in HR › General Setup.
  */
-export const getNextPayrollPeriod = () =>
-    apiFetch<{ name: string; startDate: string; endDate: string; frequency: string }>(
-        '/payroll-periods/next',
+export const getNextPayrollPeriod = (frequencyId?: string) =>
+    apiFetch<{ name: string; startDate: string; endDate: string; frequency: string; salaryFrequencyId?: string }>(
+        frequencyId ? `/payroll-periods/next?frequencyId=${encodeURIComponent(frequencyId)}` : '/payroll-periods/next',
     );
 export const getPayrollPeriod = (id: string) => apiFetch<PayrollPeriod>(`/payroll-periods/${id}`);
 export const createPayrollPeriod = (data: Partial<PayrollPeriod>) =>
@@ -99,6 +109,9 @@ export const getDepartmentPayrollSummary = () =>
     apiFetch<DepartmentPayrollSummary[]>('/payroll-summary/departments');
 export const updatePayrollEntry = (id: string, data: Partial<PayrollEntry>) =>
     apiFetch<PayrollEntry>(`/payroll-entries/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+export const getPayrollInputs = (status?: string) => apiFetch<PayrollInput[]>(status ? `/payroll-inputs?status=${encodeURIComponent(status)}` : '/payroll-inputs');
+export const createPayrollInput = (data: Partial<PayrollInput>) => apiFetch<PayrollInput>('/payroll-inputs', { method: 'POST', body: JSON.stringify(data) });
+export const deletePayrollInput = (id: string) => apiFetch<{ id: string; deleted: boolean }>(`/payroll-inputs/${id}`, { method: 'DELETE' });
 
 // Payslips
 export const getPayslips = (employeeId?: string) =>

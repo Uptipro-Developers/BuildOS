@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { getProjectById, stakeholders, fmtDate } from "./mockData";
 import { exportCSV } from "../../utils/exportCSV";
-import { listStakeholders, createStakeholder } from "../../api/stakeholders";
+import { listStakeholders, createStakeholder, inviteStakeholderPartner } from "../../api/stakeholders";
 import { listVisitorLogs, createVisitorLog } from "../../api/visitor-logs";
 import { useNumbering } from "../../stores/numberingStore";
 
@@ -212,6 +212,10 @@ export function StakeholdersPage() {
     notes: "",
     email: "",
     phone: "",
+    isPartner: false,
+    partnerCategory: "Architecture",
+    partnerTask: "",
+    invitePartner: true,
   });
 
   const [visitorForm, setVisitorForm] = useState({
@@ -289,12 +293,16 @@ export function StakeholdersPage() {
       influenceLevel: addForm.influence as "High" | "Medium" | "Low",
       impactLevel: addForm.impact as "High" | "Medium" | "Low",
       notes: addForm.notes,
+      isPartner: addForm.isPartner,
+      partnerCategory: addForm.isPartner ? addForm.partnerCategory : undefined,
+      partnerTask: addForm.isPartner ? addForm.partnerTask : undefined,
     };
     const { id: _omit, ...payload } = newSh;
     createStakeholder(payload)
-      .then((saved) => {
+      .then(async (saved) => {
+        if (addForm.isPartner && addForm.invitePartner) await inviteStakeholderPartner(saved.id);
         setLocalStakeholders((prev) => [...prev, saved]);
-        toast.success(`${saved.name || "Stakeholder"} added.`);
+        toast.success(`${saved.name || "Stakeholder"} added${addForm.isPartner && addForm.invitePartner ? " and invited" : ""}.`);
       })
       // The unsaved stakeholder used to be pushed into the list on failure.
       .catch((err) =>
@@ -312,6 +320,10 @@ export function StakeholdersPage() {
       notes: "",
       email: "",
       phone: "",
+      isPartner: false,
+      partnerCategory: "Architecture",
+      partnerTask: "",
+      invitePartner: true,
     });
   }
 
@@ -875,6 +887,8 @@ export function StakeholdersPage() {
                   />
                 </div>
               </div>
+              <label className="flex items-center gap-2 rounded-lg border border-gray-200 p-3 text-sm"><input type="checkbox" checked={addForm.isPartner} onChange={(e) => setAddForm((form) => ({ ...form, isPartner: e.target.checked }))} />Consortium / delivery partner</label>
+              {addForm.isPartner && <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50/40 p-3"><div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-gray-600">Partner Category</label><select value={addForm.partnerCategory} onChange={(e) => setAddForm((form) => ({ ...form, partnerCategory: e.target.value }))} className="w-full rounded-md border px-3 py-2 text-sm"><option>Architecture</option><option>Mechanical & Electrical</option><option>Construction</option><option>Plumbing</option><option>Structural</option><option>Quantity Surveying</option><option>Other</option></select></div><div><label className="mb-1 block text-xs font-medium text-gray-600">Assigned Task</label><input value={addForm.partnerTask} onChange={(e) => setAddForm((form) => ({ ...form, partnerTask: e.target.value }))} placeholder="e.g. Upload design drawings" className="w-full rounded-md border px-3 py-2 text-sm" /></div></div><label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={addForm.invitePartner} onChange={(e) => setAddForm((form) => ({ ...form, invitePartner: e.target.checked }))} />Email an onboarding invitation after saving</label></div>}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Role

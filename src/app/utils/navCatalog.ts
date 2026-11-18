@@ -39,6 +39,8 @@ export const NAV_CATALOG: Record<NavAppKey, NavCatalogItem[]> = {
     { id: "/apps/construction/my-tasks", label: "My Tasks", section: "Tasks" },
     { id: "/apps/construction/schedule", label: "Schedule", section: "Management" },
     { id: "/apps/construction/daily-reports", label: "Daily Reports", section: "Management" },
+    { id: "/apps/construction/attendance", label: "Daily Attendance", section: "Management" },
+    { id: "/apps/construction/boq-bom", label: "BoQ & BoM", section: "Management" },
     { id: "/apps/construction/resources", label: "Resources", section: "Management" },
     { id: "/apps/construction/issues", label: "Issues", section: "Management" },
     { id: "/apps/construction/change-requests", label: "Change Requests", section: "Management" },

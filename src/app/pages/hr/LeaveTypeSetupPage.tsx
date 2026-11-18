@@ -9,6 +9,7 @@ import {
   type LeaveType as ApiLeaveType,
 } from "../../api/leave-types";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
+import { getSalaryGrades, type SalaryGradeOption } from "../../api/employment-types";
 
 type LeaveGender = "all" | "male" | "female";
 
@@ -42,7 +43,11 @@ const GENDER_LABELS: Record<LeaveGender, string> = {
   female: "Female only",
 };
 
-const EMPTY = {
+const EMPTY: {
+  name: string; daysAllowed: number; carryOver: boolean; maxCarryOver: number;
+  paid: boolean; approvalsRequired: 1 | 2; color: string; gender: LeaveGender;
+  gradeEntitlements: Record<string, number>;
+} = {
   name: "",
   daysAllowed: 10,
   carryOver: false,
@@ -51,6 +56,7 @@ const EMPTY = {
   approvalsRequired: 1 as 1 | 2,
   color: COLORS[0],
   gender: "all" as LeaveGender,
+  gradeEntitlements: {},
 };
 
 /**
@@ -78,6 +84,7 @@ export function LeaveTypeSetupPage({ embedded }: { embedded?: boolean } = {}) {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
   const [deleteTarget, setDeleteTarget] = useState<UILeaveType | null>(null);
+  const [salaryGrades, setSalaryGrades] = useState<SalaryGradeOption[]>([]);
 
   useEffect(() => {
     fetchLeaveTypes()
@@ -86,6 +93,7 @@ export function LeaveTypeSetupPage({ embedded }: { embedded?: boolean } = {}) {
       toast.error("Could not load leave types."),
     );
   }, []);
+  useEffect(() => { getSalaryGrades().then(setSalaryGrades).catch(() => setSalaryGrades([])); }, []);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -122,6 +130,7 @@ export function LeaveTypeSetupPage({ embedded }: { embedded?: boolean } = {}) {
       approvalsRequired: t.approvalsRequired,
       color: t.color,
       gender: t.gender,
+      gradeEntitlements: t.gradeEntitlements ?? {},
     });
     setEditId(t.id);
     setShowForm(true);
@@ -266,6 +275,15 @@ export function LeaveTypeSetupPage({ embedded }: { embedded?: boolean } = {}) {
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <div className="mb-3"><p className="text-sm font-medium text-gray-800">Grade-specific entitlements</p><p className="text-xs text-gray-500">Leave the field blank to use the default days allowed above.</p></div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {salaryGrades.map((grade) => {
+                  const key = grade.gradeLevel || grade.gradeName;
+                  return <label key={grade.id} className="text-xs text-gray-600"><span className="mb-1 block truncate">{grade.gradeName}{grade.gradeLevel ? ` (${grade.gradeLevel})` : ""}</span><input type="number" min="0" placeholder={String(form.daysAllowed)} value={form.gradeEntitlements[key] ?? ""} onChange={(event) => setForm((current) => { const next = { ...current.gradeEntitlements }; if (event.target.value === "") delete next[key]; else next[key] = Number(event.target.value); return { ...current, gradeEntitlements: next }; })} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" /></label>;
+                })}
               </div>
             </div>
             <div className="flex items-center gap-6 flex-wrap">

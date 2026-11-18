@@ -123,6 +123,7 @@ function makeService(fx: Fixtures = {}) {
             }),
         },
         materialRequest: {
+            findMany: jest.fn(() => Promise.resolve([])),
             updateMany: jest.fn((args: any) => {
                 writes.materialRequest.push(args);
                 return Promise.resolve({ count: 1 });

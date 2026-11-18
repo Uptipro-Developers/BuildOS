@@ -40,4 +40,15 @@ export class EmployeesController {
     remove(@Param('id') id: string) {
         return this.employeesService.remove(id);
     }
+
+    @Get(':id/documents')
+    documents(@Param('id') id: string) { return this.employeesService.listDocuments(id); }
+
+    @Post(':id/documents')
+    addDocument(@Param('id') id: string, @Body() body: any) { return this.employeesService.addDocument(id, body); }
+
+    @Delete(':id/documents/:documentId')
+    deleteDocument(@Param('id') id: string, @Param('documentId') documentId: string) {
+        return this.employeesService.deleteDocument(id, documentId);
+    }
 }

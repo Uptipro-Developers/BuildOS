@@ -61,6 +61,18 @@ export class PurchaseOrdersController {
         });
     }
 
+    @Post(':id/approve')
+    @RequiresProcess('p_purchase_orders', 'approve')
+    approvePO(@Param('id') id: string, @Body() body: any) {
+        return this.purchaseOrdersService.approvePO(id, body?.actor);
+    }
+
+    @Post(':id/reject')
+    @RequiresProcess('p_purchase_orders', 'approve')
+    rejectPO(@Param('id') id: string, @Body() body: any) {
+        return this.purchaseOrdersService.rejectPO(id, body?.reason, body?.actor);
+    }
+
     @Post(':id/send-to-finance')
     @RequiresProcess('p_purchase_orders', 'edit')
     sendToFinance(@Param('id') id: string, @Body() body: any) {

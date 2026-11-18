@@ -52,6 +52,21 @@ export class ProcurementRequestsController {
         }
     }
 
+    private async guardQuoteDecision(req: any, body: any) {
+        const status = String(body?.status ?? '').trim().toLowerCase();
+        if (status !== 'approved' && status !== 'rejected') return;
+        const user = req?.user;
+        if (!user?.sub && !user?.id) {
+            throw new ForbiddenException('Supplier integrations cannot approve or reject quotations.');
+        }
+        await this.adminExtras.assertMayApprove({
+            userId: String(user.sub ?? user.id),
+            name: user.name,
+            email: user.email,
+            role: user.role,
+        }, 'p_supplier_quotes');
+    }
+
     // ── Purchase Requests ──
     @Get('purchase-requests')
     getAllPRs(@Query('status') status?: string) { return this.svc.findAllPRs(status); }
@@ -94,6 +109,11 @@ export class ProcurementRequestsController {
     updateInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
     @Patch('purchase-invoices/:id')
     patchInvoice(@Param('id') id: string, @Body() body: any) { return this.svc.updateInvoice(id, body); }
+    @Post('purchase-invoices/:id/payments')
+    @RequiresProcess('p_purchase_invoices', 'approve')
+    recordInvoicePayment(@Param('id') id: string, @Body() body: any) {
+        return this.svc.recordInvoicePayment(id, body);
+    }
     // Moves a Pending Review invoice to Pending Approval, where the Purchase
     // Invoices workflow (Settings › Approvals) takes over. The posting draft
     // (date/method/GL lines) is decided here, up front.
@@ -152,7 +172,10 @@ export class ProcurementRequestsController {
     // Service-accessible: a supplier revising a quote before it is accepted.
     @Patch('received-quotes/:id')
     @ServiceAuth()
-    updateQuote(@Param('id') id: string, @Body() body: any) { return this.svc.updateQuote(id, body); }
+    async updateQuote(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        await this.guardQuoteDecision(req, body);
+        return this.svc.updateQuote(id, body);
+    }
     @Delete('received-quotes/:id')
     deleteQuote(@Param('id') id: string) { return this.svc.deleteQuote(id); }
 }
