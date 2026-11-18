@@ -231,6 +231,7 @@ export const router = createBrowserRouter([
         Component: AppLayout,
         children: [
           { index: true, Component: AppLauncherPage },
+          { path: "partner", lazy: () => import("./pages/partner/PartnerWorkspacePage").then((m) => ({ Component: m.PartnerWorkspacePage })) },
           {
             path: "construction",
             Component: ConstructionLayout,
@@ -254,6 +255,8 @@ export const router = createBrowserRouter([
                   })),
               },
               { path: "daily-reports", Component: DailyReportsOverviewPage },
+              { path: "attendance", lazy: () => import("./pages/construction/ProjectAttendancePage").then((m) => ({ Component: m.ProjectAttendancePage })) },
+              { path: "boq-bom", lazy: () => import("./pages/construction/BoqBomPage").then((m) => ({ Component: m.BoqBomPage })) },
               { path: "resources", Component: ResourcesOverviewPage },
               {
                 path: "resources/:resourceId",

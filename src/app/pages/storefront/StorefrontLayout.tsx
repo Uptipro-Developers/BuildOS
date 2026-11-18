@@ -126,7 +126,7 @@ export function StorefrontLayout() {
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
       <AppHeader currentApp="storefront" appColor="bg-teal-700" />
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+        <aside className="bg-white border-r border-gray-200 flex-shrink-0 overflow-hidden">
           <CollapsibleSidebar
             sections={canConfigure ? sidebarSections : sidebarSections.filter((section) => section.label !== "Settings")}
             activeClass="bg-teal-50 text-teal-700 font-medium [&_svg]:text-teal-600"

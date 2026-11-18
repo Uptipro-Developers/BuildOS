@@ -21,6 +21,8 @@ function mapLeaveRequest(r: any) {
         approvedBy: r.approvedBy ?? '',
         approvedAt: fmt(r.approvedAt),
         notes: r.notes ?? '',
+        handoverEmployeeId: r.handoverEmployeeId ?? '',
+        handoverEmployeeName: r.handoverEmployeeName ?? '',
     };
 }
 
@@ -35,6 +37,22 @@ export async function fetchLeaveRequests(params?: { status?: string; employeeId?
 
 export function createLeaveRequest(data: any) {
     return apiFetch(`/leave-requests`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export interface LeaveBalance {
+    leaveTypeId: string;
+    leaveTypeName: string;
+    totalAllowed: number;
+    usedDays: number;
+    availableDays: number;
+    carryOverDays: number;
+    employeeGrade?: string | null;
+}
+
+export async function getLeaveBalance(employeeId: string, leaveTypeId?: string) {
+    const query = leaveTypeId ? `?leaveTypeId=${encodeURIComponent(leaveTypeId)}` : '';
+    const response = await apiFetch<any>(`/leave-requests/balance/${employeeId}${query}`);
+    return response?.data as LeaveBalance | LeaveBalance[];
 }
 
 export function approveLeaveRequest(id: string, notes?: string) {

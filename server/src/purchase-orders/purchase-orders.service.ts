@@ -74,14 +74,19 @@ export class PurchaseOrdersService {
         const reference = String(poRef ?? '').trim() ||
             (await this.numbering.allocate('PurchaseOrder')).reference;
 
-        return this.prisma.purchaseOrder.create({
-            data: {
-                ...rest,
-                poRef: reference,
-                ...(items ? { items: { create: items } } : {}),
-            },
-            include: { supplier: true, items: true },
-        }).then((po) => {
+        if (!Array.isArray(items) || items.length === 0) throw new BadRequestException('Add at least one purchase-order line.');
+        const boqLines = items.filter((item: any) => item.boqItemId);
+        const po = await this.prisma.$transaction(async (tx) => {
+            for (const line of boqLines) {
+                const boq = await tx.projectBoqItem.findUnique({ where: { id: String(line.boqItemId) } });
+                if (!boq) throw new BadRequestException(`BoQ item ${line.boqItemId} was not found.`);
+                if (Number(line.qty) > boq.quantity - boq.procuredQty) throw new BadRequestException(`${boq.description} only has ${boq.quantity - boq.procuredQty} ${boq.unit} remaining to procure.`);
+            }
+            const created = await tx.purchaseOrder.create({ data: { ...rest, poRef: reference, boqItemIds: boqLines.map((line: any) => String(line.boqItemId)), items: { create: items } }, include: { supplier: true, items: true } });
+            for (const line of boqLines) await tx.projectBoqItem.update({ where: { id: String(line.boqItemId) }, data: { procuredQty: { increment: Number(line.qty) } } });
+            return created;
+        });
+        {
             this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => { });
             void this.notifications.dispatch('purchase-order.created', {
                 title: 'Purchase order created',
@@ -99,7 +104,7 @@ export class PurchaseOrdersService {
             // once the wizard has actually finished and there's a real
             // document to send instead of a bare notice.
             return po;
-        });
+        }
     }
 
     /**
@@ -163,6 +168,9 @@ export class PurchaseOrdersService {
             include: { supplier: true, items: true },
         });
         if (!po) throw new NotFoundException('Purchase order not found');
+        if (po.approvalStatus !== 'approved') {
+            throw new BadRequestException('The purchase order must be approved before it can be sent to Finance.');
+        }
         this.assertTransition(po.status, 'sent_to_finance');
 
         const { reference: invoiceNo } = await this.numbering.allocate('PurchaseInvoice');
@@ -227,9 +235,9 @@ export class PurchaseOrdersService {
      * `confirmed` (Finance approved, supplier confirmed the payment landed),
      * which meant a post-delivery order needed its own separate skip-finance
      * path just to become receivable. Opening the receipt here instead, the
-     * moment the order is created, means receiving staff can see what's
-     * expected regardless of where the order sits in the finance chain —
-     * and both payment-timing paths go through exactly one action to get here.
+     * Approval is now a separate gate. Completing the document submits it for
+     * approval; supplier email and goods-receipt availability only happen once
+     * an authorised approver accepts it.
      */
     async createPO(
         id: string,
@@ -247,6 +255,10 @@ export class PurchaseOrdersService {
             where: { id },
             data: {
                 status: 'po_created',
+                approvalStatus: 'pending_approval',
+                approvedBy: null,
+                approvedAt: null,
+                rejectionReason: null,
                 ...(data.paymentTermId ? { paymentTermId: data.paymentTermId } : {}),
                 ...(data.deliverySplit ? { deliverySplit: data.deliverySplit } : {}),
                 ...(data.signatories !== undefined ? { signatories: data.signatories as any } : {}),
@@ -256,9 +268,58 @@ export class PurchaseOrdersService {
             },
             include: { supplier: true, items: true },
         });
+        return updated;
+    }
+
+    async approvePO(id: string, actor?: string) {
+        const po = await this.prisma.purchaseOrder.findUnique({
+            where: { id },
+            include: { supplier: true, items: true },
+        });
+        if (!po) throw new NotFoundException('Purchase order not found');
+        if (po.status !== 'po_created' || po.approvalStatus !== 'pending_approval') {
+            throw new BadRequestException('Only a purchase order awaiting approval can be approved.');
+        }
+        const updated = await this.prisma.purchaseOrder.update({
+            where: { id },
+            data: {
+                approvalStatus: 'approved',
+                approvedBy: actor || 'Current User',
+                approvedAt: new Date(),
+                rejectionReason: null,
+            },
+            include: { supplier: true, items: true },
+        });
         await this.goodsReceipts.openForOrder(id).catch(() => undefined);
         this.emailPurchaseOrderToSupplier(updated).catch(() => undefined);
+        void this.notifications.dispatch('purchase-order.approved', {
+            title: 'Purchase order approved',
+            message: `${updated.poRef ?? updated.id} is approved and ready for fulfilment.`,
+            actionUrl: '/apps/procurement/purchase-orders',
+            relatedId: updated.id,
+            relatedType: 'PurchaseOrder',
+            vars: { reference: updated.poRef ?? updated.id, approver: actor ?? '' },
+        });
         return updated;
+    }
+
+    async rejectPO(id: string, reason?: string, actor?: string) {
+        const po = await this.prisma.purchaseOrder.findUnique({ where: { id } });
+        if (!po) throw new NotFoundException('Purchase order not found');
+        if (po.status !== 'po_created' || po.approvalStatus !== 'pending_approval') {
+            throw new BadRequestException('Only a purchase order awaiting approval can be rejected.');
+        }
+        return this.prisma.purchaseOrder.update({
+            where: { id },
+            data: {
+                status: 'draft',
+                approvalStatus: 'rejected',
+                approvedBy: actor || 'Current User',
+                approvedAt: new Date(),
+                rejectionReason: String(reason ?? '').trim() || 'Returned for correction.',
+            },
+            include: { supplier: true, items: true },
+        });
     }
 
     /**
@@ -379,7 +440,7 @@ export class PurchaseOrdersService {
 
     /** Cancels the order, and the invoice raised for it if one exists. */
     async cancel(id: string, reason?: string) {
-        const po = await this.prisma.purchaseOrder.findUnique({ where: { id } });
+        const po = await this.prisma.purchaseOrder.findUnique({ where: { id }, include: { items: true } });
         if (!po) throw new NotFoundException('Purchase order not found');
         this.assertTransition(po.status, 'cancelled');
         if (po.financeRef) {
@@ -390,10 +451,22 @@ export class PurchaseOrdersService {
                 })
                 .catch(() => undefined);
         }
-        return this.prisma.purchaseOrder.update({
-            where: { id },
-            data: { status: 'cancelled', declineReason: reason ?? null },
-            include: { supplier: true, items: true },
+        return this.prisma.$transaction(async (tx) => {
+            const updated = await tx.purchaseOrder.update({
+                where: { id },
+                data: { status: 'cancelled', declineReason: reason ?? null },
+                include: { supplier: true, items: true },
+            });
+            for (const item of po.items.filter((line) => line.boqItemId)) {
+                const boq = await tx.projectBoqItem.findUnique({ where: { id: item.boqItemId! } });
+                if (boq) {
+                    await tx.projectBoqItem.update({
+                        where: { id: boq.id },
+                        data: { procuredQty: Math.max(0, boq.procuredQty - item.qty) },
+                    });
+                }
+            }
+            return updated;
         });
     }
 

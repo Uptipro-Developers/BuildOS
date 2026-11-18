@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -13,12 +13,25 @@ export class LeaveTypesService {
         return this.prisma.leaveType.findUniqueOrThrow({ where: { id } });
     }
 
+    private clean(data: any) {
+        const patch: Record<string, any> = { ...data };
+        if (data?.gradeEntitlements !== undefined) {
+            if (!data.gradeEntitlements || typeof data.gradeEntitlements !== 'object' || Array.isArray(data.gradeEntitlements)) {
+                throw new BadRequestException('Grade entitlements must be an object keyed by grade level.');
+            }
+            patch.gradeEntitlements = Object.fromEntries(Object.entries(data.gradeEntitlements)
+                .filter(([grade, days]) => grade.trim() && Number(days) >= 0)
+                .map(([grade, days]) => [grade.trim(), Number(days)]));
+        }
+        return patch;
+    }
+
     create(data: any) {
-        return this.prisma.leaveType.create({ data });
+        return this.prisma.leaveType.create({ data: this.clean(data) as any });
     }
 
     update(id: string, data: any) {
-        return this.prisma.leaveType.update({ where: { id }, data });
+        return this.prisma.leaveType.update({ where: { id }, data: this.clean(data) as any });
     }
 
     remove(id: string) {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityHistoryService } from '../activity-history/activity-history.service';
 import { AdminExtrasService } from '../admin-extras/admin-extras.service';
@@ -7,7 +7,8 @@ import { HrSetupService } from '../hr-extras/hr-setup.service';
 /** Columns accepted from clients; everything else is dropped. */
 const EMPLOYEE_FIELDS = [
     'firstName', 'lastName', 'middleName', 'email', 'phone', 'dateOfBirth',
-    'gender', 'dateHired', 'status', 'employmentType', 'salaryType', 'projectCount', 'projects',
+    'gender', 'dateHired', 'status', 'employmentType', 'salaryType', 'salaryFrequencyId',
+    'paysSalary', 'paymentSource', 'payrollProjectId', 'projectCount', 'projects',
     'baseSalary', 'gradeLevel', 'jobRoleId', 'bankName', 'accountNumber',
     'accountHolder', 'supervisorId', 'taxId', 'pensionId', 'healthInsuranceId',
     'emergencyContact', 'emergencyPhone', 'address', 'city', 'state', 'zipCode',
@@ -30,6 +31,8 @@ function sanitizeEmployeeInput(data: any): Record<string, any> {
     return out;
 }
 
+const normalizeEmploymentType = (value: unknown) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 @Injectable()
 export class EmployeesService {
     private readonly logger = new Logger(EmployeesService.name);
@@ -40,6 +43,23 @@ export class EmployeesService {
         private adminExtras: AdminExtrasService,
         private hrSetup: HrSetupService,
     ) { }
+
+    /** Employment-type payroll rules are authoritative; clients only select the type. */
+    private async applyEmploymentTypeDefaults(clean: Record<string, any>) {
+        if (!clean.employmentType) return;
+        const row = await this.prisma.systemSetting.findUnique({ where: { key: 'hr-employment-types' } });
+        const items = Array.isArray(row?.value) ? row.value as any[] : [];
+        const selected = items.find((item) => normalizeEmploymentType(item?.name) === normalizeEmploymentType(clean.employmentType));
+        if (!selected) return;
+        clean.paysSalary = selected.paysSalary !== false;
+        clean.salaryFrequencyId = clean.salaryFrequencyId || String(selected.defaultSalaryFrequencyId
+            ?? (selected.defaultSalaryType === 'Annual' ? 'salary-frequency-annual' : 'salary-frequency-monthly'));
+        clean.salaryType = clean.salaryType || String(selected.defaultSalaryType ?? 'Monthly');
+        clean.paymentSource = clean.paymentSource === 'project' || clean.paymentSource === 'company'
+            ? clean.paymentSource
+            : selected.defaultPaymentSource === 'project' ? 'project' : 'company';
+        if (clean.paymentSource !== 'project') clean.payrollProjectId = null;
+    }
 
     findAll(status?: string, departmentId?: string) {
         return this.prisma.employee.findMany({
@@ -77,6 +97,7 @@ export class EmployeesService {
 
     async create(data: any) {
         const clean = sanitizeEmployeeInput(data);
+        await this.applyEmploymentTypeDefaults(clean);
         if (!clean.departmentId && typeof data?.department === 'string' && data.department.trim()) {
             const department = await this.prisma.department.findFirst({
                 where: { name: { equals: data.department.trim(), mode: 'insensitive' } },
@@ -118,6 +139,7 @@ export class EmployeesService {
 
     async update(id: string, data: any) {
         const clean = sanitizeEmployeeInput(data);
+        await this.applyEmploymentTypeDefaults(clean);
         if (!clean.departmentId && typeof data?.department === 'string' && data.department.trim()) {
             const department = await this.prisma.department.findFirst({
                 where: { name: { equals: data.department.trim(), mode: 'insensitive' } },
@@ -151,5 +173,29 @@ export class EmployeesService {
             }).catch(() => {});
         }
         return this.prisma.employee.delete({ where: { id } });
+    }
+
+    listDocuments(employeeId: string) {
+        return this.prisma.documentUpload.findMany({ where: { employeeId }, orderBy: { uploadedAt: 'desc' } });
+    }
+
+    async addDocument(employeeId: string, data: any) {
+        await this.prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
+        const fileName = String(data?.fileName ?? '').trim();
+        const fileUrl = String(data?.fileUrl ?? '');
+        if (!fileName || !fileUrl.startsWith('data:')) throw new BadRequestException('A valid document file is required.');
+        return this.prisma.documentUpload.create({ data: {
+            employeeId, fileName, fileUrl, fileSize: Number(data?.fileSize ?? 0),
+            mimeType: String(data?.mimeType ?? 'application/octet-stream'),
+            documentType: String(data?.documentType ?? 'employee-document'),
+            uploadedBy: String(data?.uploadedBy ?? 'HR'), tags: Array.isArray(data?.tags) ? data.tags : [],
+        } });
+    }
+
+    async deleteDocument(employeeId: string, documentId: string) {
+        const document = await this.prisma.documentUpload.findFirst({ where: { id: documentId, employeeId } });
+        if (!document) throw new NotFoundException('Employee document not found.');
+        await this.prisma.documentUpload.delete({ where: { id: documentId } });
+        return { id: documentId, deleted: true };
     }
 }

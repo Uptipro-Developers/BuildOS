@@ -248,6 +248,54 @@ export class ProcurementRequestsService {
         return invoice;
     }
 
+    async recordInvoicePayment(id: string, body: any) {
+        const amount = Number(body?.amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            throw new BadRequestException('Payment amount must be greater than zero.');
+        }
+        return this.prisma.$transaction(async (tx) => {
+            const invoice = await tx.purchaseInvoice.findUnique({ where: { id } });
+            if (!invoice) throw new NotFoundException('Purchase invoice not found');
+            const status = normaliseStatus(invoice.status);
+            if (!['approved', 'partially_paid'].includes(status)) {
+                throw new BadRequestException('Only an approved invoice can be paid.');
+            }
+            const balance = Math.max(0, invoice.total - invoice.paidAmount);
+            if (amount > balance + 0.005) {
+                throw new BadRequestException(`Payment exceeds the outstanding balance of ${balance.toFixed(2)}.`);
+            }
+            const paidAmount = Math.min(invoice.total, invoice.paidAmount + amount);
+            const fullyPaid = paidAmount >= invoice.total - 0.005;
+            const history = Array.isArray(invoice.paymentHistory) ? invoice.paymentHistory : [];
+            const payment = {
+                amount,
+                date: body?.date ?? new Date().toISOString(),
+                method: String(body?.method ?? ''),
+                reference: String(body?.reference ?? ''),
+                recordedBy: String(body?.recordedBy ?? ''),
+            };
+            const updated = await tx.purchaseInvoice.update({
+                where: { id },
+                data: {
+                    paidAmount,
+                    status: fullyPaid ? 'paid' : 'partially_paid',
+                    paymentHistory: [...history, payment],
+                    notes: body?.notes ? `${invoice.notes ?? ''}\n${body.notes}`.trim() : invoice.notes,
+                },
+            });
+            if (invoice.poRef) {
+                await tx.purchaseOrder.updateMany({
+                    where: { OR: [{ poRef: invoice.poRef }, { id: invoice.poRef }] },
+                    data: {
+                        paidAmount,
+                        ...(fullyPaid ? { status: 'paid', paidAt: new Date() } : {}),
+                    },
+                });
+            }
+            return updated;
+        });
+    }
+
     /**
      * Cancels an invoice rather than deleting it.
      *
@@ -307,6 +355,15 @@ export class ProcurementRequestsService {
         });
     }
     async createRFQ(data: any) {
+        if (!data?.prRef) {
+            throw new BadRequestException('An RFQ must reference an approved purchase request.');
+        }
+        const purchaseRequest = await this.prisma.purchaseRequest.findUnique({
+            where: { prRef: String(data.prRef) },
+        });
+        if (!purchaseRequest || normaliseStatus(purchaseRequest.status) !== 'approved') {
+            throw new BadRequestException('The purchase request must be approved before an RFQ can be sent.');
+        }
         // From the RFQ sequence in Settings > Numbering ("RFQ-{N:4}").
         const { reference: rfqRef } = await this.numbering.allocate('RFQ');
         const rfqData: any = {
@@ -384,12 +441,21 @@ export class ProcurementRequestsService {
      * service-key endpoints the SabiQuot portal posts to, and an unrecognised
      * field in that payload would otherwise fail the whole write.
      */
-    createQuote(data: any) {
+    async createQuote(data: any) {
+        if (!data?.rfqRef) throw new BadRequestException('A supplier quote must reference an RFQ.');
+        const rfq = await this.prisma.sentRFQ.findFirst({
+            where: { OR: [{ id: String(data.rfqRef) }, { rfqRef: String(data.rfqRef) }] },
+        });
+        if (!rfq) throw new BadRequestException('The referenced RFQ was not found.');
+        const prRef = data.prRef ? String(data.prRef) : rfq.prRef;
+        if (!prRef || (rfq.prRef && prRef !== rfq.prRef)) {
+            throw new BadRequestException('The quote must remain linked to the RFQ purchase request.');
+        }
         return this.prisma.receivedQuote.create({
             data: {
-                rfqRef: data.rfqRef ? String(data.rfqRef) : null,
+                rfqRef: rfq.rfqRef,
                 // What the quote is for. Quote comparison groups on this.
-                prRef: data.prRef ? String(data.prRef) : null,
+                prRef,
                 supplierName: data.supplierName,
                 supplierId: data.supplierId ?? null,
                 status: data.status ?? 'Received',
@@ -405,13 +471,25 @@ export class ProcurementRequestsService {
         });
     }
     async updateQuote(id: string, data: any) {
+        const existing = await this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
+        const decision = normaliseStatus(data?.status);
+        if (decision === 'approved') {
+            if (!['received', 'pending_review'].includes(normaliseStatus(existing.status))) {
+                throw new BadRequestException('Only a quote awaiting review can be approved.');
+            }
+            if (!existing.prRef) throw new BadRequestException('The quote is not linked to a purchase request.');
+            const pr = await this.prisma.purchaseRequest.findUnique({ where: { prRef: existing.prRef } });
+            if (!pr || normaliseStatus(pr.status) !== 'approved') {
+                throw new BadRequestException('The originating purchase request is not approved.');
+            }
+        }
         const quote = await this.prisma.receivedQuote.update({ where: { id }, data });
 
         // Approving a quote *is* raising the order. "Create PO" was a separate
         // button on Received Quotes, so a quote could sit approved with no order
         // behind it and the two lists disagreed about what had been bought.
-        if (normaliseStatus(data?.status) === 'approved') {
-            await this.raisePurchaseOrderFromQuote(quote).catch(() => undefined);
+        if (decision === 'approved') {
+            await this.raisePurchaseOrderFromQuote(quote);
             return this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
         }
         // Mirror a buyer counter-offer to the supplier's portal. Only the negotiate

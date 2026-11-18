@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { apiFetch } from "../../api/client";
 import { fetchDepartments } from "../../api/departments";
+import { getSalaryFrequencies, type SalaryFrequencyConfig } from "../../api/employment-types";
 import { ConfirmationModal } from "../../components/ConfirmationModal";
 import {
   getCurrencySymbol,
@@ -49,7 +50,8 @@ interface SalaryBand {
   department: string;
   description: string;
   basicSalary: number;
-  salaryType: "Monthly" | "Annual";
+  salaryType: string;
+  salaryFrequencyId?: string | null;
   components: SalaryComponent[];
 }
 
@@ -434,6 +436,7 @@ function ComponentModal({
 export function SalaryStructurePage() {
   const [bands, setBands] = useState<SalaryBand[]>([]);
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
+  const [frequencies, setFrequencies] = useState<SalaryFrequencyConfig[]>([]);
 
   useEffect(() => {
     apiFetch<any[]>("/salary-bands")
@@ -446,7 +449,8 @@ export function SalaryStructurePage() {
             department: b.department ?? "",
             description: b.description ?? "",
             basicSalary: b.basicSalary ?? 0,
-            salaryType: b.salaryType === "Annual" ? "Annual" : "Monthly",
+            salaryType: b.salaryType ?? "Monthly",
+            salaryFrequencyId: b.salaryFrequencyId,
             components: Array.isArray(b.components) ? b.components : [],
           })),
         ),
@@ -460,6 +464,9 @@ export function SalaryStructurePage() {
     fetchDepartments()
       .then((rows) => setDepartments(rows.map((department) => ({ id: department.id, name: department.name }))))
       .catch(() => setDepartments([]));
+  }, []);
+  useEffect(() => {
+    getSalaryFrequencies().then(setFrequencies).catch(() => setFrequencies([]));
   }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["b1"]));
   const [modalBand, setModalBand] = useState<SalaryBand | null>(null);
@@ -476,6 +483,7 @@ export function SalaryStructurePage() {
     description: "",
     basicSalary: 0,
     salaryType: "Monthly" as "Monthly" | "Annual",
+    salaryFrequencyId: "salary-frequency-monthly",
   });
 
   const toggle = (id: string) =>
@@ -543,6 +551,19 @@ export function SalaryStructurePage() {
     }
   };
 
+  const updateBandFrequency = async (band: SalaryBand, salaryFrequencyId: string) => {
+    const frequency = frequencies.find((item) => item.id === salaryFrequencyId);
+    if (!frequency) return;
+    setBands((current) => current.map((item) => item.id === band.id ? { ...item, salaryFrequencyId, salaryType: frequency.name } : item));
+    try {
+      await apiFetch(`/salary-bands/${band.id}`, { method: "PATCH", body: JSON.stringify({ salaryFrequencyId, salaryType: frequency.name }) });
+      toast.success(`${band.gradeName} frequency updated to ${frequency.name}.`);
+    } catch (error) {
+      setBands((current) => current.map((item) => item.id === band.id ? band : item));
+      toast.error(error instanceof Error ? error.message : "Failed to update salary frequency.");
+    }
+  };
+
   const addBand = async () => {
     if (!newBand.gradeName.trim()) return;
     const gradeName = newBand.gradeName.trim();
@@ -557,6 +578,7 @@ export function SalaryStructurePage() {
           description: newBand.description,
           basicSalary: newBand.basicSalary,
           salaryType: newBand.salaryType,
+          salaryFrequencyId: newBand.salaryFrequencyId,
           components: [],
         }),
       });
@@ -569,11 +591,12 @@ export function SalaryStructurePage() {
           department: created.department ?? newBand.department,
           description: created.description ?? newBand.description,
           basicSalary: created.basicSalary ?? newBand.basicSalary,
-          salaryType: created.salaryType === "Annual" ? "Annual" : newBand.salaryType,
+          salaryType: created.salaryType ?? newBand.salaryType,
+          salaryFrequencyId: created.salaryFrequencyId ?? newBand.salaryFrequencyId,
           components: Array.isArray(created.components) ? created.components : [],
         },
       ]);
-      setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0, salaryType: "Monthly" });
+      setNewBand({ gradeName: "", gradeLevel: "", department: "", description: "", basicSalary: 0, salaryType: "Monthly", salaryFrequencyId: "salary-frequency-monthly" });
       setAddBandOpen(false);
       toast.success(`Salary band "${gradeName}" created.`);
     } catch (err) {
@@ -737,6 +760,7 @@ export function SalaryStructurePage() {
               {/* Band body */}
               {isOpen && (
                 <div className="border-t px-5 py-4 bg-gray-50 space-y-4">
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2"><div><p className="text-sm font-medium text-gray-800">Salary Frequency</p><p className="text-xs text-gray-500">Controls the pay cycle used for this grade band.</p></div><select value={band.salaryFrequencyId ?? "salary-frequency-monthly"} onChange={(event) => void updateBandFrequency(band, event.target.value)} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">{frequencies.map((frequency) => <option key={frequency.id} value={frequency.id}>{frequency.name}</option>)}</select></div>
                   {(["allowance", "deduction"] as const).map((ctype) => {
                     const list = band.components.filter(
                       (c) => c.type === ctype,
@@ -940,15 +964,14 @@ export function SalaryStructurePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Salary Type
+                    Salary Frequency
                   </label>
                   <select
                     className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={newBand.salaryType}
-                    onChange={(e) => setNewBand((p) => ({ ...p, salaryType: e.target.value as "Monthly" | "Annual" }))}
+                    value={newBand.salaryFrequencyId}
+                    onChange={(e) => { const frequency = frequencies.find((item) => item.id === e.target.value); setNewBand((p) => ({ ...p, salaryFrequencyId: e.target.value, salaryType: frequency?.name ?? p.salaryType })); }}
                   >
-                    <option value="Monthly">Monthly</option>
-                    <option value="Annual">Annual</option>
+                    {frequencies.map((frequency) => <option key={frequency.id} value={frequency.id}>{frequency.name}</option>)}
                   </select>
                 </div>
                 <div>

@@ -177,7 +177,7 @@ export function ProcurementLayout() {
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
       <AppHeader currentApp="procurement" appColor="bg-blue-700" />
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+        <aside className="bg-white border-r border-gray-200 flex-shrink-0 overflow-hidden">
           <CollapsibleSidebar
             sections={canConfigure ? sidebarSections : sidebarSections.filter((section) => section.label !== "Settings")}
             activeClass="bg-blue-50 text-blue-700 font-medium [&_svg]:text-blue-600"

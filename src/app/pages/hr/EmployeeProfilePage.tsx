@@ -32,6 +32,8 @@ import {
   AlertCircle,
   X,
   Save,
+  Upload,
+  Trash2,
 } from "lucide-react";
 import {
   fetchEmployee,
@@ -39,9 +41,14 @@ import {
   fetchEmploymentTerms,
   updateEmployee,
   toEmployeeUpdatePayload,
+  getEmployeeDocuments,
+  addEmployeeDocument,
+  deleteEmployeeDocument,
+  type EmployeeDocument,
   type EmploymentTerms,
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
+import { fetchProjects } from "../../api/projects";
 import { getAppRoles } from "../../api/admin-extras";
 import {
   getEmploymentTypes,
@@ -139,7 +146,10 @@ export function EmployeeProfilePage() {
   const [terms, setTerms] = useState<EmploymentTerms | null>(null);
   const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeConfig[]>([]);
   const [salaryGrades, setSalaryGrades] = useState<SalaryGradeOption[]>([]);
+  const [payrollProjects, setPayrollProjects] = useState<{ id: string; name: string }[]>([]);
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
+  const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
 
   // Human-friendly display ID passed from the list page
   const displayId = searchParams.get("displayId") ?? emp?.id ?? "";
@@ -151,9 +161,29 @@ export function EmployeeProfilePage() {
       )
       .catch(() => {});
   }, []);
+  useEffect(() => { if (id) getEmployeeDocuments(id).then(setDocuments).catch(() => setDocuments([])); }, [id]);
+
+  async function uploadDocument(file: File) {
+    if (!id) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("Documents must be 5 MB or smaller."); return; }
+    setUploadingDocument(true);
+    try {
+      const fileUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+      const created = await addEmployeeDocument(id, { fileName: file.name, fileUrl, fileSize: file.size, mimeType: file.type || "application/octet-stream", documentType: "employee-document", uploadedBy: "HR" });
+      setDocuments((current) => [created, ...current]); toast.success("Employee document uploaded.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Document upload failed."); }
+    finally { setUploadingDocument(false); }
+  }
+
+  async function removeDocument(documentId: string) {
+    if (!id || !window.confirm("Delete this employee document?")) return;
+    try { await deleteEmployeeDocument(id, documentId); setDocuments((current) => current.filter((document) => document.id !== documentId)); toast.success("Document deleted."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete document."); }
+  }
   useEffect(() => {
     getEmploymentTypes().then(setEmploymentTypes).catch(() => setEmploymentTypes([]));
     getSalaryGrades().then(setSalaryGrades).catch(() => setSalaryGrades([]));
+    fetchProjects().then((rows) => setPayrollProjects(rows.map((project) => ({ id: project.id, name: project.name })))).catch(() => setPayrollProjects([]));
     getAppRoles()
       .then((roles) =>
         setRoleOptions(
@@ -241,6 +271,8 @@ export function EmployeeProfilePage() {
       errs.email = "Enter a valid email address";
     if (draft.phone && !/^\+?[\d\s\-().]{7,20}$/.test(draft.phone))
       errs.phone = "Enter a valid phone number";
+    if (draft.paysSalary !== false && draft.paymentSource === "project" && !draft.payrollProjectId)
+      errs.payrollProjectId = "Select the project funding this employee";
     return errs;
   }
 
@@ -655,16 +687,7 @@ export function EmployeeProfilePage() {
 
       {/* Documents */}
       {tab === "documents" && (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-          <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm text-gray-500 font-medium">
-            Document storage not yet connected
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Documents will appear here once the document management module is
-            integrated.
-          </p>
-        </div>
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="flex items-center justify-between border-b px-5 py-4"><div><h3 className="text-sm font-semibold text-gray-900">Employee Documents</h3><p className="text-xs text-gray-500">Contracts, identification and certificates · maximum 5 MB each</p></div><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"><Upload className="h-4 w-4" />{uploadingDocument ? "Uploading…" : "Upload Document"}<input type="file" className="hidden" disabled={uploadingDocument} accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadDocument(file); event.target.value = ""; }} /></label></div>{documents.length === 0 ? <div className="p-10 text-center"><FileText className="mx-auto mb-2 h-9 w-9 text-gray-300" /><p className="text-sm text-gray-500">No documents uploaded</p></div> : <div className="divide-y">{documents.map((document) => <div key={document.id} className="flex items-center justify-between px-5 py-3"><div className="flex min-w-0 items-center gap-3"><FileText className="h-5 w-5 flex-none text-indigo-500" /><div className="min-w-0"><a href={document.fileUrl} download={document.fileName} className="block truncate text-sm font-medium text-gray-900 hover:text-indigo-600">{document.fileName}</a><p className="text-xs text-gray-400">{(document.fileSize / 1024).toFixed(1)} KB · {formatDateTimeByGeneralSettings(document.uploadedAt)}</p></div></div><button onClick={() => void removeDocument(document.id)} className="rounded p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" title="Delete document"><Trash2 className="h-4 w-4" /></button></div>)}</div>}</div>
       )}
 
       {/* Attendance */}
@@ -1084,7 +1107,7 @@ export function EmployeeProfilePage() {
                       setEditDraft((previous: any) => ({
                         ...previous,
                         employmentType: e.target.value,
-                        ...(selected ? { salaryType: selected.defaultSalaryType } : {}),
+                        ...(selected ? { salaryType: selected.defaultSalaryType, salaryFrequencyId: selected.defaultSalaryFrequencyId, paysSalary: selected.paysSalary, paymentSource: selected.defaultPaymentSource, payrollProjectId: selected.defaultPaymentSource === "project" ? previous.payrollProjectId : "" } : {}),
                       }));
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1131,17 +1154,20 @@ export function EmployeeProfilePage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Salary Type
+                    Payroll Eligibility
                   </label>
                   <select
-                    value={editDraft.salaryType ?? "Monthly"}
-                    onChange={(e) => df("salaryType", e.target.value)}
+                    value={editDraft.paysSalary === false ? "unpaid" : "paid"}
+                    onChange={(e) => setEditDraft((previous: any) => ({ ...previous, paysSalary: e.target.value === "paid" }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    <option value="Monthly">Monthly</option>
-                    <option value="Annual">Annual</option>
+                    <option value="paid">Paid</option>
+                    <option value="unpaid">Unpaid</option>
                   </select>
                 </div>
+                {editDraft.paysSalary !== false && <div><label className="block text-xs font-medium text-gray-600 mb-1">Salary Frequency</label><input value={editDraft.salaryType ?? "Monthly"} readOnly className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-600" /></div>}
+                {editDraft.paysSalary !== false && <div><label className="block text-xs font-medium text-gray-600 mb-1">Payment Source</label><select value={editDraft.paymentSource ?? "company"} onChange={(e) => setEditDraft((previous: any) => ({ ...previous, paymentSource: e.target.value, payrollProjectId: e.target.value === "project" ? previous.payrollProjectId : "" }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"><option value="company">Company payroll</option><option value="project">Project payroll</option></select></div>}
+                {editDraft.paysSalary !== false && editDraft.paymentSource === "project" && <div><label className="block text-xs font-medium text-gray-600 mb-1">Payroll Project</label><select value={editDraft.payrollProjectId ?? ""} onChange={(e) => df("payrollProjectId", e.target.value)} className={`w-full border rounded-lg px-3 py-2 text-sm bg-white ${editErrors.payrollProjectId ? "border-red-400" : "border-gray-300"}`}><option value="">Select project…</option>{payrollProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>{editErrors.payrollProjectId && <p className="mt-1 text-xs text-red-600">{editErrors.payrollProjectId}</p>}</div>}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     Base Salary

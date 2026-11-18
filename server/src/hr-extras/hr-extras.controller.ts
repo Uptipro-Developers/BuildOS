@@ -41,6 +41,8 @@ export class HrExtrasController {
     }
     @Post('attendance')
     create(@Body() body: any) { return this.svc.createAttendance(body); }
+    @Post('attendance/project-upload')
+    uploadProjectAttendance(@Body() body: any) { return this.svc.uploadProjectAttendance(body); }
     @Put('attendance/:id')
     update(@Param('id') id: string, @Body() body: any) { return this.svc.updateAttendance(id, body); }
     @Delete('attendance/:id')
@@ -51,7 +53,7 @@ export class HrExtrasController {
     getAllPeriods() { return this.svc.findAllPeriods(); }
     /** The next period's suggested name and dates, from the configured frequency. */
     @Get('payroll-periods/next')
-    getNextPeriod() { return this.svc.nextPeriod(); }
+    getNextPeriod(@Query('frequencyId') frequencyId?: string) { return this.svc.nextPeriod(frequencyId); }
     @Get('payroll-periods/:id')
     getPeriod(@Param('id') id: string) { return this.svc.findPeriod(id); }
     @Post('payroll-periods')
@@ -79,6 +81,16 @@ export class HrExtrasController {
     getEntries(@Param('runId') runId: string) { return this.svc.findEntriesByRun(runId); }
     @Patch('payroll-entries/:id')
     updateEntry(@Param('id') id: string, @Body() body: any) { return this.svc.updateEntry(id, body); }
+
+    // ── Payroll Inputs ──
+    @Get('payroll-inputs')
+    getPayrollInputs(@Query('employeeId') employeeId?: string, @Query('status') status?: string) {
+        return this.svc.findPayrollInputs(employeeId, status);
+    }
+    @Post('payroll-inputs')
+    createPayrollInput(@Body() body: any) { return this.svc.createPayrollInput(body); }
+    @Delete('payroll-inputs/:id')
+    deletePayrollInput(@Param('id') id: string) { return this.svc.deletePayrollInput(id); }
 
     // ── Payslips ──
     @Get('payslips')
@@ -137,6 +149,16 @@ export class HrExtrasController {
     updateSalaryBand(@Param('id') id: string, @Body() body: any) { return this.svc.updateSalaryBand(id, body); }
     @Delete('salary-bands/:id')
     deleteSalaryBand(@Param('id') id: string) { return this.svc.deleteSalaryBand(id); }
+
+    // ── Salary Frequencies ──
+    @Get('salary-frequencies')
+    getSalaryFrequencies() { return this.svc.findSalaryFrequencies(); }
+    @Post('salary-frequencies')
+    createSalaryFrequency(@Body() body: any) { return this.svc.createSalaryFrequency(body); }
+    @Patch('salary-frequencies/:id')
+    updateSalaryFrequency(@Param('id') id: string, @Body() body: any) { return this.svc.updateSalaryFrequency(id, body); }
+    @Delete('salary-frequencies/:id')
+    deleteSalaryFrequency(@Param('id') id: string) { return this.svc.deleteSalaryFrequency(id); }
 
     // ── Employment Types ──
     @Get('employment-types')

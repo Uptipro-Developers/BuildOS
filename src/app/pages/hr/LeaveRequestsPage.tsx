@@ -24,6 +24,7 @@ interface LeaveRequest {
   approvedBy: string | null;
   approvedAt: string | null;
   notes: string;
+  handoverEmployeeName: string;
 }
 
 const STATUS_CONF: Record<
@@ -184,6 +185,7 @@ export function LeaveRequestsPage() {
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 Days
               </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Handover To</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 Status
               </th>
@@ -215,6 +217,7 @@ export function LeaveRequestsPage() {
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">
                     {r.days}d
                   </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{r.handoverEmployeeName || "—"}</td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${s.badge}`}
