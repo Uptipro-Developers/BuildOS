@@ -18,6 +18,7 @@ import { NotificationDispatchService } from '../notifications/notification-dispa
 const LEAVE_REQUEST_FIELDS = [
     'refId', 'days', 'startDate', 'endDate', 'status', 'notes',
     'employeeId', 'leaveTypeId',
+    'handoverEmployeeId', 'handoverEmployeeName',
 ] as const;
 
 const DATE_FIELDS = new Set(['startDate', 'endDate']);
@@ -91,6 +92,7 @@ export class LeaveRequestsService {
 
         if (!clean.employeeId) throw new BadRequestException('An employee is required');
         if (!clean.leaveTypeId) throw new BadRequestException('A leave type is required');
+        if (!clean.handoverEmployeeId) throw new BadRequestException('Select the employee receiving the handover');
         if (!clean.startDate || !clean.endDate) {
             throw new BadRequestException('Start and end dates are required');
         }
@@ -102,6 +104,15 @@ export class LeaveRequestsService {
             where: { id: clean.leaveTypeId },
         });
         if (!leaveType) throw new BadRequestException('That leave type no longer exists');
+        if (clean.handoverEmployeeId === clean.employeeId) {
+            throw new BadRequestException('You cannot hand over leave responsibilities to yourself');
+        }
+        const handoverEmployee = await this.prisma.employee.findFirst({
+            where: { id: clean.handoverEmployeeId, status: 'active' },
+            select: { firstName: true, lastName: true },
+        });
+        if (!handoverEmployee) throw new BadRequestException('The selected handover employee is not active');
+        clean.handoverEmployeeName = `${handoverEmployee.firstName} ${handoverEmployee.lastName}`.trim();
 
         // Fall back to the working-day count when the client does not send one.
         const days = Number(clean.days) > 0

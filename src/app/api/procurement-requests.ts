@@ -41,6 +41,7 @@ export interface PurchaseInvoice {
     supplierId?: string; invoiceDate: string; dueDate: string;
     lines: any[]; subtotal: number; vatTotal: number; total: number;
     status: string; notes?: string; createdAt: string;
+    paidAmount?: number; paymentHistory?: { amount: number; date: string; method: string; reference: string; recordedBy?: string }[];
     /** Set once the invoice has been sent for approval; read-only from then on. */
     postingDraft?: PostingDraft | null;
 }
@@ -83,6 +84,8 @@ export const createPurchaseInvoice = (data: Partial<PurchaseInvoice>) =>
     apiFetch<PurchaseInvoice>('/purchase-invoices', { method: 'POST', body: JSON.stringify(data) });
 export const updatePurchaseInvoice = (id: string, data: Partial<PurchaseInvoice>) =>
     apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+export const recordPurchaseInvoicePayment = (id: string, data: { amount: number; date: string; method: string; reference: string; recordedBy?: string; notes?: string }) =>
+    apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}/payments`, { method: 'POST', body: JSON.stringify(data) });
 /** Moves a Pending Review invoice to Pending Approval, with the posting treatment already decided. */
 export const sendPurchaseInvoiceForApproval = (id: string, postingDraft: PostingDraft) =>
     apiFetch<PurchaseInvoice>(`/purchase-invoices/${id}/send-for-approval`, {

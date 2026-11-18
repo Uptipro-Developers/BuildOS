@@ -30,6 +30,7 @@ import { useResources } from "../../contexts/ResourceContext";
 import { fetchConstructionProjects, createConstructionProject } from "../../api/projects";
 import { fetchEmployees } from "../../api/employees";
 import { setProjectsCache, upsertProjectCache } from "./projectStore";
+import { createStakeholder, inviteStakeholderPartner } from "../../api/stakeholders";
 
 type ProjectStatus = Project["status"];
 
@@ -88,6 +89,15 @@ const DEFAULT_FORM = {
   clusterId: "",
 };
 
+const PARTNER_CATEGORIES = [
+  "Architecture",
+  "Mechanical & Electrical",
+  "Construction",
+  "Plumbing",
+  "Structural",
+  "Quantity Surveying",
+];
+
 export function ProjectsListPage() {
   const navigate = useNavigate();
   const { contractors } = useResources();
@@ -108,6 +118,9 @@ export function ProjectsListPage() {
   const [projectList, setProjectList] = useState<Project[]>([]);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [staffList, setStaffList] = useState<string[]>([]);
+  const [projectPartners, setProjectPartners] = useState<
+    { category: string; contractorId: string; task: string }[]
+  >([]);
 
   // Load employees for the Project Manager dropdown.
   useEffect(() => {
@@ -518,11 +531,39 @@ export function ProjectsListPage() {
                     status: "Active",
                     budget: 0,
                   })) as Project;
+                  const partnerResults = await Promise.allSettled(
+                    projectPartners
+                      .filter((partner) => partner.contractorId)
+                      .map(async (partner) => {
+                        const contractor = contractors.find((row) => row.id === partner.contractorId);
+                        if (!contractor) return;
+                        const stakeholder = await createStakeholder({
+                          projectId: created.id,
+                          name: contractor.name,
+                          organization: contractor.name,
+                          role: partner.category,
+                          email: contractor.email,
+                          phone: contractor.mobile,
+                          influenceLevel: "High",
+                          impactLevel: "High",
+                          notes: partner.task,
+                          isPartner: true,
+                          partnerCategory: partner.category,
+                          partnerTask: partner.task,
+                        });
+                        if (contractor.email) await inviteStakeholderPartner(stakeholder.id);
+                      }),
+                  );
                   setProjectList((prev) => [...prev, created]);
                   upsertProjectCache(created);
                   toast.success(`Project "${created.name}" created.`);
+                  const failedPartners = partnerResults.filter((result) => result.status === "rejected").length;
+                  if (failedPartners) {
+                    toast.warning(`${failedPartners} partner assignment${failedPartners === 1 ? "" : "s"} could not be completed. Add them from Project Stakeholders.`);
+                  }
                   setShowCreate(false);
                   setForm(DEFAULT_FORM);
+                  setProjectPartners([]);
                 } catch (err) {
                   toast.error(
                     (err as Error)?.message ||
@@ -715,6 +756,38 @@ export function ProjectsListPage() {
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   placeholder="Project description"
                 />
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Project Partners</h3>
+                    <p className="mt-0.5 text-xs text-gray-500">Assign delivery partners by discipline. Partners with an email receive onboarding invitations after creation.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProjectPartners((rows) => [...rows, { category: PARTNER_CATEGORIES[0], contractorId: "", task: "" }])}
+                    className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add Partner
+                  </button>
+                </div>
+                {projectPartners.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {projectPartners.map((partner, index) => (
+                      <div key={`${index}-${partner.category}`} className="grid grid-cols-[160px_1fr_1fr_32px] items-center gap-2 rounded-lg border border-gray-200 bg-white p-2">
+                        <select value={partner.category} onChange={(event) => setProjectPartners((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, category: event.target.value } : row))} className="rounded-md border border-gray-300 px-2 py-2 text-xs">
+                          {PARTNER_CATEGORIES.map((category) => <option key={category}>{category}</option>)}
+                        </select>
+                        <select value={partner.contractorId} onChange={(event) => setProjectPartners((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, contractorId: event.target.value } : row))} className="rounded-md border border-gray-300 px-2 py-2 text-xs">
+                          <option value="">Select partner…</option>
+                          {contractors.map((contractor) => <option key={contractor.id} value={contractor.id}>{contractor.name}{contractor.email ? "" : " (no email)"}</option>)}
+                        </select>
+                        <input value={partner.task} onChange={(event) => setProjectPartners((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, task: event.target.value } : row))} placeholder="Assigned task" className="rounded-md border border-gray-300 px-2 py-2 text-xs" />
+                        <button type="button" onClick={() => setProjectPartners((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600" title="Remove partner"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button

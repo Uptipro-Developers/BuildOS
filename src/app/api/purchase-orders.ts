@@ -16,6 +16,10 @@ export function mapPO(p: any) {
         prRef: p.prRef ?? '',
         mrRef: p.mrRef ?? '',
         quoteRef: p.quoteRef ?? '',
+        sourceType: p.sourceType ?? 'direct',
+        projectId: p.projectId ?? '',
+        projectName: p.projectName ?? '',
+        boqItemIds: p.boqItemIds ?? [],
         supplierId: p.supplierId ?? p.supplier?.id ?? '',
         supplier: p.supplier?.name ?? '',
         supplierEmail: p.supplier?.email ?? '',
@@ -23,6 +27,10 @@ export function mapPO(p: any) {
             ? `${p.supplier.contactPerson}${p.supplier.phone ? ' — ' + p.supplier.phone : ''}`
             : '',
         status: p.status,
+        approvalStatus: p.approvalStatus ?? 'approved',
+        approvedBy: p.approvedBy ?? '',
+        approvedAt: fmt(p.approvedAt),
+        rejectionReason: p.rejectionReason ?? '',
         sentToFinance: p.sentToFinance ?? false,
         financeRef: p.financeRef ?? '',
         declineReason: p.declineReason ?? '',
@@ -47,6 +55,7 @@ export function mapPO(p: any) {
         confirmedAt: fmt(p.confirmedAt),
         totalItems: p.items?.length ?? 0,
         totalValue: p.totalValue ?? 0,
+        paidAmount: p.paidAmount ?? 0,
         receivedValue: p.receivedValue ?? 0,
         items: (p.items ?? []).map((i: any) => ({
             material: i.material,
@@ -54,6 +63,7 @@ export function mapPO(p: any) {
             unit: i.unit,
             unitCost: i.unitCost,
             received: i.received ?? 0,
+            boqItemId: i.boqItemId ?? undefined,
         })),
     };
 }
@@ -124,6 +134,20 @@ export function createPO(
     return apiFetch<any>(`/purchase-orders/${id}/create-po`, {
         method: 'POST',
         body: JSON.stringify(data),
+    }).then(mapPO);
+}
+
+export function approvePurchaseOrder(id: string, actor?: string) {
+    return apiFetch<any>(`/purchase-orders/${id}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ actor }),
+    }).then(mapPO);
+}
+
+export function rejectPurchaseOrder(id: string, reason: string, actor?: string) {
+    return apiFetch<any>(`/purchase-orders/${id}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason, actor }),
     }).then(mapPO);
 }
 

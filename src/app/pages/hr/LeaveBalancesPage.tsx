@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Search, Download, Filter } from "lucide-react";
 import { fetchEmployees } from "../../api/employees";
-import { fetchLeaveRequests } from "../../api/leave-requests";
+import { getLeaveBalance, type LeaveBalance } from "../../api/leave-requests";
 import { exportCSV } from "../../utils/exportCSV";
 
 interface EmployeeBalance {
@@ -51,34 +51,24 @@ export function LeaveBalancesPage() {
   const [balances, setBalances] = useState<EmployeeBalance[]>([]);
 
   useEffect(() => {
-    Promise.all([fetchEmployees(), fetchLeaveRequests()])
-      .then(([employees, requests]) => {
-        const usedByEmployee = new Map<string, EmployeeBalance>();
-        employees.forEach((e: any) => {
-          usedByEmployee.set(`${e.firstName} ${e.lastName}`, {
+    fetchEmployees()
+      .then(async (employees) => {
+        const rows = await Promise.all(employees.map(async (e: any) => {
+          const balances = await getLeaveBalance(e.id).catch(() => []) as LeaveBalance[];
+          const find = (needle: string) => balances.find((balance) => balance.leaveTypeName.toLowerCase().includes(needle));
+          const cell = (balance?: LeaveBalance) => ({ total: balance?.totalAllowed ?? 0, used: balance?.usedDays ?? 0 });
+          return {
             id: e.id,
             name: `${e.firstName} ${e.lastName}`,
             department: e.department,
             employeeId: e.id,
-            annual: { total: LEAVE_TOTALS.annual, used: 0 },
-            sick: { total: LEAVE_TOTALS.sick, used: 0 },
-            emergency: { total: LEAVE_TOTALS.emergency, used: 0 },
-            study: { total: LEAVE_TOTALS.study, used: 0 },
-          });
-        });
-        requests
-          .filter((r: any) => String(r.status).toLowerCase() === "approved")
-          .forEach((r: any) => {
-            const row = usedByEmployee.get(r.employee);
-            if (!row) return;
-            const type = String(r.leaveType).toLowerCase();
-            const days = Number(r.days) || 0;
-            if (type.includes("sick")) row.sick.used += days;
-            else if (type.includes("emergency")) row.emergency.used += days;
-            else if (type.includes("study")) row.study.used += days;
-            else row.annual.used += days;
-          });
-        setBalances(Array.from(usedByEmployee.values()));
+            annual: cell(find("annual")),
+            sick: cell(find("sick")),
+            emergency: cell(find("emergency")),
+            study: cell(find("study")),
+          } satisfies EmployeeBalance;
+        }));
+        setBalances(rows);
       })
       .catch(() => setBalances([]));
   }, []);

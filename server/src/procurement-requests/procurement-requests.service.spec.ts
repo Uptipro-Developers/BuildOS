@@ -40,7 +40,7 @@ function makeService() {
         purchaseRequest: {
             ...record('purchaseRequest'),
             findUnique: jest.fn(() =>
-                Promise.resolve({ prRef: 'PR-0019', mrRef: 'MR-0007', daysToDeliver: 10 }),
+                Promise.resolve({ prRef: 'PR-0019', mrRef: 'MR-0007', daysToDeliver: 10, status: 'approved' }),
             ),
             findUniqueOrThrow: jest.fn(() =>
                 Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved' }),
@@ -53,7 +53,10 @@ function makeService() {
                 return Promise.resolve({ count: 1 });
             }),
         },
-        sentRFQ: record('sentRFQ'),
+        sentRFQ: {
+            ...record('sentRFQ'),
+            findFirst: jest.fn(() => Promise.resolve({ id: 'rfq-1', rfqRef: 'RFQ-0011', prRef: 'PR-0019', status: 'Sent' })),
+        },
         receivedQuote: {
             ...record('receivedQuote'),
             update: jest.fn(({ where, data }: any) => {
@@ -64,9 +67,7 @@ function makeService() {
                 quoteUpdates.push(args);
                 return Promise.resolve({ count: 1 });
             }),
-            findUniqueOrThrow: jest.fn(() =>
-                Promise.resolve({ ...quoteRow, status: 'po_created' }),
-            ),
+            findUniqueOrThrow: jest.fn(() => Promise.resolve({ ...quoteRow, status: 'received' })),
         },
         purchaseOrder: {
             findFirst: jest.fn(() => Promise.resolve(null)),
@@ -156,6 +157,7 @@ const quoteRow = {
     supplierName: 'Dangote Cement',
     totalValue: 4_250_000,
     validUntil: null,
+    status: 'received',
     items: [
         { material: 'OPC Cement', qty: 500, unit: 'bags', unitPrice: 8500 },
     ],
@@ -271,17 +273,16 @@ describe('creating an RFQ', () => {
         const { service, created } = makeService();
 
         // The UI used to pass the purchase-request reference as `rfqRef`.
-        await service.createRFQ({ supplierName: 'CemCo', rfqRef: 'PR-0019', items: [] });
+        await service.createRFQ({ supplierName: 'CemCo', rfqRef: 'caller-value', prRef: 'PR-0019', items: [] });
 
         expect(created.sentRFQ[0].rfqRef).toBe('RFQ-0011');
     });
 
-    it('accepts a request with no purchase request behind it', async () => {
-        const { service, created } = makeService();
-
-        await service.createRFQ({ supplierName: 'CemCo', items: [] });
-
-        expect(created.sentRFQ[0].prRef).toBeNull();
+    it('rejects an RFQ with no approved purchase request behind it', async () => {
+        const { service } = makeService();
+        await expect(service.createRFQ({ supplierName: 'CemCo', items: [] })).rejects.toThrow(
+            'An RFQ must reference an approved purchase request.',
+        );
     });
 });
 
@@ -309,6 +310,8 @@ describe('recording a supplier quote', () => {
 
         await service.createQuote({
             supplierName: 'CemCo',
+            rfqRef: 'RFQ-0011',
+            prRef: 'PR-0019',
             projectName: 'Ikeja Heights',
             destinationStore: 'Ikeja Site Store',
             storeLevel: 'project',
@@ -329,6 +332,8 @@ describe('recording a supplier quote', () => {
         // unrecognised key must not take the whole write down with it.
         await service.createQuote({
             supplierName: 'CemCo',
+            rfqRef: 'RFQ-0011',
+            prRef: 'PR-0019',
             items: [],
             sabiquotSubmissionId: 'abc-123',
         });
@@ -340,7 +345,7 @@ describe('recording a supplier quote', () => {
     it('defaults a missing total to zero rather than storing NaN', async () => {
         const { service, created } = makeService();
 
-        await service.createQuote({ supplierName: 'CemCo', items: [] });
+        await service.createQuote({ supplierName: 'CemCo', rfqRef: 'RFQ-0011', prRef: 'PR-0019', items: [] });
 
         expect(created.receivedQuote[0].totalValue).toBe(0);
     });
@@ -424,7 +429,9 @@ describe('approving a supplier quote', () => {
             Promise.resolve({ ...quoteRow, supplierId: null, ...data }),
         );
 
-        await service.updateQuote('quote-1', { status: 'approved' });
+        await expect(service.updateQuote('quote-1', { status: 'approved' })).rejects.toThrow(
+            'Dangote Cement is not in the supplier list',
+        );
         expect(purchaseOrders).toHaveLength(0);
     });
 

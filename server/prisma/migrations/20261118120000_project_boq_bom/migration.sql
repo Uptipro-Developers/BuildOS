@@ -1,0 +1,10 @@
+ALTER TABLE "PurchaseOrder" ADD COLUMN "sourceType" TEXT NOT NULL DEFAULT 'direct';
+ALTER TABLE "PurchaseOrder" ADD COLUMN "projectId" TEXT;
+ALTER TABLE "PurchaseOrder" ADD COLUMN "projectName" TEXT;
+ALTER TABLE "PurchaseOrder" ADD COLUMN "boqItemIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "POItem" ADD COLUMN "boqItemId" TEXT;
+CREATE TABLE "ProjectBoqLevel" ("id" TEXT NOT NULL,"projectId" TEXT NOT NULL,"name" TEXT NOT NULL,"description" TEXT NOT NULL DEFAULT '',"sequence" INTEGER NOT NULL DEFAULT 0,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "ProjectBoqLevel_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "ProjectBoqItem" ("id" TEXT NOT NULL,"levelId" TEXT NOT NULL,"kind" TEXT NOT NULL DEFAULT 'material',"code" TEXT NOT NULL DEFAULT '',"description" TEXT NOT NULL,"unit" TEXT NOT NULL,"quantity" DOUBLE PRECISION NOT NULL,"unitRate" DOUBLE PRECISION NOT NULL DEFAULT 0,"procuredQty" DOUBLE PRECISION NOT NULL DEFAULT 0,"notes" TEXT NOT NULL DEFAULT '',"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "ProjectBoqItem_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "ProjectBoqLevel_projectId_sequence_idx" ON "ProjectBoqLevel"("projectId", "sequence");
+CREATE INDEX "ProjectBoqItem_levelId_idx" ON "ProjectBoqItem"("levelId");
+ALTER TABLE "ProjectBoqItem" ADD CONSTRAINT "ProjectBoqItem_levelId_fkey" FOREIGN KEY ("levelId") REFERENCES "ProjectBoqLevel"("id") ON DELETE CASCADE ON UPDATE CASCADE;

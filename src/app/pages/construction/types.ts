@@ -142,6 +142,11 @@ export interface Task {
   ragStatus: RAGStatus;
   ragOverride: boolean;
   notes: string;
+  isPartner?: boolean;
+  partnerCategory?: string;
+  partnerTask?: string;
+  inviteStatus?: string;
+  partnerUserId?: string;
   expanded?: boolean;
   isMilestone?: boolean;
   wbsNumber?: string;
@@ -431,6 +436,12 @@ export interface Stakeholder {
   influenceLevel: "High" | "Medium" | "Low";
   impactLevel: "High" | "Medium" | "Low";
   notes: string;
+  isPartner?: boolean;
+  partnerCategory?: string;
+  partnerTask?: string;
+  inviteStatus?: string;
+  invitedAt?: string;
+  partnerUserId?: string;
 }
 
 export interface StakeholderCommPlan {

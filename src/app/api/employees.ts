@@ -37,7 +37,11 @@ function mapEmployee(e: any) {
         dateHiredISO: toLocalDateInput(e.dateHired),
         employmentDate: toLocalDateInput(e.dateHired),
         employmentType: EMPLOYMENT_TYPE_TO_DISPLAY[e.employmentType] ?? e.employmentType,
-        salaryType: e.salaryType === 'Annual' ? 'Annual' : 'Monthly',
+        salaryType: e.salaryType ?? 'Monthly',
+        salaryFrequencyId: e.salaryFrequencyId ?? '',
+        paysSalary: e.paysSalary !== false,
+        paymentSource: e.paymentSource === 'project' ? 'project' : 'company',
+        payrollProjectId: e.payrollProjectId ?? '',
         projectCount: e.projectCount ?? 0,
         projects: e.projects ?? [],
         dateOfBirth: toLocalDateInput(e.dateOfBirth),
@@ -91,7 +95,11 @@ export function toEmployeeCreatePayload(form: any) {
         gender: form.gender || undefined,
         status: form.status ?? 'active',
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[form.employmentType] ?? form.employmentType ?? 'FullTime',
-        salaryType: form.salaryType === 'Annual' ? 'Annual' : 'Monthly',
+        salaryType: form.salaryType || 'Monthly',
+        salaryFrequencyId: form.salaryFrequencyId || undefined,
+        paysSalary: form.paysSalary !== false,
+        paymentSource: form.paymentSource === 'project' ? 'project' : 'company',
+        payrollProjectId: form.paymentSource === 'project' ? form.payrollProjectId || undefined : null,
         departmentId: form.departmentId || undefined,
         department: form.department || undefined,
         supervisorId: form.supervisorId || undefined,
@@ -121,7 +129,8 @@ export function toEmployeeCreatePayload(form: any) {
 export function toEmployeeUpdatePayload(draft: any) {
     const {
         department, dateHired, dateHiredISO, projectCount, projects, id, status,
-        employmentType, salaryType, departmentId, baseSalary, supervisorId,
+        employmentType, salaryType, salaryFrequencyId, paysSalary, paymentSource,
+        payrollProjectId, departmentId, baseSalary, supervisorId,
         // Display-only aliases and derived state that must never be written back.
         syncStatus, userId, role, primarySupervisor, bankAccount, pfa, rsaNumber,
         maritalStatus, orgLevel, nationality, name, jobTitle, personalEmail,
@@ -149,7 +158,11 @@ export function toEmployeeUpdatePayload(draft: any) {
         // Keep the canonical column name; the UI exposes pfa/rsaNumber aliases.
         pensionId: rest.pensionId ?? rsaNumber ?? pfa ?? undefined,
         employmentType: EMPLOYMENT_TYPE_TO_BACKEND[employmentType] ?? employmentType,
-        salaryType: salaryType === 'Annual' ? 'Annual' : 'Monthly',
+        salaryType: salaryType || 'Monthly',
+        salaryFrequencyId: salaryFrequencyId || undefined,
+        paysSalary: paysSalary !== false,
+        paymentSource: paymentSource === 'project' ? 'project' : 'company',
+        payrollProjectId: paymentSource === 'project' ? payrollProjectId || null : null,
         dateHired: dateHiredISO && String(dateHiredISO).trim() ? dateHiredISO : undefined,
         // These now have columns of their own, so an edit persists instead of
         // being discarded as display-only.
@@ -172,6 +185,16 @@ export async function fetchEmployee(id: string) {
     const data = await apiFetch<any>(`/employees/${id}`);
     return mapEmployee(data);
 }
+
+export interface EmployeeDocument {
+    id: string; employeeId: string; fileName: string; fileUrl: string; fileSize: number;
+    mimeType: string; documentType: string; uploadedBy: string; uploadedAt: string;
+}
+export const getEmployeeDocuments = (employeeId: string) => apiFetch<EmployeeDocument[]>(`/employees/${employeeId}/documents`);
+export const addEmployeeDocument = (employeeId: string, data: Omit<EmployeeDocument, 'id' | 'employeeId' | 'uploadedAt'>) =>
+    apiFetch<EmployeeDocument>(`/employees/${employeeId}/documents`, { method: 'POST', body: JSON.stringify(data) });
+export const deleteEmployeeDocument = (employeeId: string, documentId: string) =>
+    apiFetch<{ id: string; deleted: boolean }>(`/employees/${employeeId}/documents/${documentId}`, { method: 'DELETE' });
 
 /**
  * The employee's probation, notice and retirement dates.

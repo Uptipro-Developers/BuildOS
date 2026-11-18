@@ -10,6 +10,7 @@ export interface LeaveType {
     approvalsRequired: number;
     color: string;
     gender: string;
+    gradeEntitlements: Record<string, number>;
 }
 
 export const fetchLeaveTypes = () => apiFetch<LeaveType[]>('/leave-types');

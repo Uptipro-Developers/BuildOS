@@ -42,7 +42,7 @@ const sidebarSections = [
     items: [
       { label: "Budget Management",  href: "/apps/finance/budget",            icon: <TrendingUp className="w-4 h-4" />, end: true },
       { label: "Payment Management", href: "/apps/finance/payments",          icon: <CreditCard  className="w-4 h-4" />, end: true },
-      { label: "Purchase Invoice",   href: "/apps/finance/purchase-invoice", icon: <Receipt     className="w-4 h-4" />, end: true },
+      { label: "PO Payments",        href: "/apps/finance/purchase-invoice", icon: <Receipt     className="w-4 h-4" />, end: true },
     ],
   },
   {
@@ -88,7 +88,7 @@ export function FinanceLayout() {
       <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
         <AppHeader currentApp="finance" appColor="bg-emerald-600" />
         <div className="flex flex-1 overflow-hidden">
-          <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+          <aside className="bg-white border-r border-gray-200 flex-shrink-0 overflow-hidden">
             <CollapsibleSidebar
               sections={canConfigure ? sidebarSections : sidebarSections.filter((section) => section.label !== "Settings")}
               activeClass="bg-emerald-50 text-emerald-700 font-medium [&_svg]:text-emerald-600"

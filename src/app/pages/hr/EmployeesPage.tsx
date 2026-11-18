@@ -8,6 +8,7 @@ import {
 } from "../../api/employees";
 import { fetchDepartments } from "../../api/departments";
 import { fetchOrgUnits } from "../../api/org-units";
+import { fetchProjects } from "../../api/projects";
 import { getAppRoles } from "../../api/admin-extras";
 import {
   getEmploymentTypes,
@@ -32,6 +33,7 @@ import {
   UserCheck,
   Clock,
   X,
+  Upload,
 } from "lucide-react";
 import { exportCSV } from "../../utils/exportCSV";
 import {
@@ -107,7 +109,11 @@ interface AddEmpForm {
   email: string;
   phone: string;
   employmentType: string;
-  salaryType: "Monthly" | "Annual";
+  salaryType: string;
+  salaryFrequencyId: string;
+  paysSalary: boolean;
+  paymentSource: "company" | "project";
+  payrollProjectId: string;
   dateOfBirth: string;
   gender: string;
   supervisorId: string;
@@ -163,6 +169,10 @@ const emptyEmpForm: AddEmpForm = {
   phone: "",
   employmentType: "Full-time",
   salaryType: "Monthly",
+  salaryFrequencyId: "salary-frequency-monthly",
+  paysSalary: true,
+  paymentSource: "company",
+  payrollProjectId: "",
   dateOfBirth: "",
   gender: "",
   supervisorId: "",
@@ -248,6 +258,7 @@ function validateEmployeeForm(
   req("emergencyContact", "Next of kin contact");
   req("emergencyPhone", "Emergency phone");
   req("gradeLevel", "Salary grade");
+  if (form.paysSalary && form.paymentSource === "project") req("payrollProjectId", "Payroll project");
 
   if (opts.supervisorRequired) req("supervisorId", "Supervisor");
 
@@ -293,6 +304,7 @@ function AddEmployeeModal({
   orgUnits,
   employmentTypes,
   salaryGrades,
+  projects,
   saving,
 }: {
   onSave: (f: AddEmpForm) => void;
@@ -303,6 +315,7 @@ function AddEmployeeModal({
   orgUnits: string[];
   employmentTypes: EmploymentTypeConfig[];
   salaryGrades: SalaryGradeOption[];
+  projects: { id: string; name: string }[];
   saving: boolean;
 }) {
   const [form, setForm] = useState<AddEmpForm>({ ...emptyEmpForm });
@@ -436,7 +449,7 @@ function AddEmployeeModal({
                   onChange={(e) => {
                     const selected = employmentTypes.find((item) => item.name === e.target.value);
                     set("employmentType", e.target.value);
-                    if (selected) set("salaryType", selected.defaultSalaryType);
+                    if (selected) setForm((current) => ({ ...current, employmentType: e.target.value, salaryType: selected.defaultSalaryType, salaryFrequencyId: selected.defaultSalaryFrequencyId, paysSalary: selected.paysSalary, paymentSource: selected.defaultPaymentSource, payrollProjectId: selected.defaultPaymentSource === "project" ? current.payrollProjectId : "" }));
                   }}
                   className={`${inputClass} bg-white`}
                 >
@@ -444,12 +457,15 @@ function AddEmployeeModal({
                   {employmentTypes.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
                 </select>
               </FormField>
-              <FormField label="Salary Type">
-                <select value={form.salaryType} onChange={(e) => set("salaryType", e.target.value as "Monthly" | "Annual")} className={`${inputClass} bg-white`}>
-                  <option value="Monthly">Monthly</option>
-                  <option value="Annual">Annual</option>
-                </select>
+              <FormField label="Payroll Eligibility">
+                <select value={form.paysSalary ? "paid" : "unpaid"} onChange={(e) => setForm((current) => ({ ...current, paysSalary: e.target.value === "paid" }))} className={`${inputClass} bg-white`}><option value="paid">Paid</option><option value="unpaid">Unpaid</option></select>
               </FormField>
+              {form.paysSalary && <FormField label="Payment Source">
+                <select value={form.paymentSource} onChange={(e) => setForm((current) => ({ ...current, paymentSource: e.target.value as "company" | "project", payrollProjectId: e.target.value === "project" ? current.payrollProjectId : "" }))} className={`${inputClass} bg-white`}><option value="company">Company payroll</option><option value="project">Project payroll</option></select>
+              </FormField>
+              }
+              {form.paysSalary && form.paymentSource === "project" && <FormField label="Payroll Project" required error={errors.payrollProjectId}><select value={form.payrollProjectId} onChange={(e) => set("payrollProjectId", e.target.value)} className={`${errors.payrollProjectId ? errorInputClass : inputClass} bg-white`}><option value="">Select project…</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></FormField>}
+              {form.paysSalary && <FormField label="Salary Frequency"><input value={form.salaryType} readOnly className={`${inputClass} bg-gray-50 text-gray-600`} /></FormField>}
             </div>
           </div>
 
@@ -556,6 +572,7 @@ export function EmployeesPage() {
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
   const [employmentTypes, setEmploymentTypes] = useState<EmploymentTypeConfig[]>([]);
   const [salaryGrades, setSalaryGrades] = useState<SalaryGradeOption[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -579,6 +596,7 @@ export function EmployeesPage() {
       .catch(() => setRoleOptions([]));
     getEmploymentTypes().then(setEmploymentTypes).catch(() => setEmploymentTypes([]));
     getSalaryGrades().then(setSalaryGrades).catch(() => setSalaryGrades([]));
+    fetchProjects().then((rows) => setProjects(rows.map((project) => ({ id: project.id, name: project.name })))).catch(() => setProjects([]));
   }, []);
 
   function loadEmployees() {
@@ -617,6 +635,9 @@ export function EmployeesPage() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [creatingEmployee, setCreatingEmployee] = useState(false);
+  const [importingEmployees, setImportingEmployees] = useState(false);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLTableCellElement>(null);
   useClickOutside(menuRef, menuOpen !== null, () => setMenuOpen(null));
 
@@ -752,6 +773,31 @@ export function EmployeesPage() {
     toast.success(`Exported ${rows.length} employees.`);
   }
 
+  function downloadImportTemplate() {
+    exportCSV("employee-import-template", ["First Name", "Last Name", "Email", "Phone", "Employment Date", "Position", "System Role", "Department", "Employment Type", "Salary Grade", "Base Salary", "Payment Source", "Payroll Project ID"], [["Ada", "Okafor", "ada@example.com", "+2348000000000", "2026-01-15", "Site Engineer", "Employee", departments[0]?.name ?? "", employmentTypes[0]?.name ?? "Full-time", salaryGrades[0]?.gradeLevel ?? "", "250000", "company", ""]]);
+  }
+
+  async function importEmployees(file: File) {
+    setImportingEmployees(true); setImportErrors([]);
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+      if (!rows.length) throw new Error("The uploaded file contains no employee rows.");
+      const value = (row: Record<string, unknown>, ...keys: string[]) => { const found = Object.keys(row).find((key) => keys.some((candidate) => key.trim().toLowerCase() === candidate.toLowerCase())); return found ? String(row[found]).trim() : ""; };
+      const errors: string[] = []; let created = 0;
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index]; const firstName = value(row, "First Name", "firstName"); const lastName = value(row, "Last Name", "lastName"); const email = value(row, "Email");
+        if (!firstName || !lastName || !email) { errors.push(`Row ${index + 2}: First Name, Last Name and Email are required.`); continue; }
+        const departmentName = value(row, "Department"); const employmentType = value(row, "Employment Type") || employmentTypes[0]?.name || "Full-time"; const type = employmentTypes.find((item) => item.name.toLowerCase() === employmentType.toLowerCase());
+        try { await createEmployee(toEmployeeCreatePayload({ firstName, lastName, email, phone: value(row, "Phone"), employmentDate: value(row, "Employment Date", "Date Hired") || new Date().toISOString().slice(0, 10), position: value(row, "Position"), role: value(row, "System Role", "Role"), departmentId: departments.find((item) => item.name.toLowerCase() === departmentName.toLowerCase())?.id, employmentType, salaryType: type?.defaultSalaryType, salaryFrequencyId: type?.defaultSalaryFrequencyId, paysSalary: type?.paysSalary, paymentSource: value(row, "Payment Source") || type?.defaultPaymentSource, payrollProjectId: value(row, "Payroll Project ID"), gradeLevel: value(row, "Salary Grade", "Grade Level"), baseSalary: value(row, "Base Salary"), status: "active" })); created += 1; }
+        catch (error) { errors.push(`Row ${index + 2} (${email}): ${error instanceof Error ? error.message : "Could not create employee"}`); }
+      }
+      setImportErrors(errors); await loadEmployees(); toast.success(`${created} employee${created === 1 ? "" : "s"} imported${errors.length ? `; ${errors.length} row(s) need attention` : ""}.`);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Employee import failed."); }
+    finally { setImportingEmployees(false); if (importInputRef.current) importInputRef.current.value = ""; }
+  }
+
   const initials = (e: EmployeeRow) => `${e.firstName[0]}${e.lastName[0]}`;
   const avatarColors = [
     "bg-indigo-100 text-indigo-700",
@@ -779,6 +825,8 @@ export function EmployeesPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={downloadImportTemplate} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50">Template</button>
+          <button onClick={() => importInputRef.current?.click()} disabled={importingEmployees} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"><Upload className="w-3.5 h-3.5" />{importingEmployees ? "Importing…" : "Import Employees"}</button><input ref={importInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importEmployees(file); }} />
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
@@ -793,6 +841,8 @@ export function EmployeesPage() {
           </button>
         </div>
       </div>
+
+      {importErrors.length > 0 && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4"><div className="flex items-start justify-between"><div><p className="text-sm font-semibold text-amber-900">Some employee rows were not imported</p><ul className="mt-2 max-h-32 space-y-1 overflow-auto text-xs text-amber-800">{importErrors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul></div><button onClick={() => setImportErrors([])} className="text-amber-700"><X className="h-4 w-4" /></button></div></div>}
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -1011,6 +1061,7 @@ export function EmployeesPage() {
           orgUnits={orgUnits}
           employmentTypes={employmentTypes}
           salaryGrades={salaryGrades}
+          projects={projects}
           saving={creatingEmployee}
         />
       )}

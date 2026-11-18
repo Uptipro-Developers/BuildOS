@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req } from '@nestjs/common';
 import { StakeholdersService } from './stakeholders.service';
 import { RequiresProcess } from '../permissions/require-permission.decorator';
 
@@ -10,6 +10,12 @@ export class StakeholdersController {
     findAll(@Query('projectId') projectId?: string) {
         return this.service.findAll(projectId);
     }
+
+    @Get('partner/workspace')
+    partnerWorkspace(@Req() req: any) { return this.service.partnerWorkspace(String(req.user?.email ?? '')); }
+
+    @Post(':id/invite')
+    invite(@Param('id') id: string) { return this.service.invite(id); }
 
     @Get(':id')
     findOne(@Param('id') id: string) {

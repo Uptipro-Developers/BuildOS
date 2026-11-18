@@ -1,4 +1,3 @@
-
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
@@ -239,20 +238,24 @@ model Department {
 // ─────────────── EMPLOYEES ───────────────
 
 model Employee {
-  id             String         @id @default(cuid())
-  firstName      String
-  lastName       String
-  middleName     String?
-  email          String         @unique
-  phone          String
-  dateOfBirth    DateTime?
-  gender         String?
-  dateHired      DateTime
-  status         EmployeeStatus @default(active)
-  employmentType String         @default("FullTime")
-  salaryType     String         @default("Monthly")
-  projectCount   Int            @default(0)
-  projects       String[]       @default([])
+  id                String         @id @default(cuid())
+  firstName         String
+  lastName          String
+  middleName        String?
+  email             String         @unique
+  phone             String
+  dateOfBirth       DateTime?
+  gender            String?
+  dateHired         DateTime
+  status            EmployeeStatus @default(active)
+  employmentType    String         @default("FullTime")
+  salaryType        String         @default("Monthly")
+  salaryFrequencyId String?
+  paysSalary        Boolean        @default(true)
+  paymentSource     String         @default("company")
+  payrollProjectId  String?
+  projectCount      Int            @default(0)
+  projects          String[]       @default([])
 
   // Salary/Grade fields
   baseSalary Float?   @default(0)
@@ -322,6 +325,7 @@ model LeaveType {
   approvalsRequired Int      @default(1)
   color             String
   gender            String   @default("All")
+  gradeEntitlements Json     @default("{}")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -331,16 +335,18 @@ model LeaveType {
 // ─────────────── LEAVE REQUESTS ───────────────
 
 model LeaveRequest {
-  id          String      @id @default(cuid())
-  refId       String      @unique
-  days        Int
-  startDate   DateTime
-  endDate     DateTime
-  status      LeaveStatus @default(pending)
-  submittedAt DateTime    @default(now())
-  approvedBy  String?
-  approvedAt  DateTime?
-  notes       String?
+  id                   String      @id @default(cuid())
+  refId                String      @unique
+  days                 Int
+  startDate            DateTime
+  endDate              DateTime
+  status               LeaveStatus @default(pending)
+  submittedAt          DateTime    @default(now())
+  approvedBy           String?
+  approvedAt           DateTime?
+  notes                String?
+  handoverEmployeeId   String?
+  handoverEmployeeName String?
 
   // Balance tracking for audit
   balanceBefore Int?
@@ -446,8 +452,12 @@ model PurchaseOrder {
   /// could not cite the order it was receiving against.
   poRef String? @unique
 
-  prRef String?
-  mrRef String?
+  prRef       String?
+  mrRef       String?
+  sourceType  String   @default("direct")
+  projectId   String?
+  projectName String?
+  boqItemIds  String[] @default([])
 
   /// The ReceivedQuote that was awarded, when this order came out of a quote
   /// comparison. This is the record of *which* supplier won and at what price,
@@ -455,8 +465,12 @@ model PurchaseOrder {
   /// represented even though the UI offered the button.
   quoteRef String?
 
-  status        POStatus @default(draft)
-  sentToFinance Boolean  @default(false)
+  status          POStatus  @default(draft)
+  sentToFinance   Boolean   @default(false)
+  approvalStatus  String    @default("not_submitted")
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?
 
   /// Snapshot of the payment term picked in the wizard — not a live FK, since
   /// Settings can edit or delete a term later and this order should keep what
@@ -488,14 +502,15 @@ model PurchaseOrder {
   createdDate   DateTime @default(now())
   expectedDate  DateTime
   totalValue    Float    @default(0)
+  paidAmount    Float    @default(0)
   receivedValue Float    @default(0)
 
   /// Milestones of the payment chain, so the order can say *when* each step
   /// happened rather than only which step it is on.
-  sentToFinanceAt DateTime?
+  sentToFinanceAt  DateTime?
   financeDecidedAt DateTime?
-  paidAt          DateTime?
-  confirmedAt     DateTime?
+  paidAt           DateTime?
+  confirmedAt      DateTime?
 
   /// Why Finance declined, shown back on the order in Procurement so the buyer
   /// knows what to fix.
@@ -510,6 +525,37 @@ model PurchaseOrder {
   goodsReceipts GoodsReceipt[]
 }
 
+model ProjectBoqLevel {
+  id          String           @id @default(cuid())
+  projectId   String
+  name        String
+  description String           @default("")
+  sequence    Int              @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  items       ProjectBoqItem[]
+
+  @@index([projectId, sequence])
+}
+
+model ProjectBoqItem {
+  id          String          @id @default(cuid())
+  levelId     String
+  level       ProjectBoqLevel @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  kind        String          @default("material")
+  code        String          @default("")
+  description String
+  unit        String
+  quantity    Float
+  unitRate    Float           @default(0)
+  procuredQty Float           @default(0)
+  notes       String          @default("")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([levelId])
+}
+
 model POItem {
   id              String        @id @default(cuid())
   material        String
@@ -517,6 +563,7 @@ model POItem {
   unit            String
   unitCost        Float
   received        Float         @default(0)
+  boqItemId       String?
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   purchaseOrderId String
 }
@@ -536,9 +583,9 @@ model GoodsReceipt {
   purchaseOrderId String
   /// Denormalised so a receipt still reads correctly in lists and exports
   /// without joining the order.
-  poRef        String?
-  mrRef        String?
-  supplierName String
+  poRef           String?
+  mrRef           String?
+  supplierName    String
 
   /// Where the goods landed. Stock is posted against this store.
   storeId   String?
@@ -566,17 +613,17 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptItem {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   material String
   unit     String
-  ordered  Float  @default(0)
+  ordered  Float   @default(0)
   /// Cumulative totals across every *accepted* pass — only "Accept & Update
   /// Stock" moves these. A delivery still awaiting a decision lives in the
   /// pending* fields below instead, so editing or rejecting it cannot corrupt
   /// figures already posted to stock.
-  received Float  @default(0)
-  accepted Float  @default(0)
-  rejected Float  @default(0)
+  received Float   @default(0)
+  accepted Float   @default(0)
+  rejected Float   @default(0)
   reason   String?
 
   /// This pass's not-yet-decided quantities, keyed in by Update Record /
@@ -696,13 +743,13 @@ model User {
   role String @default("viewer")
 
   // Last login tracking
-  lastLogin             DateTime?
+  lastLogin DateTime?
 
   /// Last time an authenticated request was seen from this user, refreshed as
   /// they use the app rather than only at login. `lastLogin` cannot answer "who
   /// is logged in now" — somebody who signed in this morning and left still
   /// counts against it all day.
-  lastSeenAt DateTime?
+  lastSeenAt            DateTime?
   inviteToken           String?
   inviteExpiresAt       DateTime?
   refreshTokenHash      String?
@@ -712,15 +759,15 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations
-  roles           UserRole[]
-  permissions     Permission[]
-  auditLogs       AuditLog[]
-  passwordHistory UserPasswordHistory[]
-  employee        Employee?
-  signatories     Signatory[]
-  applicationOwnerships ApplicationOwner[] @relation("ApplicationOwnerUser")
-  appointedApplicationOwners ApplicationOwner[] @relation("ApplicationOwnerAppointer")
-  applicationAssignments ApplicationAssignment[] @relation("ApplicationAssignmentUser")
+  roles                           UserRole[]
+  permissions                     Permission[]
+  auditLogs                       AuditLog[]
+  passwordHistory                 UserPasswordHistory[]
+  employee                        Employee?
+  signatories                     Signatory[]
+  applicationOwnerships           ApplicationOwner[]      @relation("ApplicationOwnerUser")
+  appointedApplicationOwners      ApplicationOwner[]      @relation("ApplicationOwnerAppointer")
+  applicationAssignments          ApplicationAssignment[] @relation("ApplicationAssignmentUser")
   delegatedApplicationAssignments ApplicationAssignment[] @relation("ApplicationAssignmentAssigner")
 
   /// The Active Sessions metric counts by this on every dashboard load.
@@ -731,19 +778,19 @@ model User {
 /// ESS are deliberately excluded by the service: Admin remains the control
 /// plane and ESS is personal self-service.
 model ApplicationOwner {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   app           String
-  user          User     @relation("ApplicationOwnerUser", fields: [userId], references: [id], onDelete: Cascade)
+  user          User      @relation("ApplicationOwnerUser", fields: [userId], references: [id], onDelete: Cascade)
   userId        String
-  appointedBy   User?    @relation("ApplicationOwnerAppointer", fields: [appointedById], references: [id], onDelete: SetNull)
+  appointedBy   User?     @relation("ApplicationOwnerAppointer", fields: [appointedById], references: [id], onDelete: SetNull)
   appointedById String?
-  canConfigure  Boolean  @default(true)
-  canAssign     Boolean  @default(true)
-  validFrom     DateTime @default(now())
+  canConfigure  Boolean   @default(true)
+  canAssign     Boolean   @default(true)
+  validFrom     DateTime  @default(now())
   validUntil    DateTime?
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@unique([app, userId])
   @@index([app, active])
@@ -754,26 +801,26 @@ model ApplicationOwner {
 /// the pair identifies a project, store, department, cost centre, or another
 /// application-owned resource.
 model ApplicationAssignment {
-  id           String   @id @default(cuid())
-  app          String
-  user         User     @relation("ApplicationAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
-  userId       String
+  id             String    @id @default(cuid())
+  app            String
+  user           User      @relation("ApplicationAssignmentUser", fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
   /// Existing process-catalog id (for example p_payroll or p_stock_movements).
   /// Null is retained only for assignments created before process delegation.
-  processId    String?
-  processName  String?
-  scopeType    String
-  scopeId      String?
-  scopeName    String?
+  processId      String?
+  processName    String?
+  scopeType      String
+  scopeId        String?
+  scopeName      String?
   responsibility String?
-  permissions  String[] @default([])
-  assignedBy   User?    @relation("ApplicationAssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
-  assignedById String?
-  validFrom    DateTime @default(now())
-  validUntil   DateTime?
-  status       String   @default("active")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  permissions    String[]  @default([])
+  assignedBy     User?     @relation("ApplicationAssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  assignedById   String?
+  validFrom      DateTime  @default(now())
+  validUntil     DateTime?
+  status         String    @default("active")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([app, userId, status])
   @@index([app, processId, userId, status])
@@ -901,39 +948,39 @@ model Director {
 /// (unitCost: quantity-weighted average) across its Types whenever a Type
 /// is added/edited from the catalog.
 model Material {
-  id               String   @id @default(cuid())
-  name             String
-  category         String
+  id                String            @id @default(cuid())
+  name              String
+  category          String
   /// Denormalised from MaterialCategory.name when created via the catalog —
   /// legacy rows created directly by Goods Receipt predate categoryId and
   /// have none.
-  categoryId       String?
-  materialCategory MaterialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  categoryId        String?
+  materialCategory  MaterialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   /// Optional — legacy Goods-Receipt-created rows always set this; catalog-
   /// created rows source it from the dimension that produced the row.
-  unit             String?
+  unit              String?
   /// Catalog-created rows only. Kind/value are the dimension that produced
   /// this row (e.g. { kind: "Length", value: 12, unit: "mm" }) — one row per
   /// dimension, no separate Type table underneath any more.
-  sku              String?
+  sku               String?
   /// All dimensions/variants attached to this canonical catalogue material.
   /// kind/value/unit remain populated from the first dimension for legacy API consumers.
-  dimensions       Json     @default("[]")
-  aliases          String[] @default([])
-  imageUrl         String?
-  kind             String?
-  value            Float?
-  totalQty         Float    @default(0)
-  availableQty     Float    @default(0)
-  reservedQty      Float    @default(0)
-  unitCost         Float    @default(0)
-  reorderLevel     Float    @default(0)
+  dimensions        Json              @default("[]")
+  aliases           String[]          @default([])
+  imageUrl          String?
+  kind              String?
+  value             Float?
+  totalQty          Float             @default(0)
+  availableQty      Float             @default(0)
+  reservedQty       Float             @default(0)
+  unitCost          Float             @default(0)
+  reorderLevel      Float             @default(0)
   /// "Consumable" | "Reusable"
-  materialType     String   @default("Consumable")
-  allocationStatus String   @default("Available")
-  allocatedTo      String?
-  allocatedProject String?
-  condition        String?
+  materialType      String            @default("Consumable")
+  allocationStatus  String            @default("Available")
+  allocatedTo       String?
+  allocatedProject  String?
+  condition         String?
   /// Catalog-created rows only — the Material Name/item name entered in the
   /// Storefront Config builder, before they and the dimension were
   /// concatenated into `name`. Lets the builder regroup its flat rows back
@@ -944,11 +991,11 @@ model Material {
   /// Which store this material is attached to — optional, set from the Edit
   /// Material modal on the All Materials page. storeName is denormalised the
   /// same way category/categoryId are, for display without a join.
-  storeId          String?
-  store            Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  storeName        String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  storeId           String?
+  store             Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  storeName         String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@index([categoryId])
   @@index([storeId])
@@ -983,27 +1030,27 @@ model Store {
 }
 
 model StoreItem {
-  id           String    @id @default(cuid())
-  materialName String
-  category     String
-  unit         String
-  qty          Float     @default(0)
+  id                  String    @id @default(cuid())
+  materialName        String
+  category            String
+  unit                String
+  qty                 Float     @default(0)
   /// Quantity committed to approved requests but not yet posted as a transfer.
-  reservedQty  Float     @default(0)
-  openingQty   Float     @default(0)
-  reorderLevel Float     @default(0)
+  reservedQty         Float     @default(0)
+  openingQty          Float     @default(0)
+  reorderLevel        Float     @default(0)
   /// Optional store-item overrides. Null means inherit the owning store's
   /// configured default; zero is a valid explicit threshold.
-  lowStockThreshold  Float?
+  lowStockThreshold   Float?
   outOfStockThreshold Float?
   alertState          String    @default("in_stock")
-  unitCost     Float     @default(0)
-  lastReceived DateTime?
-  bin          String?
-  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  storeId      String
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  unitCost            Float     @default(0)
+  lastReceived        DateTime?
+  bin                 String?
+  store               Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  storeId             String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 }
 
 model StockMovement {
@@ -1033,23 +1080,23 @@ model StockMovement {
 /// A proposed change to an established catalogue/store record. The live row is
 /// unchanged until an authorised reviewer approves this record.
 model MaterialAmendment {
-  id           String   @id @default(cuid())
-  entityType   String
-  entityId     String
-  materialName String
-  storeId      String?
-  storeName    String?
-  oldValue     Json
+  id            String    @id @default(cuid())
+  entityType    String
+  entityId      String
+  materialName  String
+  storeId       String?
+  storeName     String?
+  oldValue      Json
   proposedValue Json
-  reason       String?
-  status       String   @default("pending")
-  requestedBy  String
+  reason        String?
+  status        String    @default("pending")
+  requestedBy   String
   requestedById String?
-  reviewedBy   String?
-  reviewedById String?
-  reviewedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  reviewedBy    String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([status, createdAt])
   @@index([entityType, entityId])
@@ -1074,31 +1121,31 @@ model StockTransfer {
 }
 
 model MaterialRequest {
-  id           String    @id @default(cuid())
-  reference    String    @unique
-  materialName String
-  unit         String
-  qty          Float
-  storeName    String
-  storeId      String?
-  projectName  String?
-  projectId    String?
-  purpose      String?
-  priority     String    @default("Normal")
-  status       String    @default("Pending")
-  requestedBy  String
-  approvedBy   String?
-  requestDate  DateTime  @default(now())
+  id            String    @id @default(cuid())
+  reference     String    @unique
+  materialName  String
+  unit          String
+  qty           Float
+  storeName     String
+  storeId       String?
+  projectName   String?
+  projectId     String?
+  purpose       String?
+  priority      String    @default("Normal")
+  status        String    @default("Pending")
+  requestedBy   String
+  approvedBy    String?
+  requestDate   DateTime  @default(now())
   /// When the materials are needed, derived from the requester's "Needed In
   /// (days)". Without a column the computed date existed only in the browser, so
   /// the card showed a blank Due date as soon as the list reloaded.
-  neededBy     DateTime?
-  approvedAt   DateTime?
-  notes        String?
+  neededBy      DateTime?
+  approvedAt    DateTime?
+  notes         String?
   /// Required visual reference when the requester is asking for a material
   /// that does not yet exist in the catalogue.
-  imageUrl     String?
-  isNewMaterial Boolean @default(false)
+  imageUrl      String?
+  isNewMaterial Boolean   @default(false)
 
   /// Reference of the PurchaseRequest raised from this request, so the material
   /// request can show what became of it instead of stopping at "In Procurement".
@@ -1107,13 +1154,13 @@ model MaterialRequest {
   /// Exactly one operational route is selected when the request is approved.
   fulfillmentMethod String?
   fulfillmentStatus String?
-  sourceStoreId      String?
-  sourceStoreName    String?
-  stockTransferRef   String?
+  sourceStoreId     String?
+  sourceStoreName   String?
+  stockTransferRef  String?
   /// Per-line source-store allocations plus any quantity sent to Procurement.
-  fulfillmentPlan    Json?
+  fulfillmentPlan   Json?
   /// A split request may create one transfer per supplying store.
-  stockTransferRefs  String[] @default([])
+  stockTransferRefs String[] @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1141,19 +1188,19 @@ model MaterialReturn {
 // ─────────────── PROCUREMENT ───────────────
 
 model PurchaseRequest {
-  id            String   @id @default(cuid())
-  prRef         String   @unique
+  id            String  @id @default(cuid())
+  prRef         String  @unique
   title         String
   projectId     String?
   projectName   String?
   /// "draft" | "not_raised" | "raised" | "quotes_received" | "po_created" |
   /// "cancelled". A purchase request carries no approval status of its own —
   /// see the POStatus comment and src/app/utils/procurementWorkflow.tsx.
-  status        String   @default("not_raised")
-  priority      String   @default("Normal")
+  status        String  @default("not_raised")
+  priority      String  @default("Normal")
   requestedBy   String
   daysToDeliver Int?
-  items         Json     @default("[]")
+  items         Json    @default("[]")
   notes         String?
 
   /// Reference of the MaterialRequest this was raised from, when it came through
@@ -1177,26 +1224,28 @@ model PurchaseRequest {
 }
 
 model PurchaseInvoice {
-  id           String    @id @default(cuid())
-  invoiceNo    String    @unique
-  poRef        String?
-  supplierName String
-  supplierId   String?
-  invoiceDate  DateTime
-  dueDate      DateTime?
-  lines        Json      @default("[]")
-  subtotal     Float     @default(0)
-  vatTotal     Float     @default(0)
-  total        Float     @default(0)
+  id             String    @id @default(cuid())
+  invoiceNo      String    @unique
+  poRef          String?
+  supplierName   String
+  supplierId     String?
+  invoiceDate    DateTime
+  dueDate        DateTime?
+  lines          Json      @default("[]")
+  subtotal       Float     @default(0)
+  vatTotal       Float     @default(0)
+  total          Float     @default(0)
+  paidAmount     Float     @default(0)
+  paymentHistory Json      @default("[]")
   /// "pending_review" | "pending_approval" | "approved" | "rejected" | "paid" | "cancelled".
-  status       String    @default("pending_review")
+  status         String    @default("pending_review")
   /// The accounting treatment (payment date/method + GL posting lines) chosen
   /// when sending for approval. Posting reads and locks to this rather than
   /// letting it be re-decided after approval.
-  postingDraft Json?
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  postingDraft   Json?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 model SentRFQ {
@@ -1317,42 +1366,57 @@ model AttendanceRecord {
   hoursWorked  Float    @default(0)
   status       String   @default("Present")
   notes        String?
+  projectId    String?
+  projectName  String?
+  source       String   @default("hr")
+  partnerId    String?
+  partnerName  String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([projectId, date])
+  @@index([partnerId, date])
 }
 
 model PayrollPeriod {
-  id          String       @id @default(cuid())
-  name        String
-  startDate   DateTime
-  endDate     DateTime
-  status      String       @default("Open")
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  payrollRuns PayrollRun[]
+  id                  String       @id @default(cuid())
+  name                String
+  startDate           DateTime
+  endDate             DateTime
+  status              String       @default("Open")
+  salaryFrequencyId   String?
+  salaryFrequencyName String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  payrollRuns         PayrollRun[]
 }
 
 model PayrollRun {
-  id            String         @id @default(cuid())
+  id                  String         @id @default(cuid())
   /// Human reference shown as "Payroll Code" in the Finance Payroll Overview.
   /// Allocated from Settings → Numbering, so it follows the same convention as
   /// every other document reference rather than exposing the cuid.
-  code          String?        @unique
-  periodId      String?
-  period        PayrollPeriod? @relation(fields: [periodId], references: [id])
-  periodName    String
-  month         Int
-  year          Int
+  code                String?        @unique
+  periodId            String?
+  period              PayrollPeriod? @relation(fields: [periodId], references: [id])
+  periodName          String
+  month               Int
+  year                Int
   /// HR side: "Draft" | "Processing" | "Approved". Finance side then carries it
   /// through "Pending Posting Approval" → "Posting Approved" → "Posted".
   /// Approval to post is deliberately separate from posting: the person who
   /// authorises the accounting is not always the one who runs it.
-  status        String         @default("Draft")
-  totalGross    Float          @default(0)
-  totalNet      Float          @default(0)
-  employeeCount Int            @default(0)
-  processedBy   String?
-  processedAt   DateTime?
+  status              String         @default("Draft")
+  totalGross          Float          @default(0)
+  totalNet            Float          @default(0)
+  employeeCount       Int            @default(0)
+  scope               String         @default("company")
+  projectId           String?
+  projectName         String?
+  salaryFrequencyId   String?
+  salaryFrequencyName String?
+  processedBy         String?
+  processedAt         DateTime?
 
   // Finance posting trail.
   postingRequestedBy String?
@@ -1365,52 +1429,70 @@ model PayrollRun {
   /// General Ledger can be traced back to the run.
   journalEntryId     String?
 
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  entries       PayrollEntry[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  entries   PayrollEntry[]
 }
 
 model PayrollEntry {
-  id           String     @id @default(cuid())
-  runId        String
-  run          PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  employeeId   String?
-  employeeName String
-  department   String
-  grossPay     Float
-  deductions   Float      @default(0)
-  netPay       Float
-  tax          Float      @default(0)
-  pension      Float      @default(0)
-  allowances   Float      @default(0)
+  id            String     @id @default(cuid())
+  runId         String
+  run           PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employeeId    String?
+  employeeName  String
+  department    String
+  grossPay      Float
+  deductions    Float      @default(0)
+  netPay        Float
+  tax           Float      @default(0)
+  pension       Float      @default(0)
+  allowances    Float      @default(0)
   /// Earned beyond the standard working day, at the configured multiplier.
-  overtime      Float  @default(0)
-  overtimeHours Float  @default(0)
-  status       String     @default("Pending")
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  overtime      Float      @default(0)
+  overtimeHours Float      @default(0)
+  status        String     @default("Pending")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model PayrollInput {
+  id            String   @id @default(cuid())
+  employeeId    String
+  employeeName  String
+  type          String
+  amount        Float    @default(0)
+  quantity      Float    @default(0)
+  effectiveDate DateTime
+  notes         String?
+  status        String   @default("pending")
+  payrollRunId  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([employeeId, effectiveDate, status])
+  @@index([payrollRunId])
 }
 
 model Payslip {
-  id           String   @id @default(cuid())
-  employeeId   String?
-  employeeName String
-  department   String
-  period       String
-  month        Int
-  year         Int
-  grossPay     Float
-  deductions   Float    @default(0)
-  netPay       Float
-  tax          Float    @default(0)
-  pension      Float    @default(0)
-  allowances   Float    @default(0)
+  id            String   @id @default(cuid())
+  employeeId    String?
+  employeeName  String
+  department    String
+  period        String
+  month         Int
+  year          Int
+  grossPay      Float
+  deductions    Float    @default(0)
+  netPay        Float
+  tax           Float    @default(0)
+  pension       Float    @default(0)
+  allowances    Float    @default(0)
   /// Earned beyond the standard working day, at the configured multiplier.
   overtime      Float    @default(0)
   overtimeHours Float    @default(0)
-  status       String   @default("Issued")
-  issuedAt     DateTime @default(now())
-  createdAt    DateTime @default(now())
+  status        String   @default("Issued")
+  issuedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
 }
 
 model Appraisal {
@@ -1467,14 +1549,14 @@ model Transaction {
 }
 
 model JournalEntry {
-  id          String        @id @default(cuid())
-  reference   String        @unique
-  date        DateTime
-  description String
-  status      String        @default("Draft")
-  createdBy   String
-  postedAt    DateTime?
-  reversedAt  DateTime?
+  id           String         @id @default(cuid())
+  reference    String         @unique
+  date         DateTime
+  description  String
+  status       String         @default("Draft")
+  createdBy    String
+  postedAt     DateTime?
+  reversedAt   DateTime?
   // Set on the reversing entry, pointing back at the entry it reverses. The
   // inverse side gives the original entry a link to its reversal, which is what
   // the Reversed badge in the UI resolves to.
@@ -1497,9 +1579,9 @@ model JournalEntry {
   /// The configured process whose mapping produced the lines, when one did.
   process      String?
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  lines       JournalLine[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  lines     JournalLine[]
 
   @@index([sourceModule, sourceId])
   @@index([status, date])
@@ -1518,14 +1600,14 @@ model JournalLine {
 }
 
 model ChartAccount {
-  id          String      @id @default(cuid())
-  code        String      @unique
+  id          String         @id @default(cuid())
+  code        String         @unique
   name        String
   type        String
   category    String
   description String?
-  balance     Float       @default(0)
-  isActive    Boolean     @default(true)
+  balance     Float          @default(0)
+  isActive    Boolean        @default(true)
   parentId    String?
   parent      ChartAccount?  @relation("AccountTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    ChartAccount[] @relation("AccountTree")
@@ -1546,10 +1628,10 @@ model BankAccount {
 }
 
 model TaxConfig {
-  id   String @id @default(cuid())
-  name String
-  type String
-  rate Float
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  rate        Float
   /// GL code the tax posts to, as entered in Finance › Configuration.
   code        String?
   /// What the rule applies to, e.g. "Goods and services".
@@ -1745,20 +1827,21 @@ model AuditLog {
 // ─────────────── SALARY & PAYROLL ───────────────
 
 model SalaryBand {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  gradeLevel  String
-  minSalary   Float
-  maxSalary   Float
-  midSalary   Float?
-  description String?
-  gradeName   String?
-  department  String?
-  basicSalary Float?
-  salaryType String   @default("Monthly")
-  components  Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(cuid())
+  name              String   @unique
+  gradeLevel        String
+  minSalary         Float
+  maxSalary         Float
+  midSalary         Float?
+  description       String?
+  gradeName         String?
+  department        String?
+  basicSalary       Float?
+  salaryType        String   @default("Monthly")
+  salaryFrequencyId String?
+  components        Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model EmployeeBank {
@@ -1864,9 +1947,10 @@ model DocumentUpload {
   uploadedAt   DateTime @default(now())
 
   // Relations
-  projectId String?
-  taskId    String?
-  expenseId String?
+  projectId  String?
+  taskId     String?
+  expenseId  String?
+  employeeId String?
 
   tags        String[] @default([])
   description String?
@@ -2026,15 +2110,15 @@ model ProjectCategory {
   name     String
 
   /// Level 3 — Specific Descriptors. "dropdown" | "free_text".
-  descriptorMode String @default("free_text")
+  descriptorMode    String @default("free_text")
   /// Array of option strings, used when descriptorMode is "dropdown".
-  descriptorOptions Json @default("[]")
+  descriptorOptions Json   @default("[]")
 
   /// Level 4 — Physical Structure Breakdown.
   structureHeaderLabel String?
   structureDescription String?
   /// Array of { id, key, label, type: "text" | "number" | "select", options?: string[] }.
-  structureFields Json @default("[]")
+  structureFields      Json    @default("[]")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2160,18 +2244,24 @@ model ProjectDelay {
 }
 
 model Stakeholder {
-  id             String   @id @default(cuid())
-  projectId      String
-  name           String
-  organization   String   @default("")
-  role           String   @default("")
-  email          String?
-  phone          String?
-  influenceLevel String   @default("Medium")
-  impactLevel    String   @default("Medium")
-  notes          String   @default("")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String    @id @default(cuid())
+  projectId       String
+  name            String
+  organization    String    @default("")
+  role            String    @default("")
+  email           String?
+  phone           String?
+  influenceLevel  String    @default("Medium")
+  impactLevel     String    @default("Medium")
+  notes           String    @default("")
+  isPartner       Boolean   @default(false)
+  partnerCategory String?
+  partnerTask     String?
+  inviteStatus    String    @default("not_invited")
+  invitedAt       DateTime?
+  partnerUserId   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([projectId])
 }
@@ -2235,10 +2325,13 @@ model CommunicationLog {
   followUpDate String?
   status       String   @default("sent")
   createdBy    String   @default("")
+  partnerId    String?
+  partnerName  String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([projectId])
+  @@index([partnerId, projectId])
 }
 
 model FundingAllocation {
@@ -2631,11 +2724,11 @@ model NumberingConfig {
   template String @default("")
 
   /// First number the sequence issues.
-  startingNumber Int @default(1)
+  startingNumber Int  @default(1)
   /// Last number it may issue; null means unbounded.
   endingNumber   Int?
   /// Step between successive numbers.
-  incrementBy    Int @default(1)
+  incrementBy    Int  @default(1)
 
   /// The last number actually issued, and when — shown ixn Settings so an admin
   /// can see where a sequence has reached without inferring it from `nextNumber`.

@@ -114,13 +114,7 @@ const sidebarSections = [
     label: "Payroll",
     items: [
       {
-        label: "Payroll Overview",
-        href: "/apps/hr/payroll",
-        icon: <DollarSign className="w-4 h-4" />,
-        end: true,
-      },
-      {
-        label: "Payroll Processing",
+        label: "Payroll Workspace",
         href: "/apps/hr/payroll-processing",
         icon: <PlayCircle className="w-4 h-4" />,
         end: true,
@@ -208,7 +202,7 @@ export function HRLayout() {
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
       <AppHeader currentApp="hr" appColor="bg-indigo-700" />
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+        <aside className="bg-white border-r border-gray-200 flex-shrink-0 overflow-hidden">
           <CollapsibleSidebar
             sections={canConfigure ? sidebarSections : sidebarSections.filter((section) => section.label !== "Settings")}
             activeClass="bg-indigo-50 text-indigo-700 font-medium [&_svg]:text-indigo-600"

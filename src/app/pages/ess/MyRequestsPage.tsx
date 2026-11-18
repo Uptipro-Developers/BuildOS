@@ -336,6 +336,7 @@ export function MyRequestsPage() {
                 name: `${lv.startDate || ""} - ${lv.endDate || ""}`.trim(),
                 qty: lv.days != null ? `${lv.days} day(s)` : undefined,
               },
+              ...(lv.handoverEmployeeName ? [{ name: `Handover to: ${lv.handoverEmployeeName}` }] : []),
             ],
             comments: lv.notes || "",
             approvalHistory: [],

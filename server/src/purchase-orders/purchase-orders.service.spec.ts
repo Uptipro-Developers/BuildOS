@@ -16,7 +16,8 @@ function makeService(po: any = {}) {
     const order = {
         id: 'po-1',
         poRef: 'PO-0031',
-        status: 'draft',
+        status: 'po_created',
+        approvalStatus: 'approved',
         supplierId: 'sup-1',
         supplier: { id: 'sup-1', name: 'Dangote Cement', email: 'sales@dangote.ng' },
         items: [
@@ -46,7 +47,12 @@ function makeService(po: any = {}) {
             }),
             updateMany: jest.fn(() => Promise.resolve({ count: 1 })),
         },
+        projectBoqItem: {
+            findUnique: jest.fn(() => Promise.resolve(null)),
+            update: jest.fn(),
+        },
     };
+    prisma.$transaction = jest.fn((run: any) => run(prisma));
 
     const webhooks: any = { triggerWebhook: jest.fn(() => Promise.resolve()) };
     const mailQueue: any = { enqueueEmail: jest.fn(() => Promise.resolve()) };
@@ -197,7 +203,7 @@ describe('creating a purchase order', () => {
             createdBy: 'Musa Ibrahim',
             expectedDate: new Date('2026-09-01'),
             totalValue: 100,
-            items: [],
+            items: [{ material: 'OPC Cement', qty: 1, unit: 'bag', unitCost: 100 }],
         });
 
         expect(numbering.allocate).toHaveBeenCalledWith('PurchaseOrder');
@@ -206,5 +212,22 @@ describe('creating a purchase order', () => {
                 data: expect.objectContaining({ poRef: 'PO-0032' }),
             }),
         );
+    });
+
+    it('submits a completed document for approval before fulfilment starts', async () => {
+        const { service, updates, goodsReceipts, mailQueue } = makeService({ status: 'draft', approvalStatus: 'not_submitted' });
+        await service.createPO('po-1', { paymentTermId: 'term-1', deliverySplit: 'post_delivery' });
+
+        expect(updates[0]).toMatchObject({ status: 'po_created', approvalStatus: 'pending_approval' });
+        expect(goodsReceipts.openForOrder).not.toHaveBeenCalled();
+        expect(mailQueue.enqueueEmail).not.toHaveBeenCalled();
+    });
+
+    it('opens fulfilment only after an authorised approval action', async () => {
+        const { service, goodsReceipts } = makeService({ status: 'po_created', approvalStatus: 'pending_approval' });
+        const approved = await service.approvePO('po-1', 'Procurement Manager');
+
+        expect(approved.approvalStatus).toBe('approved');
+        expect(goodsReceipts.openForOrder).toHaveBeenCalledWith('po-1');
     });
 });
