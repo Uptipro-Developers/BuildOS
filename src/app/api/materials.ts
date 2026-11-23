@@ -45,7 +45,7 @@ export interface StockMovement {
     toStoreId?: string; toStoreName?: string;
 }
 export interface MaterialAmendment {
-    id: string; entityType: 'Material' | 'StoreItem'; entityId: string;
+    id: string; entityType: 'Material' | 'MaterialBatch' | 'StoreItem'; entityId: string;
     materialName: string; storeId?: string; storeName?: string;
     oldValue: Record<string, unknown>; proposedValue: Record<string, unknown>;
     reason?: string; status: 'pending' | 'approved' | 'rejected';
@@ -110,8 +110,13 @@ export const getMaterials = () => apiFetch<Material[]>('/materials');
 export const getMaterial = (id: string) => apiFetch<Material>(`/materials/${id}`);
 export const createMaterial = (data: Partial<Material>) =>
     apiFetch<Material>('/materials', { method: 'POST', body: JSON.stringify(data) });
-export const updateMaterial = (id: string, data: Partial<Material>) =>
+export const updateMaterial = (id: string, data: Partial<Material> & { reason?: string }) =>
     apiFetch<Material>(`/materials/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const submitMaterialAmendment = (id: string, data: {
+    materialChanges: Partial<Material>;
+    storeChanges: Array<{ storeId: string; qty: number }>;
+    reason: string;
+}) => apiFetch<Material>(`/materials/${id}/amendment`, { method: 'POST', body: JSON.stringify(data) });
 export const deleteMaterial = (id: string) =>
     apiFetch<void>(`/materials/${id}`, { method: 'DELETE' });
 
@@ -138,7 +143,7 @@ export const getStoreItems = (storeId?: string) =>
     apiFetch<StoreItem[]>(storeId ? `/stores/${storeId}/items` : '/store-items');
 export const createStoreItem = (data: Partial<StoreItem>) =>
     apiFetch<StoreItem>('/store-items', { method: 'POST', body: JSON.stringify(data) });
-export const updateStoreItem = (id: string, data: Partial<StoreItem>) =>
+export const updateStoreItem = (id: string, data: Partial<StoreItem> & { reason?: string }) =>
     apiFetch<StoreItem>(`/store-items/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 export const deleteStoreItem = (id: string) =>
     apiFetch<void>(`/store-items/${id}`, { method: 'DELETE' });
@@ -178,7 +183,7 @@ export const createMaterialRequest = (data: Partial<MaterialRequest>) =>
     apiFetch<MaterialRequest>('/material-requests', { method: 'POST', body: JSON.stringify(data) });
 export const createMaterialRequestBatch = (data: {
     reference?: string;
-    items: Array<{ materialName: string; unit: string; qty: number; notes?: string }>;
+    items: Array<{ materialName: string; unit: string; qty: number; notes?: string; imageUrl?: string }>;
     [key: string]: unknown;
 }) => apiFetch<{ reference: string; items: MaterialRequest[] }>('/material-requests/batch', {
     method: 'POST',

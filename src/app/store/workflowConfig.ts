@@ -22,7 +22,13 @@ export interface PipelineStep {
  * only as a fallback for a workflow saved before ids were stored.
  */
 const PROCESS_FOR_REQUEST: Record<string, { id: string; label: string }> = {
-  material: { id: "p_material_requests", label: "Material Requests" },
+  // ESS material requests are owned by Storefront until a Storefront approver
+  // explicitly routes them to Procurement. Using p_material_requests here made
+  // the submission receipt show the Procurement approver before that decision.
+  material: {
+    id: "p_storefront_material_requests",
+    label: "Material Request Approval",
+  },
   finance: { id: "p_expenses", label: "Expenses" },
   leave: { id: "p_leave_requests", label: "Leave Requests" },
   issue: { id: "p_ess_issues", label: "Logged Issues" },
@@ -44,8 +50,13 @@ export function getPipelineForRequest(
   const process = PROCESS_FOR_REQUEST[requestType];
   if (!process) return genericPipeline();
 
-  const wf = workflows.find(
-    (w) => w.processId === process.id || w.process === process.label,
+  // Material Request Approval exists independently in Storefront and
+  // Procurement and both may have the same display label. It therefore must be
+  // resolved by its catalogue id; a label fallback can silently select the
+  // Procurement workflow when Storefront has not been configured.
+  const wf = workflows.find((w) =>
+    w.processId === process.id ||
+    (requestType !== "material" && !w.processId && w.process === process.label),
   );
   if (!wf) return genericPipeline();
 

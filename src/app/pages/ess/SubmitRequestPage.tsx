@@ -554,6 +554,8 @@ function MaterialForm({
     quantity: string;
     unit: string;
     stock: StockLevel | null;
+    imageUrl: string;
+    imageName: string;
   };
   const blankMaterialRow = (): MaterialRequestRow => ({
     id: crypto.randomUUID(),
@@ -561,6 +563,8 @@ function MaterialForm({
     quantity: "",
     unit: "",
     stock: null,
+    imageUrl: "",
+    imageName: "",
   });
   const [requestKind, setRequestKind] = useState<"material" | "service">(
     "material",
@@ -701,6 +705,7 @@ function MaterialForm({
           materialName: row.material.trim(),
           unit: row.unit,
           qty: Number(row.quantity),
+          imageUrl: row.imageUrl || undefined,
         })),
         storeId: formState.destinationStoreId,
         storeName: stores.find((store) => store.id === formState.destinationStoreId)?.name || "",
@@ -748,6 +753,25 @@ function MaterialForm({
 
   function removeMaterialRow(id: string) {
     setMaterialRows((rows) => rows.length === 1 ? rows : rows.filter((row) => row.id !== id));
+  }
+
+  function attachMaterialImage(rowId: string, file?: File) {
+    if (!file) return;
+    if (!file.type.match(/^image\/(jpeg|png|webp)$/i)) {
+      toast.error("Choose a JPG, PNG or WebP image.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Material image must be 2 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => updateMaterialRow(rowId, {
+      imageUrl: String(reader.result ?? ""),
+      imageName: file.name,
+    });
+    reader.onerror = () => toast.error("Could not read the selected image.");
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -885,6 +909,49 @@ function MaterialForm({
                           <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                         </div>
                       </div>
+                      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-3">
+                        <div className="flex items-center gap-3">
+                          {row.imageUrl ? (
+                            <img
+                              src={row.imageUrl}
+                              alt={`${row.material || `Material ${index + 1}`} attachment`}
+                              className="h-12 w-12 flex-none rounded-lg border border-gray-200 object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-12 w-12 flex-none items-center justify-center rounded-lg bg-gray-100">
+                              <Upload className="h-5 w-5 text-gray-400" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-medium text-gray-700">
+                              {row.imageName || "Attach a material image"}
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-gray-400">Optional · JPG, PNG or WebP · Max 2 MB</p>
+                          </div>
+                          <label className="cursor-pointer rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                            {row.imageUrl ? "Replace" : "Choose image"}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              onChange={(event) => {
+                                attachMaterialImage(row.id, event.target.files?.[0]);
+                                event.currentTarget.value = "";
+                              }}
+                            />
+                          </label>
+                          {row.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => updateMaterialRow(row.id, { imageUrl: "", imageName: "" })}
+                              className="p-1.5 text-gray-400 hover:text-red-600"
+                              title="Remove image"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       {row.stock === "low_stock" && <p className="text-xs text-amber-700">Low stock — Storefront will decide the fulfilment route.</p>}
                     </div>
                   ))}
@@ -943,11 +1010,6 @@ function MaterialForm({
                     className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
                   />
                 </div>
-
-                <AttachmentsSection
-                  files={attachments}
-                  onChange={setAttachments}
-                />
 
                 <button
                   type="submit"

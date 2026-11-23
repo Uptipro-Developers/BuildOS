@@ -388,9 +388,21 @@ export function IncomingRequestsPage() {
               </button>
             </div>
             <div className="p-6 space-y-3">
-              {selected.imageUrl && (
-                <img src={selected.imageUrl} alt={selected.material} className="w-full max-h-64 object-contain rounded-xl border border-gray-200 bg-gray-50" />
-              )}
+              <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+                {selected.materials.map((item) => (
+                  <div key={item.name} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.name} className="h-12 w-12 flex-none rounded-lg border border-gray-200 object-cover" />
+                    ) : (
+                      <div className="flex h-12 w-12 flex-none items-center justify-center rounded-lg bg-white text-xs font-semibold text-gray-400">—</div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-900">{item.name}</p>
+                      <p className="text-xs text-gray-500">{item.qty} {item.unit}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
               {(
                 [
                   ["Materials", selected.materials.map((item) => `${item.name} — ${item.qty} ${item.unit}`).join(", ")],

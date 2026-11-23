@@ -3,7 +3,7 @@ import { exportCSV } from "../../utils/exportCSV";
 import {
   getMaterials,
   createMaterial,
-  updateMaterial,
+  submitMaterialAmendment,
   deleteMaterial,
   getStores,
   getStoreItems,
@@ -675,6 +675,7 @@ export function AllMaterialsPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [storeQuantities, setStoreQuantities] = useState<Record<string, string>>({});
+  const [amendmentReason, setAmendmentReason] = useState("");
 
   const toMaterial = (m: any): Material => ({
     id: m.id,
@@ -799,6 +800,7 @@ export function AllMaterialsPage() {
     setStoreQuantities(Object.fromEntries(
       stores.map((store) => [store.id, String(storeItems.find((item) => item.storeId === store.id && item.materialName.toLowerCase() === m.name.toLowerCase())?.qty ?? "")]),
     ));
+    setAmendmentReason("");
     setShowModal(true);
   }
   // The modal used to close before the request resolved, and failures only hit
@@ -806,27 +808,37 @@ export function AllMaterialsPage() {
   // silently reappeared unchanged on the next load.
   async function save() {
     const name = form.name;
-    const { totalQty: _totalQty, availableQty: _availableQty, reservedQty: _reservedQty, storeId: _storeId, storeName: _storeName, ...payload } = form;
+    const {
+      totalQty: _totalQty, availableQty: _availableQty, reservedQty: _reservedQty,
+      storeId: _storeId, storeName: _storeName, effectiveStatus: _effectiveStatus,
+      createdAt: _createdAt, ...payload
+    } = form;
     try {
       if (editTarget) {
-        const updated = await updateMaterial(editTarget.id, payload);
-        const existingStoreIds = new Set(storeItems.filter((item) => item.materialName.toLowerCase() === editTarget.name.toLowerCase()).map((item) => item.storeId));
-        const newBalances = Object.entries(storeQuantities)
+        if (!amendmentReason.trim()) {
+          toast.error("Enter a reason for the proposed changes.");
+          return;
+        }
+        const existingItems = storeItems.filter((item) => item.materialName.toLowerCase() === editTarget.name.toLowerCase());
+        const currentByStore = new Map(existingItems.map((item) => [item.storeId, Number(item.qty)]));
+        const storeChanges = Object.entries(storeQuantities)
+          .filter(([, qty]) => qty !== "")
           .map(([storeId, qty]) => ({ storeId, qty: Number(qty) }))
-          .filter((entry) => entry.qty > 0 && !existingStoreIds.has(entry.storeId));
-        const createdItems = await Promise.all(newBalances.map((entry) => createStoreItem({
-          storeId: entry.storeId,
-          materialName: updated.name,
-          category: updated.category,
-          unit: updated.unit || form.unit || form.dimensions?.[0]?.unit || "Units",
-          qty: entry.qty,
-          openingQty: entry.qty,
-          unitCost: updated.unitCost,
-          reorderLevel: updated.reorderLevel,
-        })));
-        if (createdItems.length) setStoreItems((current) => [...current, ...createdItems]);
+          .filter((entry) => Number.isFinite(entry.qty) && entry.qty >= 0 && entry.qty !== (currentByStore.get(entry.storeId) ?? 0));
+        const updated = await submitMaterialAmendment(editTarget.id, {
+          materialChanges: payload,
+          storeChanges,
+          reason: amendmentReason.trim(),
+        });
         setMaterials((prev) =>
-          prev.map((m) => (m.id === updated.id ? toMaterial(updated) : m)),
+          // The update response is the unchanged catalogue row plus a pending
+          // amendment marker. Its persisted stock cache may predate the live
+          // StoreItem rollup returned by GET /materials, so replacing the row
+          // here can make the displayed total jump before approval. Preserve
+          // the current computed quantities and decorate only the pending state.
+          prev.map((m) => (m.id === updated.id
+            ? { ...m, amendmentId: updated.amendmentId, amendmentStatus: updated.amendmentStatus }
+            : m)),
         );
         toast.success(`Changes to "${name}" were submitted for approval.`);
       } else {
@@ -838,6 +850,7 @@ export function AllMaterialsPage() {
       setForm({ ...BLANK });
       setEditTarget(null);
       setStoreQuantities({});
+      setAmendmentReason("");
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to save the material.",
@@ -1444,22 +1457,22 @@ export function AllMaterialsPage() {
                 <section className="rounded-xl border border-gray-200 overflow-hidden">
                   <div className="px-3 py-2.5 bg-gray-50 border-b border-gray-200">
                     <p className="text-xs font-semibold text-gray-700">Stock distribution by store</p>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Add an opening balance to stores that do not yet hold this material. Existing balances are changed through stock movements.</p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">Propose store balances here. Existing-balance changes remain pending until approved.</p>
                   </div>
                   <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {stores.map((store) => {
                       const existing = storeItems.find((item) => item.storeId === store.id && item.materialName.toLowerCase() === editTarget.name.toLowerCase());
                       return <label key={store.id} className="rounded-lg border border-gray-100 p-2.5">
                         <span className="block text-xs font-medium text-gray-700 mb-1">{store.name}</span>
-                        <input type="number" min="0" step="any" disabled={Boolean(existing)} value={storeQuantities[store.id] ?? ""}
+                        <input type="number" min="0" step="any" value={storeQuantities[store.id] ?? ""}
                           onChange={(event) => setStoreQuantities((current) => ({ ...current, [store.id]: event.target.value }))}
-                          placeholder="0" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm disabled:bg-gray-100" />
-                        {existing && <span className="text-[10px] text-gray-400">Current balance · ledger controlled</span>}
+                          placeholder="0" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                        {existing && <span className="text-[10px] text-amber-600">Changes require approval before affecting stock.</span>}
                       </label>;
                     })}
                   </div>
                   <div className="px-3 py-2 bg-blue-50 text-xs text-blue-800">
-                    Organization total after additions: {stores.reduce((sum, store) => sum + (Number(storeQuantities[store.id]) || 0), 0)} {form.unit}
+                    Proposed organization total: {stores.reduce((sum, store) => sum + (Number(storeQuantities[store.id]) || 0), 0)} {form.unit}. Current stock remains unchanged until approval.
                   </div>
                 </section>
               )}
@@ -1495,6 +1508,52 @@ export function AllMaterialsPage() {
                   ))}
                 </select>
               </div>
+              <section className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2.5">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-700">Properties / dimensions</p>
+                    <p className="mt-0.5 text-[11px] text-gray-500">These specifications appear beneath the material name.</p>
+                  </div>
+                  <button type="button" onClick={() => setForm({ ...form, dimensions: [...form.dimensions, { kind: "", value: "", unit: "" }] })}
+                    className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-50">
+                    <Plus className="h-3.5 w-3.5" /> Add property
+                  </button>
+                </div>
+                <div className="space-y-2 p-3">
+                  {form.dimensions.length === 0 && <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-400">No properties added.</p>}
+                  {form.dimensions.map((dimension, index) => (
+                    <div key={index} className="grid grid-cols-[1fr_0.8fr_0.8fr_auto] items-center gap-2">
+                      <input value={dimension.kind} placeholder="Property"
+                        onChange={(event) => setForm({ ...form, dimensions: form.dimensions.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value } : item) })}
+                        className="min-w-0 rounded-lg border border-gray-200 px-2.5 py-2 text-xs outline-none focus:ring-2 focus:ring-teal-500" />
+                      <input value={dimension.value ?? ""} placeholder="Value"
+                        onChange={(event) => setForm({ ...form, dimensions: form.dimensions.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item) })}
+                        className="min-w-0 rounded-lg border border-gray-200 px-2.5 py-2 text-xs outline-none focus:ring-2 focus:ring-teal-500" />
+                      <select value={dimension.unit ?? ""}
+                        onChange={(event) => setForm({ ...form, dimensions: form.dimensions.map((item, itemIndex) => itemIndex === index ? { ...item, unit: event.target.value } : item) })}
+                        className="min-w-0 rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs outline-none focus:ring-2 focus:ring-teal-500">
+                        <option value="">Unit</option>
+                        {dimension.unit && !DIMENSION_UNITS.includes(dimension.unit) && <option value={dimension.unit}>{dimension.unit}</option>}
+                        {DIMENSION_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                      </select>
+                      <button type="button" title="Remove property"
+                        onClick={() => setForm({ ...form, dimensions: form.dimensions.filter((_, itemIndex) => itemIndex !== index) })}
+                        className="p-1.5 text-gray-400 hover:text-red-600">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              {editTarget && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Reason for change<span className="text-red-500">*</span></label>
+                  <textarea value={amendmentReason} onChange={(event) => setAmendmentReason(event.target.value)} rows={2}
+                    placeholder="Explain why these material or store quantity changes are required…"
+                    className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500" />
+                  <p className="mt-1 text-[11px] text-gray-400">Recorded in the approval and audit history.</p>
+                </div>
+              )}
               {(
                 [
                   ["totalQty", "Total Quantity", "number"],

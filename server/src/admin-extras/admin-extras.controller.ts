@@ -408,6 +408,18 @@ export class AdminExtrasController {
     @Delete('units/:id')
     deleteUnit(@Param('id') id: string) { return this.svc.deleteUnit(id); }
 
+    @Get('unit-categories')
+    getUnitCategories() { return this.svc.findUnitCategories(); }
+
+    @Post('unit-categories')
+    createUnitCategory(@Body() body: any) { return this.svc.createUnitCategory(body); }
+
+    @Patch('unit-categories/:name')
+    updateUnitCategory(@Param('name') name: string, @Body() body: any) { return this.svc.updateUnitCategory(name, body); }
+
+    @Delete('unit-categories/:name')
+    deleteUnitCategory(@Param('name') name: string) { return this.svc.deleteUnitCategory(name); }
+
     // ── Material Categories ──
     @Get('material-categories')
     getMaterialCategories() { return this.svc.findMaterialCategories(); }

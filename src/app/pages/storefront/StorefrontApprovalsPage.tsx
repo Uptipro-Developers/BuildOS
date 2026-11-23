@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { CheckCircle, XCircle, Eye, Search } from "lucide-react";
+import { ArrowRight, CheckCircle, XCircle, Eye, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   getConstructionApprovals,
@@ -18,6 +18,7 @@ import {
 } from "../../api/materials";
 import { formatDateByGeneralSettings } from "../../utils/generalSettings";
 import { baseMaterialRequestRef } from "../../utils/materialRequestRef";
+import { useApprovalRights } from "../../utils/useApprovalRights";
 
 type ApprovalType = "Material Request" | "Material Amendment" | "Transfer" | "Return";
 type ApprovalStatus = "Pending" | "Approved" | "Rejected";
@@ -134,7 +135,123 @@ function fromAmendment(a: MaterialAmendment): ApprovalItem {
   };
 }
 
+const AMENDMENT_FIELD_LABELS: Record<string, string> = {
+  name: "Material name", category: "Category", unit: "Unit of measure", sku: "SKU",
+  dimensions: "Properties / dimensions", imageUrl: "Material image", unitCost: "Unit cost",
+  reorderLevel: "Reorder level", materialType: "Material type", allocationStatus: "Allocation status",
+  allocatedTo: "Allocated to", allocatedProject: "Allocated project", condition: "Condition",
+  qty: "Store quantity", lowStockThreshold: "Low-stock threshold", outOfStockThreshold: "Out-of-stock threshold",
+};
+
+function amendmentFieldLabel(field: string) {
+  return AMENDMENT_FIELD_LABELS[field]
+    ?? field.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function formatAmendmentValue(value: unknown, field?: string): string {
+  if (value === null || value === undefined || value === "") return "Not set";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (field === "unitCost" && typeof value === "number") return `₦${value.toLocaleString()}`;
+  if (Array.isArray(value)) {
+    if (!value.length) return "None";
+    return value.map((entry) => {
+      if (entry && typeof entry === "object") {
+        const dimension = entry as Record<string, unknown>;
+        const kind = dimension.kind ?? dimension.name ?? dimension.label;
+        const amount = dimension.value ?? dimension.amount;
+        const unit = dimension.unit;
+        if (kind || amount !== undefined || unit) return [amount, unit, kind].filter((part) => part !== undefined && part !== null && part !== "").join(" ");
+      }
+      return typeof entry === "object" ? JSON.stringify(entry) : String(entry);
+    }).join(", ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => `${amendmentFieldLabel(key)}: ${formatAmendmentValue(entry, key)}`)
+      .join(" · ");
+  }
+  return String(value);
+}
+
+function AmendmentDetails({ amendment }: { amendment: MaterialAmendment }) {
+  const proposed = amendment.proposedValue ?? {};
+  const old = amendment.oldValue ?? {};
+  const isConsolidated = amendment.entityType === "MaterialBatch";
+  const catalogue = (isConsolidated ? proposed.catalogue : proposed) as Record<string, unknown>;
+  const oldCatalogue = (isConsolidated ? old.catalogue : old) as Record<string, unknown>;
+  const changes = Object.entries(catalogue ?? {})
+    .filter(([field]) => !["effectiveStatus", "createdAt"].includes(field))
+    .map(([field, value]) => ({ key: field, label: amendmentFieldLabel(field), field, current: oldCatalogue?.[field], proposed: value }));
+  if (isConsolidated && Array.isArray(proposed.storeChanges)) {
+    (proposed.storeChanges as Array<Record<string, unknown>>).forEach((change, index) => changes.push({
+      key: `store-${String(change.storeId ?? index)}`,
+      label: `Store quantity — ${String(change.storeName ?? "Store")}`,
+      field: "qty",
+      current: change.oldQty ?? 0,
+      proposed: change.qty,
+    }));
+  }
+  return (
+    <div className="space-y-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Record affected</p>
+          <p className="mt-1 text-sm font-semibold text-gray-900">{amendment.materialName}</p>
+          <p className="mt-0.5 text-xs text-gray-500">{amendment.entityType === "StoreItem" ? "Store inventory record" : "Material catalogue record"}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Affected store</p>
+          <p className="mt-1 text-sm font-semibold text-gray-900">{amendment.storeName || "All stores"}</p>
+          <p className="mt-0.5 text-xs text-gray-500">{amendment.storeName ? "This store only" : "Catalogue-wide change"}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Fields changing</p>
+          <p className="mt-1 text-sm font-semibold text-gray-900">{changes.length}</p>
+          <p className="mt-0.5 text-xs text-gray-500">Review every value below</p>
+        </div>
+      </section>
+      <section className="overflow-hidden rounded-xl border border-gray-200">
+        <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+          <h3 className="text-sm font-semibold text-gray-900">Change comparison</h3>
+          <p className="mt-0.5 text-xs text-gray-500">Current values remain active until this amendment is approved.</p>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {changes.map((change) => (
+            <div key={change.key} className="p-4">
+              <p className="mb-2 text-xs font-semibold text-gray-700">{change.label}</p>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-3">
+                <div className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Current value</p>
+                  <p className="mt-1 break-words text-sm font-medium text-gray-700">{formatAmendmentValue(change.current, change.field)}</p>
+                </div>
+                <div className="flex items-center text-gray-400"><ArrowRight className="h-4 w-4" /></div>
+                <div className="min-w-0 rounded-lg border border-teal-200 bg-teal-50 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-teal-600">Proposed value</p>
+                  <p className="mt-1 break-words text-sm font-semibold text-teal-900">{formatAmendmentValue(change.proposed, change.field)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+          {changes.length === 0 && <p className="p-4 text-sm text-gray-500">No changed fields were supplied.</p>}
+        </div>
+      </section>
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Reason for change</p>
+        <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-amber-950">{amendment.reason?.trim() || "No reason was provided."}</p>
+      </section>
+      <section className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 p-4 sm:grid-cols-2">
+        <div><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Submitted by</p><p className="mt-1 text-sm font-medium text-gray-900">{amendment.requestedBy || "Unknown user"}</p></div>
+        <div><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Submitted on</p><p className="mt-1 text-sm font-medium text-gray-900">{formatDateByGeneralSettings(amendment.createdAt)}</p></div>
+        {amendment.reviewedBy && <div><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Reviewed by</p><p className="mt-1 text-sm font-medium text-gray-900">{amendment.reviewedBy}</p></div>}
+        {amendment.reviewedAt && <div><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Reviewed on</p><p className="mt-1 text-sm font-medium text-gray-900">{formatDateByGeneralSettings(amendment.reviewedAt)}</p></div>}
+      </section>
+    </div>
+  );
+}
+
 export function StorefrontApprovalsPage() {
+  const { canApprove, loading: approvalRightsLoading } = useApprovalRights();
+  const mayApproveStorefrontRequests = canApprove("p_storefront_material_requests");
   const [items, setItems] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -146,6 +263,17 @@ export function StorefrontApprovalsPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [fulfilmentDraft, setFulfilmentDraft] = useState<FulfilmentDraft>({});
   const [saving, setSaving] = useState(false);
+
+  /**
+   * Material requests have their own Storefront workflow. Merely being able to
+   * open this page must not expose its fulfilment decision controls; Admin's
+   * configured approver list is authoritative.
+   *
+   * Other approval types on this shared page retain their existing behaviour
+   * until their individual process mappings are migrated to this same guard.
+   */
+  const mayDecide = (item: ApprovalItem) =>
+    !item.materialRequest || mayApproveStorefrontRequests;
 
   async function loadApprovals() {
     const [approvalRows, materialRequests, storeRows, amendments] = await Promise.all([
@@ -386,7 +514,7 @@ export function StorefrontApprovalsPage() {
               >
                 {a.status}
               </span>
-              {a.status === "Pending" && (
+              {a.status === "Pending" && mayDecide(a) && !approvalRightsLoading && (
                 <>
                   <button
                     onClick={() => {
@@ -449,6 +577,7 @@ export function StorefrontApprovalsPage() {
               </button>
             </div>
             <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {selected.amendment && <AmendmentDetails amendment={selected.amendment} />}
               {selected.materials && selected.materials.length > 0 && (
                 <section className="rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between gap-3 bg-gray-50 px-4 py-2.5 border-b border-gray-200">
@@ -465,9 +594,13 @@ export function StorefrontApprovalsPage() {
                         key={material.id}
                         className="flex min-w-0 items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm"
                       >
-                        <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-blue-50 text-xs font-semibold text-blue-700">
-                          {index + 1}
-                        </span>
+                        {material.imageUrl ? (
+                          <img src={material.imageUrl} alt={material.materialName} className="h-12 w-12 flex-none rounded-lg border border-gray-200 object-cover" />
+                        ) : (
+                          <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-blue-50 text-xs font-semibold text-blue-700">
+                            {index + 1}
+                          </span>
+                        )}
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-gray-900" title={material.materialName}>
                             {material.materialName}
@@ -483,7 +616,7 @@ export function StorefrontApprovalsPage() {
                   </div>
                 </section>
               )}
-              {Object.entries(selected.details).map(([k, v]) => (
+              {!selected.amendment && Object.entries(selected.details).map(([k, v]) => (
                 <div key={k} className="flex gap-4">
                   <span className="text-xs text-gray-400 w-36 flex-shrink-0 mt-0.5">
                     {k}
@@ -491,15 +624,15 @@ export function StorefrontApprovalsPage() {
                   <span className="text-sm text-gray-800 font-medium">{v}</span>
                 </div>
               ))}
-              <div className="flex gap-4">
+              {!selected.amendment && <div className="flex gap-4">
                 <span className="text-xs text-gray-400 w-36 flex-shrink-0 mt-0.5">
                   Requested By
                 </span>
                 <span className="text-sm text-gray-800 font-medium">
                   {selected.requestedBy} · {selected.requestDate}
                 </span>
-              </div>
-              {selected.approvedBy && (
+              </div>}
+              {!selected.amendment && selected.approvedBy && (
                 <div className="flex gap-4">
                   <span className="text-xs text-gray-400 w-36 flex-shrink-0 mt-0.5">
                     Actioned By
@@ -510,7 +643,7 @@ export function StorefrontApprovalsPage() {
                 </div>
               )}
             </div>
-            {selected.status === "Pending" && selected.materialRequest && (
+            {selected.status === "Pending" && selected.materialRequest && mayApproveStorefrontRequests && !approvalRightsLoading && (
               <div className="px-6 py-4 space-y-3 flex-none max-h-[52vh] overflow-y-auto border-t border-gray-200 bg-gray-50/60">
                 <div className="sticky -top-4 z-10 bg-gray-50 py-2">
                   <p className="text-sm font-semibold text-gray-900">Choose fulfilment route</p>
@@ -553,7 +686,7 @@ export function StorefrontApprovalsPage() {
               </div>
             )}
             <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
-              {selected.status === "Pending" && (
+              {selected.status === "Pending" && mayDecide(selected) && !approvalRightsLoading && (
                 <>
                   <button
                     onClick={() => approve(selected)}

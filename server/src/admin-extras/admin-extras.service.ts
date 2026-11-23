@@ -542,6 +542,9 @@ export class AdminExtrasService {
             units: Array.isArray(parsed?.units) && parsed.units.length
                 ? parsed.units
                 : [...this.defaultUnits],
+            unitCategories: Array.isArray(parsed?.unitCategories) && parsed.unitCategories.length
+                ? parsed.unitCategories
+                : [...new Set(this.defaultUnits.map((unit) => unit.category)), 'Area', 'Custom'],
         };
     }
 
@@ -559,6 +562,7 @@ export class AdminExtrasService {
         storeLevels?: any[];
         storeThresholds?: any[];
         units?: any[];
+        unitCategories?: string[];
         emailTemplates?: any[];
         notificationRules?: any[];
         reportSchedules?: any[];
@@ -2894,6 +2898,46 @@ export class AdminExtrasService {
         settings.units = settings.units.filter((item: any) => item.id !== id);
         await this.writeAdminSettings(settings);
         return { id, deleted: true };
+    }
+
+    async findUnitCategories() {
+        const settings = await this.readAdminSettings();
+        return settings.unitCategories;
+    }
+    async createUnitCategory(data: any) {
+        const settings = await this.readAdminSettings();
+        const name = String(data?.name ?? '').trim();
+        if (!name) throw new BadRequestException('Category name is required');
+        if (settings.unitCategories.some((category: string) => category.toLowerCase() === name.toLowerCase())) {
+            throw new ConflictException(`A unit category named "${name}" already exists`);
+        }
+        settings.unitCategories = [...settings.unitCategories, name];
+        await this.writeAdminSettings(settings);
+        return { name };
+    }
+    async updateUnitCategory(currentName: string, data: any) {
+        const settings = await this.readAdminSettings();
+        const nextName = String(data?.name ?? '').trim();
+        if (!nextName) throw new BadRequestException('Category name is required');
+        const index = settings.unitCategories.findIndex((category: string) => category.toLowerCase() === currentName.toLowerCase());
+        if (index < 0) throw new NotFoundException('Unit category not found');
+        if (settings.unitCategories.some((category: string, categoryIndex: number) => categoryIndex !== index && category.toLowerCase() === nextName.toLowerCase())) {
+            throw new ConflictException(`A unit category named "${nextName}" already exists`);
+        }
+        const previousName = settings.unitCategories[index];
+        settings.unitCategories[index] = nextName;
+        settings.units = settings.units.map((unit: any) => unit.category === previousName ? { ...unit, category: nextName } : unit);
+        await this.writeAdminSettings(settings);
+        return { name: nextName };
+    }
+    async deleteUnitCategory(name: string) {
+        const settings = await this.readAdminSettings();
+        if (settings.units.some((unit: any) => unit.category.toLowerCase() === name.toLowerCase())) {
+            throw new ConflictException('Move or delete the units in this category before deleting it');
+        }
+        settings.unitCategories = settings.unitCategories.filter((category: string) => category.toLowerCase() !== name.toLowerCase());
+        await this.writeAdminSettings(settings);
+        return { name, deleted: true };
     }
 
     // ── Material Categories ──

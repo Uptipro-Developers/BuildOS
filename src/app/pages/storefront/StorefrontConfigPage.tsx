@@ -35,6 +35,8 @@ import {
   createUnit,
   updateUnit,
   deleteUnit,
+  getUnitCategories,
+  createUnitCategory,
   getMaterialCategories,
   createMaterialCategory,
   updateMaterialCategory,
@@ -1263,10 +1265,9 @@ interface Unit {
 }
 
 
-const UNIT_CATEGORIES = ["All", "Length", "Weight", "Volume", "Area", "Custom"];
-
 function UnitsOfMeasurementPanel() {
   const [units, setUnits] = useState<Unit[]>([]);
+  const [unitCategories, setUnitCategories] = useState<string[]>([]);
   const [catFilter, setCatFilter] = useState("All");
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Unit | null>(null);
@@ -1278,6 +1279,9 @@ function UnitsOfMeasurementPanel() {
   const [deleteTarget, setDeleteTarget] = useState<Unit | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [categoryName, setCategoryName] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
 
   useEffect(() => {
     getUnits()
@@ -1292,6 +1296,9 @@ function UnitsOfMeasurementPanel() {
         ),
       )
       .catch((err) => toast.error(err?.message || "Failed to load units"));
+    getUnitCategories()
+      .then((data) => setUnitCategories(data ?? []))
+      .catch((err) => toast.error(err?.message || "Failed to load unit categories"));
   }, []);
 
   const filtered =
@@ -1371,12 +1378,27 @@ function UnitsOfMeasurementPanel() {
       setDeleting(false);
     }
   }
+  async function saveCategory() {
+    const name = categoryName.trim();
+    if (!name) return;
+    setSavingCategory(true);
+    try {
+      const created = await createUnitCategory(name);
+      setUnitCategories((current) => [...current, created.name]);
+      setForm((current) => ({ ...current, category: created.name }));
+      setCategoryName("");
+      setShowCategoryModal(false);
+      toast.success("Unit category added");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to add unit category");
+    } finally { setSavingCategory(false); }
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
-          {UNIT_CATEGORIES.map((c) => (
+          {["All", ...unitCategories].map((c) => (
             <button
               key={c}
               onClick={() => setCatFilter(c)}
@@ -1386,12 +1408,14 @@ function UnitsOfMeasurementPanel() {
             </button>
           ))}
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm px-4 py-2 rounded-xl"
-        >
-          <Plus className="w-4 h-4" /> Add Unit
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowCategoryModal(true)} className="flex items-center gap-2 border border-teal-200 text-teal-700 hover:bg-teal-50 text-sm px-4 py-2 rounded-xl">
+            <Plus className="w-4 h-4" /> Add Category
+          </button>
+          <button onClick={openAdd} className="flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm px-4 py-2 rounded-xl">
+            <Plus className="w-4 h-4" /> Add Unit
+          </button>
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
@@ -1492,7 +1516,7 @@ function UnitsOfMeasurementPanel() {
                   }
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 >
-                  {["Length", "Weight", "Volume", "Area", "Custom"].map((c) => (
+                  {unitCategories.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
                 </select>
@@ -1511,6 +1535,28 @@ function UnitsOfMeasurementPanel() {
                 className="px-4 py-2 text-sm bg-teal-700 hover:bg-teal-800 text-white rounded-xl disabled:opacity-60"
               >
                 {saving ? "Saving…" : editing ? "Save Changes" : "Add Unit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCategoryModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">Add Unit Category</h2>
+              <button onClick={() => setShowCategoryModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="p-6">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Category Name<span className="text-red-500">*</span></label>
+              <input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} placeholder="e.g. Pressure"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500" />
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+              <button onClick={() => setShowCategoryModal(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-xl text-gray-700">Cancel</button>
+              <button onClick={() => void saveCategory()} disabled={savingCategory || !categoryName.trim()} className="px-4 py-2 text-sm bg-teal-700 text-white rounded-xl disabled:opacity-50">
+                {savingCategory ? "Saving…" : "Add Category"}
               </button>
             </div>
           </div>
