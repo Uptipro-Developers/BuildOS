@@ -53,7 +53,7 @@ export interface MaterialAmendment {
 }
 export interface StockTransfer {
     id: string; reference: string; fromStoreId: string; fromStoreName: string;
-    toStoreId: string; toStoreName: string; items: any[]; status: string;
+    toStoreId: string; toStoreName: string; items: Array<{ materialName: string; qty: number; unit: string; materialRequestRef?: string }>; status: string;
     requestedBy?: string; approvedBy?: string; requestDate: string;
     completedAt?: string; notes?: string;
 }

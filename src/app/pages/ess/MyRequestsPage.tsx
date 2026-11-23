@@ -128,6 +128,7 @@ interface Request {
   items: RequestItem[];
   comments?: string;
   approvalHistory: ApprovalHistoryEntry[];
+  receiptRef?: string;
 }
 
 function toReqStatus(status: string | undefined): ReqStatus {
@@ -135,7 +136,7 @@ function toReqStatus(status: string | undefined): ReqStatus {
   // "resolved"/"closed" cover logged issues, which reach a settled state rather
   // than being approved.
   if (
-    ["approved", "approve", "completed", "done", "paid", "resolved", "closed"]
+    ["approved", "approve", "completed", "done", "paid", "resolved", "closed", "fulfilled_via_storefront", "fulfilled_via_stock_and_procurement"]
       .includes(raw)
   ) {
     return "approved";
@@ -293,6 +294,7 @@ export function MyRequestsPage() {
               })),
             comments: mr.purpose || mr.notes || "",
             approvalHistory: [],
+            receiptRef: [mr.stockTransferRef, ...(mr.stockTransferRefs ?? [])].filter(Boolean)[0],
           }});
 
         const mappedExpenses: Request[] = expenses
@@ -624,6 +626,14 @@ export function MyRequestsPage() {
                       <div className="flex items-start gap-2 bg-white border border-gray-200 rounded-lg px-4 py-3">
                         <MessageSquare className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
                         <p className="text-sm text-gray-700">{r.comments}</p>
+                      </div>
+                    </div>
+                  )}
+                  {r.type === "Material Request" && r.status === "approved" && r.receiptRef && (
+                    <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div><p className="text-xs font-semibold uppercase tracking-wide text-green-700">Stock Receipt Note</p><p className="mt-1 font-mono text-sm font-semibold text-green-950">{r.receiptRef}</p><p className="mt-1 text-xs text-green-800">The materials below were received for this ESS request.</p></div>
+                        <button onClick={(event) => { event.stopPropagation(); window.print(); }} className="flex items-center gap-2 rounded-xl border border-green-300 bg-white px-3 py-2 text-sm font-medium text-green-800 hover:bg-green-100"><Download className="h-4 w-4" /> Print Receipt</button>
                       </div>
                     </div>
                   )}
