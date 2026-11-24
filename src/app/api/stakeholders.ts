@@ -10,3 +10,5 @@ export const updateStakeholder = (id: string, data: Partial<Stakeholder>) =>
     apiFetch<Stakeholder>(`/stakeholders/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteStakeholder = (id: string) =>
     apiFetch<void>(`/stakeholders/${id}`, { method: 'DELETE' });
+export const inviteStakeholderPartner = (id: string) => apiFetch<any>(`/stakeholders/${id}/invite`, { method: 'POST' });
+export const getPartnerWorkspace = () => apiFetch<any>('/stakeholders/partner/workspace');

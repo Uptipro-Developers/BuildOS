@@ -9,12 +9,19 @@ import {
   Plus,
   LayoutList,
   Building2,
+  Inbox,
+  CheckCircle,
+  FileText,
+  X,
 } from "lucide-react";
 import {
   getStockMovements,
   createStockMovement,
   getMaterials,
   getStores,
+  getStockTransfers,
+  updateStockTransfer,
+  type StockTransfer,
 } from "../../api/materials";
 import {
   formatDateByGeneralSettings,
@@ -38,6 +45,8 @@ interface Movement {
   qtyBefore?: number;
   qtyAfter?: number;
   status?: string;
+  storeId?: string;
+  toStoreId?: string;
 }
 
 function movementLabel(type: string): MovementType {
@@ -90,11 +99,15 @@ export function StockMovementPage() {
   const [typeFilter, setTypeFilter] = useState<MovementType | "All">("All");
   const [storeFilter, setStoreFilter] = useState("All Stores");
   const [showModal, setShowModal] = useState(false);
+  const [showIncoming, setShowIncoming] = useState(false);
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [receiptTransfer, setReceiptTransfer] = useState<StockTransfer | null>(null);
+  const [updatingTransfer, setUpdatingTransfer] = useState<string | null>(null);
   const [form, setForm] = useState<typeof BLANK_FORM>({ ...BLANK_FORM });
 
   useEffect(() => {
-    Promise.all([getStockMovements(), getStores(), getMaterials()])
-      .then(([movs, strs, mats]) => {
+    Promise.all([getStockMovements(), getStores(), getMaterials(), getStockTransfers()])
+      .then(([movs, strs, mats, transferRows]) => {
         setMovements(
           movs.map((m) => ({
             id: m.id,
@@ -102,7 +115,7 @@ export function StockMovementPage() {
             material: m.materialName,
             category: "",
             fromStore: m.storeName,
-            toStore: m.projectName ?? "—",
+            toStore: m.toStoreName ?? m.projectName ?? "—",
             quantity: m.qty,
             unit: m.unit,
             type: movementLabel(m.type),
@@ -111,12 +124,15 @@ export function StockMovementPage() {
             qtyBefore: m.qtyBefore,
             qtyAfter: m.qtyAfter,
             status: m.status,
+            storeId: m.storeId,
+            toStoreId: m.toStoreId,
           })),
         );
         setStores(strs.map((s) => s.name));
         setStoreRecords(strs.map((s) => ({ id: s.id, name: s.name })));
         const materialNames = mats.map((m) => m.name);
         setMaterials(materialNames);
+        setTransfers(transferRows);
         setForm((prev) => ({ ...prev, material: prev.material || materialNames[0] || "" }));
       })
       .catch((err: unknown) =>
@@ -126,6 +142,32 @@ export function StockMovementPage() {
       )
       .finally(() => setLoading(false));
   }, []);
+
+  const incomingTransfers = transfers.filter((transfer) => {
+    const requestLinked = transfer.notes?.includes("ESS Material Request") || transfer.items?.some((item) => item.materialRequestRef);
+    return requestLinked && ["pending", "in transit"].includes(String(transfer.status).toLowerCase());
+  });
+
+  async function changeTransferStatus(transfer: StockTransfer, status: "In Transit" | "Completed") {
+    setUpdatingTransfer(transfer.id);
+    try {
+      const updated = await updateStockTransfer(transfer.id, { status });
+      setTransfers((current) => current.map((item) => item.id === updated.id ? updated : item));
+      if (status === "Completed") {
+        setReceiptTransfer(updated);
+        const fresh = await getStockMovements();
+        setMovements(fresh.map((m) => ({
+          id: m.id, date: formatDateByGeneralSettings(m.date), material: m.materialName, category: "",
+          fromStore: m.storeName, toStore: m.toStoreName ?? m.projectName ?? "—", quantity: m.qty, unit: m.unit,
+          type: movementLabel(m.type), reference: m.reference ?? "", remarks: m.notes ?? "", qtyBefore: m.qtyBefore,
+          qtyAfter: m.qtyAfter, status: m.status, storeId: m.storeId, toStoreId: m.toStoreId,
+        })));
+        toast.success("Receipt confirmed and stock movement posted.");
+      } else toast.success("Stock movement marked In Transit.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update the stock movement.");
+    } finally { setUpdatingTransfer(null); }
+  }
 
   const storeOptions = stores.length > 0 ? stores : [];
   const STORE_FILTER_OPTIONS = ["All Stores", ...storeOptions];
@@ -249,6 +291,13 @@ export function StockMovementPage() {
             className="flex items-center gap-2 border border-gray-200 bg-white text-gray-700 text-sm px-3 py-2 rounded-xl hover:bg-gray-50"
           >
             <Download className="w-4 h-4" /> Export
+          </button>
+          <button
+            onClick={() => setShowIncoming(true)}
+            className="relative flex items-center gap-2 border border-teal-200 bg-white text-teal-700 text-sm px-3 py-2 rounded-xl hover:bg-teal-50"
+          >
+            <Inbox className="w-4 h-4" /> Incoming Requests
+            {incomingTransfers.length > 0 && <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-bold text-white">{incomingTransfers.length}</span>}
           </button>
           <button
             onClick={() => {
@@ -401,15 +450,19 @@ export function StockMovementPage() {
       {view === "store" && (
         <div className="space-y-4">
           {storeOptions.map((store) => {
-            const outbound = movements.filter(
-              (m) => m.fromStore === store && m.type !== "Receipt",
-            );
-            const inbound = movements.filter(
-              (m) => m.toStore === store && m.type !== "Return",
-            );
-            const returns = movements.filter(
-              (m) => m.fromStore === store && m.type === "Return",
-            );
+            const history = movements.filter((movement) => movement.fromStore === store || movement.toStore === store).map((movement) => {
+              const transfer = transfers.find((candidate) => candidate.reference === movement.reference);
+              const rawDirection = movement.type === "Receipt" || movement.remarks.toLowerCase().includes("incoming") || movement.qtyAfter !== undefined && movement.qtyBefore !== undefined && movement.qtyAfter > movement.qtyBefore;
+              const direction = movement.type === "Return" ? "RETURN" : rawDirection ? "IN" : "OUT";
+              const counterpart = transfer
+                ? direction === "IN" ? transfer.fromStoreName : transfer.toStoreName
+                : movement.toStore !== "—" && movement.toStore !== store ? movement.toStore
+                  : movement.type === "Receipt" ? "External receipt" : movement.type === "Issue" ? "Material issue" : "—";
+              return { ...movement, direction, counterpart };
+            });
+            const inboundCount = history.filter((movement) => movement.direction === "IN").length;
+            const outboundCount = history.filter((movement) => movement.direction === "OUT").length;
+            const returnCount = history.filter((movement) => movement.direction === "RETURN").length;
 
             return (
               <div
@@ -425,13 +478,13 @@ export function StockMovementPage() {
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-500">
                     <span className="text-blue-600 font-medium">
-                      {outbound.length} out
+                      {outboundCount} out
                     </span>
                     <span className="text-green-600 font-medium">
-                      {inbound.length} in
+                      {inboundCount} in
                     </span>
                     <span className="text-yellow-600 font-medium">
-                      {returns.length} returns
+                      {returnCount} returns
                     </span>
                   </div>
                 </div>
@@ -444,24 +497,23 @@ export function StockMovementPage() {
                       <th className="px-4 py-2.5 text-left">Direction</th>
                       <th className="px-4 py-2.5 text-left">Counterpart</th>
                       <th className="px-4 py-2.5 text-left">Type</th>
+                      <th className="px-4 py-2.5 text-left">Balance</th>
+                      <th className="px-4 py-2.5 text-left">Reference</th>
+                      <th className="px-4 py-2.5 text-left">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {[...inbound, ...outbound, ...returns].length === 0 && (
+                    {history.length === 0 && (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={9}
                           className="px-4 py-4 text-center text-gray-400 text-xs"
                         >
                           No activity for this store.
                         </td>
                       </tr>
                     )}
-                    {[
-                      ...inbound.map((m) => ({ ...m, dir: "IN" as const })),
-                      ...outbound.map((m) => ({ ...m, dir: "OUT" as const })),
-                      ...returns.map((m) => ({ ...m, dir: "RET" as const })),
-                    ].map((m) => (
+                    {history.map((m) => (
                       <tr key={m.id} className="hover:bg-gray-50">
                         <td className="px-4 py-2.5 text-gray-900 font-medium text-xs">
                           {m.material}
@@ -474,21 +526,20 @@ export function StockMovementPage() {
                         </td>
                         <td className="px-4 py-2.5">
                           <span
-                            className={`text-xs font-bold ${m.dir === "IN" ? "text-green-600" : m.dir === "OUT" ? "text-blue-600" : "text-yellow-600"}`}
+                            className={`text-xs font-bold ${m.direction === "IN" ? "text-green-600" : m.direction === "OUT" ? "text-blue-600" : "text-yellow-600"}`}
                           >
-                            {m.dir}
+                            {m.direction}
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-gray-500">
-                          {m.dir === "IN" ? m.fromStore : m.toStore}
+                          {m.counterpart}
                         </td>
                         <td className="px-4 py-2.5">
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded-full font-medium ${TYPE_STYLE[m.type]}`}
-                          >
-                            {m.type}
-                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TYPE_STYLE[m.type]}`}>{m.type}</span>
                         </td>
+                        <td className="px-4 py-2.5 text-xs text-gray-600 whitespace-nowrap">{m.qtyBefore ?? "—"} → <span className="font-semibold text-gray-900">{m.qtyAfter ?? "—"}</span></td>
+                        <td className="px-4 py-2.5 font-mono text-[11px] text-gray-500">{m.reference || "—"}</td>
+                        <td className="px-4 py-2.5 text-xs capitalize text-gray-500">{(m.status ?? "posted").replace(/_/g, " ")}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -496,6 +547,53 @@ export function StockMovementPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {showIncoming && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
+              <div><h2 className="text-lg font-semibold text-gray-900">Incoming Stock Movement Requests</h2><p className="mt-0.5 text-xs text-gray-500">Approved ESS requests waiting to be moved or received.</p></div>
+              <button onClick={() => setShowIncoming(false)} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-6">
+              {incomingTransfers.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 px-6 py-12 text-center text-sm text-gray-400">No incoming stock movement requests.</div>}
+              {incomingTransfers.map((transfer) => {
+                const inTransit = String(transfer.status).toLowerCase() === "in transit";
+                return <section key={transfer.id} className="overflow-hidden rounded-xl border border-gray-200">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3">
+                    <div><p className="font-mono text-xs font-semibold text-gray-800">{transfer.reference}</p><p className="mt-0.5 text-xs text-gray-500">{transfer.fromStoreName} <ArrowRight className="mx-1 inline h-3 w-3" /> {transfer.toStoreName}</p></div>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${inTransit ? "bg-blue-50 text-blue-700" : "bg-yellow-50 text-yellow-700"}`}>{transfer.status}</span>
+                  </div>
+                  <div className="grid gap-3 p-4 md:grid-cols-[1fr_auto]">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {transfer.items.map((item, index) => <div key={`${item.materialName}-${index}`} className="rounded-lg border border-gray-100 p-3"><p className="text-sm font-semibold text-gray-900">{item.materialName}</p><p className="mt-1 text-xs text-gray-500">{item.qty} {item.unit} · Request {item.materialRequestRef || "—"}</p></div>)}
+                    </div>
+                    <div className="flex items-center">
+                      <button disabled={updatingTransfer === transfer.id} onClick={() => void changeTransferStatus(transfer, inTransit ? "Completed" : "In Transit")}
+                        className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${inTransit ? "bg-green-600 hover:bg-green-700" : "bg-teal-700 hover:bg-teal-800"}`}>
+                        {inTransit ? <CheckCircle className="h-4 w-4" /> : <ArrowRight className="h-4 w-4" />}{updatingTransfer === transfer.id ? "Updating…" : inTransit ? "Confirm Receipt" : "Create Movement"}
+                      </button>
+                    </div>
+                  </div>
+                </section>;
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {receiptTransfer && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5"><div><p className="text-xs font-semibold uppercase tracking-wide text-teal-700">Stock Receipt Note</p><h2 className="mt-1 text-lg font-semibold text-gray-900">{receiptTransfer.reference}</h2></div><button onClick={() => setReceiptTransfer(null)}><X className="h-5 w-5 text-gray-400" /></button></div>
+            <div className="space-y-5 p-6">
+              <div className="grid grid-cols-2 gap-4 rounded-xl bg-gray-50 p-4 text-sm"><div><p className="text-xs text-gray-400">From store</p><p className="mt-1 font-semibold text-gray-900">{receiptTransfer.fromStoreName}</p></div><div><p className="text-xs text-gray-400">Receiving store</p><p className="mt-1 font-semibold text-gray-900">{receiptTransfer.toStoreName}</p></div><div><p className="text-xs text-gray-400">Requested by</p><p className="mt-1 font-medium text-gray-800">{receiptTransfer.requestedBy || "—"}</p></div><div><p className="text-xs text-gray-400">Received date</p><p className="mt-1 font-medium text-gray-800">{receiptTransfer.completedAt ? formatDateByGeneralSettings(receiptTransfer.completedAt) : "—"}</p></div></div>
+              <div className="overflow-hidden rounded-xl border border-gray-200"><table className="w-full text-sm"><thead className="bg-gray-50 text-xs uppercase text-gray-500"><tr><th className="px-4 py-3 text-left">Material</th><th className="px-4 py-3 text-left">ESS Request</th><th className="px-4 py-3 text-right">Received</th></tr></thead><tbody className="divide-y divide-gray-100">{receiptTransfer.items.map((item, index) => <tr key={`${item.materialName}-${index}`}><td className="px-4 py-3 font-medium text-gray-900">{item.materialName}</td><td className="px-4 py-3 font-mono text-xs text-gray-500">{item.materialRequestRef || "—"}</td><td className="px-4 py-3 text-right font-semibold">{item.qty} {item.unit}</td></tr>)}</tbody></table></div>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-gray-100 px-6 py-4"><button onClick={() => setReceiptTransfer(null)} className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-700">Close</button><button onClick={() => window.print()} className="flex items-center gap-2 rounded-xl bg-teal-700 px-4 py-2 text-sm text-white"><FileText className="h-4 w-4" /> Print Receipt</button></div>
+          </div>
         </div>
       )}
 

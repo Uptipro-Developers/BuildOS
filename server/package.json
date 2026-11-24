@@ -9,7 +9,7 @@
     "start:dev": "npm run prisma:deploy && nest start --watch",
     "start:debug": "nest start --debug --watch",
     "prisma:generate": "prisma generate",
-    "prisma:deploy": "prisma migrate deploy",
+    "prisma:deploy": "node scripts/reconcile-migration-history.js && prisma migrate deploy",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:seed-coa": "ts-node prisma/seed-chart-accounts.ts",
@@ -18,7 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:integration": "jest test/**/*.integration.spec.ts",
+    "test:integration": "jest --testPathPattern='\\.integration\\.spec\\.ts$'",
     "test:unit": "jest --testPathPattern='(?<!integration)\\.spec\\.ts$'"
   },
   "prisma": {

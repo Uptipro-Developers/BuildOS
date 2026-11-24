@@ -8,13 +8,15 @@ import {
   getNextPayrollPeriod,
 } from "../../api/hr-extras";
 import { Plus, Lock, Unlock, Clock, CalendarPlus } from "lucide-react";
+import { getSalaryFrequencies, type SalaryFrequencyConfig } from "../../api/employment-types";
 
 type PeriodStatus = "open" | "processing" | "closed";
 
 interface Period {
   id: string;
   name: string;
-  type: "Monthly" | "Bi-Weekly";
+  type: string;
+  salaryFrequencyId?: string;
   startDate: string;
   endDate: string;
   status: PeriodStatus;
@@ -54,6 +56,8 @@ export function PayrollPeriodPage() {
   const [newName, setNewName] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
+  const [newFrequencyId, setNewFrequencyId] = useState("salary-frequency-monthly");
+  const [frequencies, setFrequencies] = useState<SalaryFrequencyConfig[]>([]);
 
   useEffect(() => {
     getPayrollPeriods()
@@ -62,11 +66,8 @@ export function PayrollPeriodPage() {
           data.map((p) => ({
             id: p.id,
             name: p.name,
-            type: (["Monthly", "Bi-Weekly"] as const).includes(
-              p.startDate ? "Monthly" : "Monthly",
-            )
-              ? "Monthly"
-              : "Bi-Weekly",
+            type: p.salaryFrequencyName ?? "Monthly",
+            salaryFrequencyId: p.salaryFrequencyId,
             startDate: p.startDate,
             endDate: p.endDate,
             status: (["open", "processing", "closed"] as const).includes(
@@ -83,6 +84,7 @@ export function PayrollPeriodPage() {
       )
       .catch(() => {});
   }, []);
+  useEffect(() => { getSalaryFrequencies().then(setFrequencies).catch(() => setFrequencies([])); }, []);
 
   /**
    * Opens or closes a period.
@@ -122,10 +124,11 @@ export function PayrollPeriodPage() {
    */
   async function prefillNextPeriod() {
     try {
-      const next = await getNextPayrollPeriod();
+      const next = await getNextPayrollPeriod(newFrequencyId);
       setNewName(next.name);
       setNewStart(next.startDate);
       setNewEnd(next.endDate);
+      if (next.salaryFrequencyId) setNewFrequencyId(next.salaryFrequencyId);
       setShowAdd(true);
     } catch (err) {
       toast.error(
@@ -143,6 +146,8 @@ export function PayrollPeriodPage() {
       name,
       startDate: newStart,
       endDate: newEnd,
+      salaryFrequencyId: newFrequencyId,
+      salaryFrequencyName: frequencies.find((item) => item.id === newFrequencyId)?.name,
     })
       .then(() => {
         getPayrollPeriods()
@@ -151,7 +156,8 @@ export function PayrollPeriodPage() {
               data.map((p) => ({
                 id: p.id,
                 name: p.name,
-                type: "Monthly" as const,
+                type: p.salaryFrequencyName ?? "Monthly",
+                salaryFrequencyId: p.salaryFrequencyId,
                 startDate: p.startDate,
                 endDate: p.endDate,
                 status: (p.status as PeriodStatus) || "open",
@@ -214,7 +220,8 @@ export function PayrollPeriodPage() {
           <h3 className="text-sm font-semibold text-gray-900">
             Create Payroll Period
           </h3>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Salary Frequency *</label><select value={newFrequencyId} onChange={(e) => setNewFrequencyId(e.target.value)} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white">{frequencies.map((frequency) => <option key={frequency.id} value={frequency.id}>{frequency.name}</option>)}</select></div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Period Name *

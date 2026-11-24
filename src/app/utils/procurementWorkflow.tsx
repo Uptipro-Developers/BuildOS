@@ -51,6 +51,7 @@ const ICON = "w-3.5 h-3.5";
 export type MaterialRequestStatus =
   | "pending"
   | "approved"
+  | "partially_paid"
   | "in_procurement"
   | "rejected"
   | "fulfilled";
@@ -66,6 +67,11 @@ export const MATERIAL_REQUEST_STATUS: Record<MaterialRequestStatus, StatusDef> =
     label: "Approved",
     badge: "bg-green-100 text-green-700",
     icon: <CheckCircle2 className={ICON} />,
+  },
+  partially_paid: {
+    label: "Partially Paid",
+    badge: "bg-cyan-100 text-cyan-700",
+    icon: <Banknote className={ICON} />,
   },
   in_procurement: {
     label: "In Procurement",

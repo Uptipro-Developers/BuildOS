@@ -38,6 +38,8 @@ export function ConstructionLayout() {
       items: [
         { label: "Schedule", href: "/apps/construction/schedule", icon: <Calendar className="w-4 h-4" />, end: true },
         { label: "Daily Reports", href: "/apps/construction/daily-reports", icon: <FileText className="w-4 h-4" />, end: true },
+        { label: "Daily Attendance", href: "/apps/construction/attendance", icon: <Clock className="w-4 h-4" />, end: true },
+        { label: "BoQ & BoM", href: "/apps/construction/boq-bom", icon: <ClipboardList className="w-4 h-4" />, end: true },
         { label: "Resources", href: "/apps/construction/resources", icon: <Truck className="w-4 h-4" />, end: true },
         { label: "Issues", href: "/apps/construction/issues", icon: <AlertTriangle className="w-4 h-4" />, end: true },
         { label: "Change Requests", href: "/apps/construction/change-requests", icon: <GitCompare className="w-4 h-4" />, end: true },
@@ -74,7 +76,7 @@ export function ConstructionLayout() {
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50">
       <AppHeader currentApp="construction" appColor="bg-amber-600" />
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 overflow-y-auto">
+        <aside className="bg-white border-r border-gray-200 flex-shrink-0 overflow-hidden">
           <CollapsibleSidebar
             sections={canConfigure ? baseSections : baseSections.filter((section) => section.label !== "Settings")}
             activeClass="bg-amber-50 text-amber-700 font-medium [&_svg]:text-amber-600"

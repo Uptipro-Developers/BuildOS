@@ -11,7 +11,10 @@ import {
   escapeHtml,
   printDocument,
 } from "../../utils/printDocument";
-import { getPayrollRuns, getPayrollEntries } from "../../api/hr-extras";
+import { createPayrollRun, getPayrollRuns, getPayrollEntries, getPayrollPeriods, getPayrollInputs, createPayrollInput, deletePayrollInput, type PayrollPeriod, type PayrollInput } from "../../api/hr-extras";
+import { getSalaryFrequencies, type SalaryFrequencyConfig } from "../../api/employment-types";
+import { fetchProjects } from "../../api/projects";
+import { fetchEmployees } from "../../api/employees";
 import {
   CheckCircle,
   AlertCircle,
@@ -21,6 +24,8 @@ import {
   FileText,
   ArrowRight,
   Clock,
+  Plus,
+  Trash2,
 } from "lucide-react";
 
 type RunStatus = "idle" | "running" | "complete" | "error";
@@ -74,6 +79,17 @@ export function PayrollProcessingPage() {
   >({});
   const [month, setMonth] = useState("April 2025");
   const [entries, setEntries] = useState<ProcessEntry[]>([]);
+  const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
+  const [selectedPeriodId, setSelectedPeriodId] = useState("");
+  const [scope, setScope] = useState<"company" | "project">("company");
+  const [projectId, setProjectId] = useState("");
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [frequencies, setFrequencies] = useState<SalaryFrequencyConfig[]>([]);
+  const [frequencyId, setFrequencyId] = useState("salary-frequency-monthly");
+  const [payrollInputs, setPayrollInputs] = useState<PayrollInput[]>([]);
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
+  const [showInputForm, setShowInputForm] = useState(false);
+  const [inputDraft, setInputDraft] = useState({ employeeId: "", type: "overtime", amount: "", quantity: "", effectiveDate: new Date().toISOString().slice(0, 10), notes: "" });
 
   useEffect(() => {
     getPayrollRuns()
@@ -103,6 +119,30 @@ export function PayrollProcessingPage() {
       toast.error("Could not load the payroll run."),
     );
   }, []);
+  useEffect(() => {
+    Promise.all([getPayrollPeriods(), fetchProjects(), getSalaryFrequencies(), getPayrollInputs("pending"), fetchEmployees({ status: "active" })])
+      .then(([periodRows, projectRows, frequencyRows, inputRows, employeeRows]) => {
+        setPeriods(periodRows.filter((period) => period.status.toLowerCase() !== "closed"));
+        setProjects(projectRows.map((project) => ({ id: project.id, name: project.name })));
+        setFrequencies(frequencyRows);
+        setPayrollInputs(inputRows);
+        setEmployees(employeeRows.map((employee: any) => ({ id: employee.id, name: `${employee.firstName} ${employee.lastName}`.trim() })));
+        const first = periodRows.find((period) => period.status.toLowerCase() !== "closed");
+        if (first) { setSelectedPeriodId(first.id); setMonth(first.name); if (first.salaryFrequencyId) setFrequencyId(first.salaryFrequencyId); }
+      })
+      .catch(() => toast.error("Could not load payroll configuration."));
+  }, []);
+
+  async function savePayrollInput() {
+    if (!inputDraft.employeeId || !inputDraft.effectiveDate) { toast.error("Select an employee and effective date."); return; }
+    try { const created = await createPayrollInput({ ...inputDraft, amount: Number(inputDraft.amount || 0), quantity: Number(inputDraft.quantity || 0) } as any); setPayrollInputs((current) => [created, ...current]); setShowInputForm(false); setInputDraft((current) => ({ ...current, employeeId: "", amount: "", quantity: "", notes: "" })); toast.success("Payroll input recorded."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Could not save payroll input."); }
+  }
+
+  async function removePayrollInput(id: string) {
+    try { await deletePayrollInput(id); setPayrollInputs((current) => current.filter((input) => input.id !== id)); toast.success("Payroll input removed."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Could not remove payroll input."); }
+  }
   const [, setShowPreview] = useState(false);
 
   const included = entries.filter((e) => e.status === "included");
@@ -175,26 +215,26 @@ export function PayrollProcessingPage() {
     toast.success(STAGE_MESSAGES[to]);
   }
 
-  function runPayroll() {
+  async function runPayroll() {
+    if (!selectedPeriodId) { toast.error("Select an open payroll period."); return; }
+    if (scope === "project" && !projectId) { toast.error("Select the project to process."); return; }
     setRunStatus("running");
-    setTimeout(() => {
+    try {
+      const run = await createPayrollRun({ periodId: selectedPeriodId, scope, projectId: scope === "project" ? projectId : undefined, salaryFrequencyId: frequencyId } as any);
+      const generated = run.entries ?? await getPayrollEntries(run.id);
+      setEntries(generated.map((e) => ({ id: e.employeeId, name: e.employeeName, department: e.department ?? "", gradeLevel: "", basicSalary: e.grossPay - e.allowances, allowances: e.allowances, deductions: e.deductions, netPay: e.netPay, status: "included" as EmpPayStatus, note: "" })));
       setRunStatus("complete");
       advanceStage("sent_for_approval");
-    }, 2500);
+      toast.success(`${run.employeeCount} paid employee${run.employeeCount === 1 ? "" : "s"} added to the payroll run.`);
+    } catch (error) {
+      setRunStatus("error");
+      toast.error(error instanceof Error ? error.message : "Payroll generation failed.");
+    }
   }
 
   function toggleStatus(id: string, status: EmpPayStatus) {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, status } : e)));
   }
-
-  const months = [
-    "January 2025",
-    "February 2025",
-    "March 2025",
-    "April 2025",
-    "May 2025",
-    "June 2025",
-  ];
 
   // Approval pipeline definition
   const APPROVAL_STAGES: {
@@ -237,14 +277,15 @@ export function PayrollProcessingPage() {
         </div>
         <div className="flex items-center gap-2">
           <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
+            value={selectedPeriodId}
+            onChange={(e) => { const period = periods.find((item) => item.id === e.target.value); setSelectedPeriodId(e.target.value); if (period) { setMonth(period.name); if (period.salaryFrequencyId) setFrequencyId(period.salaryFrequencyId); } setRunStatus("idle"); }}
             className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"
           >
-            {months.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
+            <option value="">Select period…</option>{periods.map((period) => <option key={period.id} value={period.id}>{period.name}</option>)}
           </select>
+          <select value={frequencyId} onChange={(e) => { setFrequencyId(e.target.value); setRunStatus("idle"); }} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white">{frequencies.map((frequency) => <option key={frequency.id} value={frequency.id}>{frequency.name}</option>)}</select>
+          <select value={scope} onChange={(e) => { setScope(e.target.value as "company" | "project"); setProjectId(""); setRunStatus("idle"); }} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"><option value="company">Company employees</option><option value="project">Project employees</option></select>
+          {scope === "project" && <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setRunStatus("idle"); }} className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white"><option value="">Select project…</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>}
           <button
             onClick={() => setShowPreview(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
@@ -272,6 +313,8 @@ export function PayrollProcessingPage() {
           </button>
         </div>
       </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-5"><div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-gray-900">Payroll Inputs</h3><p className="text-xs text-gray-500">Overtime, incentives, employee status events, loans, penalties and salary variables applied before generation.</p></div><button onClick={() => setShowInputForm((value) => !value)} className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Plus className="h-4 w-4" />Add Input</button></div>{showInputForm && <div className="mt-4 grid grid-cols-6 gap-3 rounded-lg border border-indigo-100 bg-indigo-50/40 p-4"><select value={inputDraft.employeeId} onChange={(e) => setInputDraft((current) => ({ ...current, employeeId: e.target.value }))} className="col-span-2 rounded-md border px-3 py-2 text-sm"><option value="">Select employee…</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><select value={inputDraft.type} onChange={(e) => setInputDraft((current) => ({ ...current, type: e.target.value }))} className="col-span-2 rounded-md border px-3 py-2 text-sm">{["abscondment","absenteeism","dismissal","incentive","new_hire","overtime","penalty","loan","reinstatement","resignation","salary_variable","suspension","termination","voluntary_contribution"].map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select><input type="date" value={inputDraft.effectiveDate} onChange={(e) => setInputDraft((current) => ({ ...current, effectiveDate: e.target.value }))} className="rounded-md border px-3 py-2 text-sm" /><input type="number" placeholder="Amount" value={inputDraft.amount} onChange={(e) => setInputDraft((current) => ({ ...current, amount: e.target.value }))} className="rounded-md border px-3 py-2 text-sm" /><input type="number" placeholder="Hours / quantity" value={inputDraft.quantity} onChange={(e) => setInputDraft((current) => ({ ...current, quantity: e.target.value }))} className="rounded-md border px-3 py-2 text-sm" /><input placeholder="Notes" value={inputDraft.notes} onChange={(e) => setInputDraft((current) => ({ ...current, notes: e.target.value }))} className="col-span-4 rounded-md border px-3 py-2 text-sm" /><button onClick={() => void savePayrollInput()} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white">Save Input</button></div>}<div className="mt-4 flex flex-wrap gap-2">{payrollInputs.length === 0 ? <p className="text-sm text-gray-400">No pending payroll inputs.</p> : payrollInputs.map((input) => <div key={input.id} className="flex items-center gap-2 rounded-lg border bg-gray-50 px-3 py-2 text-xs"><span className="font-medium text-gray-800">{input.employeeName}</span><span className="capitalize text-gray-500">{input.type.replaceAll("_", " ")}</span>{input.amount > 0 && <span>{fmt(input.amount)}</span>}<button onClick={() => void removePayrollInput(input.id)} className="text-gray-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button></div>)}</div></div>
 
       {/* Approval Pipeline */}
       {approvalStage !== "draft" && (

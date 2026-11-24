@@ -2,11 +2,15 @@ import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   fetchPurchaseOrders,
+  createPurchaseOrder,
   sendPOToFinance,
   createPO,
+  approvePurchaseOrder,
+  rejectPurchaseOrder,
   cancelPurchaseOrder,
   type MappedPurchaseOrder,
 } from "../../api/purchase-orders";
+import { getProjectBoq, type BoqItem } from "../../api/project-boq";
 import { getReferenceData } from "../../api/reference-data";
 import { getSignatories } from "../../api/signatories";
 import { getPaymentTerms, type DeliverySplit, type TrancheTiming } from "../../api/payment-terms";
@@ -92,7 +96,10 @@ function fmt(n: number) {
  * confirmation/goods-receipt steps still read as "Paid" here even though the
  * order's own status has moved past it.
  */
-function paymentStatusFor(status: POStatus): { label: string; badge: string } {
+function paymentStatusFor(status: POStatus, paidAmount = 0): { label: string; badge: string } {
+  if (paidAmount > 0 && status !== "paid" && status !== "confirmation_requested" && status !== "confirmed" && status !== "goods_received") {
+    return { label: "Partially Paid", badge: "bg-cyan-100 text-cyan-700" };
+  }
   switch (status) {
     case "finance_accepted":
       return { label: "Payment Requested", badge: "bg-amber-100 text-amber-700" };
@@ -111,6 +118,7 @@ interface POItem {
   qty: string;
   unit: string;
   unitCost: string;
+  boqItemId?: string;
 }
 
 // ── Payment terms (Step 2 of PO creation) ──────────────────────────────────
@@ -166,7 +174,10 @@ interface NewPOPayload {
   createdBy: string;
   expectedDate: string;
   totalValue: number;
-  items: { material: string; qty: number; unit: string; unitCost: number }[];
+  sourceType?: "direct" | "project_boq";
+  projectId?: string;
+  projectName?: string;
+  items: { material: string; qty: number; unit: string; unitCost: number; boqItemId?: string }[];
 }
 
 function NewPOModal({
@@ -228,7 +239,7 @@ function NewPOModal({
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>(
     [],
   );
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   // The material catalogue, so a PO line can only reference a material that
   // already exists rather than a free-typed name.
   const [materialOptions, setMaterialOptions] = useState<
@@ -237,7 +248,9 @@ function NewPOModal({
   const [supplierId, setSupplierId] = useState(initial?.supplierId ?? "");
   const [supplierContact, setSupplierContact] = useState(initial?.supplierContact ?? "");
   const [prRef, setPrRef] = useState(initial?.prRef ?? "");
-  const [project, setProject] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [sourceType, setSourceType] = useState<"direct" | "project_boq">("direct");
+  const [boqLoading, setBoqLoading] = useState(false);
   const [deliveryDays, setDeliveryDays] = useState("7");
   const units = useProcurementUnits();
   const [items, setItems] = useState<POItem[]>(
@@ -261,11 +274,11 @@ function NewPOModal({
           id: s.id,
           name: s.name,
         }));
-        const projectNames = data.projects.map((p) => p.name);
+        const projectRows = data.projects.map((p) => ({ id: p.id, name: p.name }));
         setSuppliers(supplierList);
-        setProjects(projectNames);
+        setProjects(projectRows);
         setSupplierId((prev) => prev || supplierList[0]?.id || "");
-        setProject((prev) => prev || projectNames[0] || "");
+        setProjectId((prev) => prev || projectRows[0]?.id || "");
         setMaterialOptions(
           (data.materials ?? [])
             .map((m) => ({ name: m.name, unit: m.unit ?? "" }))
@@ -284,6 +297,34 @@ function NewPOModal({
     setItems((p) => p.filter((_, j) => j !== i));
   const updateItem = (i: number, k: keyof POItem, v: string) =>
     setItems((p) => p.map((it, j) => (j === i ? { ...it, [k]: v } : it)));
+
+  async function loadProjectBoq() {
+    if (!projectId) return;
+    setBoqLoading(true);
+    try {
+      const levels = await getProjectBoq(projectId);
+      const available = levels
+        .flatMap((level) => level.items)
+        .filter((item: BoqItem) => item.kind === "material" && item.quantity - item.procuredQty > 0);
+      if (!available.length) {
+        toast.info("This project has no unprocured material BoQ lines.");
+        return;
+      }
+      setSourceType("project_boq");
+      setItems(available.map((item) => ({
+        material: item.description,
+        qty: String(item.quantity - item.procuredQty),
+        unit: item.unit,
+        unitCost: String(item.unitRate || ""),
+        boqItemId: item.id,
+      })));
+      toast.success(`${available.length} BoQ line${available.length === 1 ? "" : "s"} loaded.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not load the project BoQ.");
+    } finally {
+      setBoqLoading(false);
+    }
+  }
   const totalValue = items.reduce(
     (s, it) => s + (parseFloat(it.qty) || 0) * (parseFloat(it.unitCost) || 0),
     0,
@@ -445,7 +486,6 @@ function NewPOModal({
       setPaymentTermId(id);
       termToSave = builtTerm;
     }
-    if (!initial?.id) return;
     setSaving(true);
     try {
       const ok = await onSave(
@@ -455,9 +495,12 @@ function NewPOModal({
           createdBy: getAuthUserName() || "Current User",
           expectedDate: addDaysIso(parseInt(deliveryDays) || 7),
           totalValue,
+          sourceType,
+          projectId: projectId || undefined,
+          projectName: projects.find((p) => p.id === projectId)?.name,
           items: previewItems(),
         },
-        { paymentTerm: termToSave, signatories: previewSignatories, existingId: initial.id },
+        { paymentTerm: termToSave, signatories: previewSignatories, existingId: initial?.id },
       );
       if (ok) setStep(3);
     } finally {
@@ -484,6 +527,7 @@ function NewPOModal({
       qty: parseFloat(it.qty) || 0,
       unit: it.unit,
       unitCost: parseFloat(it.unitCost) || 0,
+      boqItemId: it.boqItemId,
     }));
   }
 
@@ -577,14 +621,22 @@ function NewPOModal({
                   Project
                 </label>
                 <select
-                  value={project}
-                  onChange={(e) => setProject(e.target.value)}
+                  value={projectId}
+                  onChange={(e) => { setProjectId(e.target.value); setSourceType("direct"); }}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {projects.map((p) => (
-                    <option key={p}>{p}</option>
+                    <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={() => void loadProjectBoq()}
+                  disabled={!projectId || boqLoading}
+                  className="mt-2 text-xs font-medium text-blue-700 hover:text-blue-900 disabled:text-gray-400"
+                >
+                  {boqLoading ? "Loading BoQ…" : "Build lines from Project BoQ"}
+                </button>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -623,6 +675,7 @@ function NewPOModal({
                   >
                     <select
                       value={item.material}
+                      disabled={!!item.boqItemId}
                       onChange={(e) => {
                         const name = e.target.value;
                         updateItem(i, "material", name);
@@ -1089,9 +1142,11 @@ export function PurchaseOrdersPage() {
    * opening a disconnected blank form.
    */
   const [createFromExisting, setCreateFromExisting] = useState<PurchaseOrder | null>(null);
+  const [creatingNew, setCreatingNew] = useState(false);
   /** Id of the order currently mid-transition, so an action can't double-fire. */
   const [working, setWorking] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<PurchaseOrder | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
   /** The order the file icon was clicked on — the read-only PurchaseOrderPaper view. */
   const [previewPO, setPreviewPO] = useState<PurchaseOrder | null>(null);
@@ -1171,19 +1226,24 @@ export function PurchaseOrdersPage() {
    * preview is the point of clicking this button, not a side effect of it.
    */
   async function handleModalSave(
-    // Only reachable via createFromExisting now — nothing here builds a new
-    // order from this payload, but NewPOModal's onSave still passes one.
-    _payload: NewPOPayload,
+    payload: NewPOPayload,
     meta: {
       paymentTerm: PaymentTermPreset;
       signatories: Signatory[];
       existingId?: string;
     },
   ): Promise<boolean> {
-    if (!meta.existingId) return false;
     try {
+      let orderId = meta.existingId;
+      if (!orderId) {
+        const draft = await createPurchaseOrder({
+          ...payload,
+          status: "draft",
+        });
+        orderId = draft.id;
+      }
       // createPO already maps the response — no need to map it again.
-      const po = await createPO(meta.existingId, {
+      const po = await createPO(orderId, {
         paymentTermId: meta.paymentTerm.id,
         deliverySplit: meta.paymentTerm.deliverySplit,
         signatories: meta.signatories.map((s) => ({
@@ -1199,7 +1259,9 @@ export function PurchaseOrdersPage() {
           tranches: meta.paymentTerm.tranches,
         },
       });
-      setPoList((prev) => prev.map((p) => (p.id === po.id ? po : p)));
+      setPoList((prev) => prev.some((p) => p.id === po.id)
+        ? prev.map((p) => (p.id === po.id ? po : p))
+        : [po, ...prev]);
       logChange({
         module: "Procurement",
         action: "PO created",
@@ -1209,7 +1271,7 @@ export function PurchaseOrdersPage() {
         performedBy: "Current User",
       });
       toast.success(`${po.poRef} created.`, {
-        description: "Goods Receipt is now open for this order.",
+        description: "The purchase order is awaiting approval.",
       });
       return true;
     } catch (e) {
@@ -1233,6 +1295,29 @@ export function PurchaseOrdersPage() {
       "Sent to Finance",
       `PO ${po.poRef} sent to Finance`,
       `${po.poRef} sent to Finance.`,
+    );
+  }
+
+  async function handleApprove(po: PurchaseOrder) {
+    return step(
+      po,
+      () => approvePurchaseOrder(po.id, getAuthUserName() || undefined),
+      "Approved",
+      `PO ${po.poRef} approved`,
+      `${po.poRef} approved. Supplier fulfilment and Goods Receipt are now available.`,
+    );
+  }
+
+  async function confirmReject() {
+    const po = rejectTarget;
+    if (!po) return;
+    setRejectTarget(null);
+    await step(
+      po,
+      () => rejectPurchaseOrder(po.id, "Returned for correction.", getAuthUserName() || undefined),
+      "Rejected",
+      `PO ${po.poRef} returned for correction`,
+      `${po.poRef} returned to draft.`,
     );
   }
 
@@ -1312,6 +1397,12 @@ export function PurchaseOrdersPage() {
       render: (po) => (
         <div className="space-y-1">
           <StatusBadge {...statusDef(PURCHASE_ORDER_STATUS, po.status)} />
+          {po.approvalStatus === "pending_approval" && (
+            <p className="text-xs font-medium text-amber-700">Awaiting PO approval</p>
+          )}
+          {po.approvalStatus === "rejected" && (
+            <p className="text-xs font-medium text-red-600">Returned: {po.rejectionReason}</p>
+          )}
           {po.financeRef && (
             <p className="text-xs text-gray-400 font-mono">{po.financeRef}</p>
           )}
@@ -1327,7 +1418,7 @@ export function PurchaseOrdersPage() {
       sortable: true,
       filterable: true,
       render: (po) => {
-        const cfg = paymentStatusFor(po.status);
+        const cfg = paymentStatusFor(po.status, po.paidAmount);
         return (
           <span
             className={`inline-flex items-center text-xs px-2 py-1 rounded-full font-medium ${cfg.badge}`}
@@ -1356,6 +1447,28 @@ export function PurchaseOrdersPage() {
        */
       render: (po) => {
         if (po.status === "cancelled") return null;
+        if (po.approvalStatus === "pending_approval") {
+          return (
+            <div className="flex items-center justify-end gap-1">
+              <button
+                type="button"
+                disabled={working === po.id}
+                onClick={(e) => { e.stopPropagation(); void handleApprove(po); }}
+                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 disabled:opacity-50"
+              >
+                <CheckCircle className="w-3 h-3" /> Approve
+              </button>
+              <button
+                type="button"
+                disabled={working === po.id}
+                onClick={(e) => { e.stopPropagation(); setRejectTarget(po); }}
+                className="px-2 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50"
+              >
+                Reject
+              </button>
+            </div>
+          );
+        }
         const created = po.status !== "draft" && po.status !== "finance_declined";
         const needsFinanceFirst = created && po.deliverySplit === "pre_delivery" && !po.sentToFinance;
         return (
@@ -1471,6 +1584,13 @@ export function PurchaseOrdersPage() {
             Draft → Finance → paid → confirmed → goods received
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setCreatingNew(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+        >
+          <Plus className="h-4 w-4" /> Raise PO
+        </button>
       </div>
 
       {/* Stats */}
@@ -1566,6 +1686,13 @@ export function PurchaseOrdersPage() {
         <NewPOModal
           initial={createFromExisting}
           onClose={() => setCreateFromExisting(null)}
+          onSave={handleModalSave}
+          onSendToFinance={async (po) => !!(await handleSendToFinance(po))}
+        />
+      )}
+      {creatingNew && (
+        <NewPOModal
+          onClose={() => setCreatingNew(false)}
           onSave={handleModalSave}
           onSendToFinance={async (po) => !!(await handleSendToFinance(po))}
         />
@@ -1763,6 +1890,16 @@ export function PurchaseOrdersPage() {
       {/* Cancelled, not deleted: deleting an order takes the quote it was
           awarded from, the invoice Finance raised for it and the payment with
           it. */}
+      <ConfirmationModal
+        isOpen={rejectTarget !== null}
+        title="Return Purchase Order?"
+        description={rejectTarget ? `${rejectTarget.poRef} will return to draft for correction and cannot proceed to Finance or Goods Receipt.` : ""}
+        confirmLabel="Return to Draft"
+        isDangerous
+        onConfirm={confirmReject}
+        onCancel={() => setRejectTarget(null)}
+      />
+
       <ConfirmationModal
         isOpen={Boolean(cancelTarget)}
         title="Cancel purchase order"

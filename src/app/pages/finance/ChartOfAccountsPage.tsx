@@ -14,6 +14,7 @@ import {
   Edit,
   Trash2,
   ChevronRight,
+  ChevronDown,
   BookOpen,
   RefreshCw,
   X,
@@ -126,6 +127,7 @@ export function ChartOfAccountsPage() {
   const [form, setForm] = useState(emptyForm);
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
   const [recomputing, setRecomputing] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   /**
    * Rebuilds every balance from the posted journal lines.
@@ -164,6 +166,13 @@ export function ChartOfAccountsPage() {
       !a.code.includes(search)
     )
       return false;
+    if (!search && typeFilter === "All") {
+      let parentId = a.parentId;
+      while (parentId) {
+        if (collapsed.has(parentId)) return false;
+        parentId = accounts.find((row) => row.id === parentId)?.parentId ?? null;
+      }
+    }
     return true;
   });
 
@@ -171,6 +180,43 @@ export function ChartOfAccountsPage() {
     setForm(emptyForm);
     setEditId(null);
     setShowModal(true);
+  }
+
+  function nextChildCode(parent: Account) {
+    const children = accounts.filter((account) => account.parentId === parent.id);
+    const numericCodes = children
+      .map((account) => Number(account.code))
+      .filter((code) => Number.isFinite(code));
+    const parentCode = Number(parent.code);
+    if (Number.isFinite(parentCode)) {
+      return String(numericCodes.length ? Math.max(...numericCodes) + 1 : parentCode + 1);
+    }
+    return `${parent.code}-01`;
+  }
+
+  function openCreateUnder(parent: Account) {
+    setForm({
+      ...emptyForm,
+      code: nextChildCode(parent),
+      type: parent.type,
+      parentId: parent.id,
+    });
+    setEditId(null);
+    setShowModal(true);
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      next.delete(parent.id);
+      return next;
+    });
+  }
+
+  function toggleCollapsed(id: string) {
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function openEdit(a: Account) {
@@ -265,9 +311,19 @@ export function ChartOfAccountsPage() {
     { key: "code", label: "Code", render: a => <span className="font-mono text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{a.code}</span>, sortable: true, filterable: true },
     { key: "name", label: "Account Name", render: a => {
       const depth = getDepth(a.id);
+      const hasChildren = accounts.some((child) => child.parentId === a.id);
       return (
         <div className="flex items-center" style={{ paddingLeft: `${depth * 24}px` }}>
-          {depth > 0 && <ChevronRight className="w-3.5 h-3.5 text-gray-400 mr-1 shrink-0" />}
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); toggleCollapsed(a.id); }}
+              className="mr-1 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              title={collapsed.has(a.id) ? "Expand group" : "Collapse group"}
+            >
+              {collapsed.has(a.id) ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          ) : depth > 0 ? <span className="mr-1 w-4" /> : <span className="mr-1 w-4" />}
           <span className={`text-sm ${depth === 0 ? "font-semibold" : ""} text-gray-900`}>{a.name}</span>
         </div>
       );
@@ -282,6 +338,7 @@ export function ChartOfAccountsPage() {
     { key: "description", label: "Description", render: a => <span className="text-sm text-gray-500">{a.description}</span>, sortable: false, filterable: false },
     { key: "actions", label: "Actions", render: a => (
       <div className="flex items-center justify-end gap-1">
+        <button onClick={e => { e.stopPropagation(); openCreateUnder(a); }} title="Add sub-account" className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Plus className="w-3.5 h-3.5" /></button>
         <button onClick={e => { e.stopPropagation(); openEdit(a); }} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"><Edit className="w-3.5 h-3.5" /></button>
         <button onClick={e => { e.stopPropagation(); setDeleteTarget(a); }} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>

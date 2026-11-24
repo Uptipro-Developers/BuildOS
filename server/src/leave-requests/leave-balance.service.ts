@@ -16,6 +16,16 @@ export class LeaveBalanceService {
     if (!leaveType) {
       throw new BadRequestException(`Leave type ${leaveTypeId} not found`);
     }
+    const employee = await this.prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { gradeLevel: true },
+    });
+    if (!employee) throw new BadRequestException(`Employee ${employeeId} not found`);
+    const gradeEntitlements = leaveType.gradeEntitlements && typeof leaveType.gradeEntitlements === 'object'
+      ? leaveType.gradeEntitlements as Record<string, unknown>
+      : {};
+    const gradeDays = employee.gradeLevel ? Number(gradeEntitlements[employee.gradeLevel]) : NaN;
+    const totalAllowed = Number.isFinite(gradeDays) ? gradeDays : leaveType.daysAllowed;
 
     // Get all approved leave requests for this year
     const startOfYear = new Date(new Date().getFullYear(), 0, 1);
@@ -32,12 +42,13 @@ export class LeaveBalanceService {
     });
 
     const usedDays = approvedDays._sum.days || 0;
-    const availableDays = leaveType.daysAllowed - usedDays;
+    const availableDays = totalAllowed - usedDays;
 
     return {
       leaveTypeId,
       leaveTypeName: leaveType.name,
-      totalAllowed: leaveType.daysAllowed,
+      totalAllowed,
+      employeeGrade: employee.gradeLevel,
       usedDays,
       availableDays: Math.max(0, availableDays),
       carryOverDays: leaveType.carryOver ? leaveType.maxCarryOver : 0,
