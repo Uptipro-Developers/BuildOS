@@ -403,6 +403,13 @@ export const updateUnit = (id: string, data: Partial<Omit<UnitOfMeasurement, 'id
     apiFetch<UnitOfMeasurement>(`/admin/units/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const deleteUnit = (id: string) =>
     apiFetch<{ ok: boolean }>(`/admin/units/${id}`, { method: 'DELETE' });
+export const getUnitCategories = () => apiFetch<string[]>('/admin/unit-categories');
+export const createUnitCategory = (name: string) =>
+    apiFetch<{ name: string }>('/admin/unit-categories', { method: 'POST', body: JSON.stringify({ name }) });
+export const updateUnitCategory = (currentName: string, name: string) =>
+    apiFetch<{ name: string }>(`/admin/unit-categories/${encodeURIComponent(currentName)}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+export const deleteUnitCategory = (name: string) =>
+    apiFetch<{ deleted: boolean }>(`/admin/unit-categories/${encodeURIComponent(name)}`, { method: 'DELETE' });
 
 // Material Categories — Category → Material → Type → Dimension
 export const getMaterialCategories = () =>

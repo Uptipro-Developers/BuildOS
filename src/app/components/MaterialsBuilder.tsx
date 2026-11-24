@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { FolderOpen, Plus, Trash2, X } from "lucide-react";
 import {
     getUnits,
+    getUnitCategories,
+    createUnit,
     type MaterialCatalogMaterialInput,
     type UnitOfMeasurement,
 } from "../api/admin-extras";
@@ -183,6 +185,10 @@ export function MaterialsBuilder({
 }) {
     const [configuredUnits, setConfiguredUnits] = useState<UnitOfMeasurement[]>([]);
     const [unitsLoadFailed, setUnitsLoadFailed] = useState(false);
+    const [unitCategories, setUnitCategories] = useState<string[]>([]);
+    const [unitTarget, setUnitTarget] = useState<{ materialKey: string; itemKey: string; dimensionKey: string } | null>(null);
+    const [newUnit, setNewUnit] = useState({ name: "", abbreviation: "", category: "Custom" });
+    const [savingUnit, setSavingUnit] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -197,10 +203,26 @@ export function MaterialsBuilder({
                 setConfiguredUnits([]);
                 setUnitsLoadFailed(true);
             });
+        getUnitCategories().then((categories) => active && setUnitCategories(categories ?? [])).catch(() => undefined);
         return () => {
             active = false;
         };
     }, []);
+
+    async function saveNewUnit() {
+        if (!unitTarget || !newUnit.name.trim() || !newUnit.abbreviation.trim()) return;
+        setSavingUnit(true);
+        try {
+            const created = await createUnit({
+                name: newUnit.name.trim(), abbreviation: newUnit.abbreviation.trim(), category: newUnit.category,
+                baseUnit: newUnit.abbreviation.trim(), conversionFactor: 1,
+            });
+            setConfiguredUnits((current) => [...current, created]);
+            updateDimensionRow(unitTarget.materialKey, unitTarget.itemKey, unitTarget.dimensionKey, { unit: created.abbreviation });
+            setUnitTarget(null);
+            setNewUnit({ name: "", abbreviation: "", category: "Custom" });
+        } finally { setSavingUnit(false); }
+    }
 
     const dimensionKinds = useMemo(() => {
         const configured = configuredUnits
@@ -406,6 +428,35 @@ export function MaterialsBuilder({
                             </button>
                         </div>
 
+                        {materialOnly && m.items[0] && (
+                            <div className="space-y-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
+                                    <input
+                                        value={m.items[0].aliases}
+                                        onChange={(e) => updateItemRow(m.key, m.items[0].key, { aliases: e.target.value })}
+                                        placeholder="Search aliases, comma separated (e.g. Y12 rebar, Rebar Y12)"
+                                        aria-label={`Search aliases for ${m.name || "material"}`}
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+                                    />
+                                    <label className="cursor-pointer text-xs font-medium text-teal-700 border border-teal-200 bg-white rounded-lg px-3 py-1.5 hover:bg-teal-50">
+                                        {m.items[0].imageUrl ? "Change photo" : "Add photo"}
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={(e) => selectImage(m.key, m.items[0].key, e.target.files?.[0])}
+                                        />
+                                    </label>
+                                </div>
+                                {m.items[0].imageUrl && (
+                                    <div className="flex items-center gap-2">
+                                        <img src={m.items[0].imageUrl} alt="Material preview" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                                        <button type="button" onClick={() => updateItemRow(m.key, m.items[0].key, { imageUrl: "" })} className="text-xs text-red-600 hover:underline">Remove photo</button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {m.items.length > 0 && (
                             <div className="space-y-2 pl-3 border-l-2 border-gray-200">
                                 {m.items.map((it) => (
@@ -440,13 +491,6 @@ export function MaterialsBuilder({
                                             )}
                                             <button
                                                 type="button"
-                                                onClick={() => addDimension(m.key, it.key)}
-                                                className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 whitespace-nowrap shrink-0"
-                                            >
-                                                <Plus className="w-3.5 h-3.5" /> Optional dimension
-                                            </button>
-                                            <button
-                                                type="button"
                                                 onClick={() => removeItem(m.key, it.key)}
                                                 title="Remove item"
                                                 className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-red-50 shrink-0"
@@ -465,7 +509,7 @@ export function MaterialsBuilder({
                                                     Reorder threshold is required at item/SKU level.
                                                 </p>
                                             )}
-                                        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
+                                        {!materialOnly && <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
                                             <input
                                                 value={it.aliases}
                                                 onChange={(e) => updateItemRow(m.key, it.key, { aliases: e.target.value })}
@@ -481,20 +525,37 @@ export function MaterialsBuilder({
                                                     onChange={(e) => selectImage(m.key, it.key, e.target.files?.[0])}
                                                 />
                                             </label>
-                                        </div>
-                                        {it.imageUrl && (
+                                        </div>}
+                                        {!materialOnly && it.imageUrl && (
                                             <div className="flex items-center gap-2">
                                                 <img src={it.imageUrl} alt="Material preview" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
                                                 <button type="button" onClick={() => updateItemRow(m.key, it.key, { imageUrl: "" })} className="text-xs text-red-600 hover:underline">Remove photo</button>
                                             </div>
                                         )}
-                                        {it.dimensions.length > 0 &&
-                                            it.dimensions.some((d) => !isDimensionComplete(d)) && (
-                                                <p className="text-[11px] text-red-500">
-                                                    Every dimension needs a type, value and unit. Custom dimensions also need a name.
-                                                </p>
-                                            )}
-                                        {it.dimensions.map((d) => {
+                                        <section className="overflow-hidden rounded-lg border border-gray-200">
+                                            <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
+                                                <div>
+                                                    <p className="text-xs font-semibold text-gray-700">Dimensions</p>
+                                                    <p className="text-[10px] text-gray-500">Optional material properties and measurements.</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => addDimension(m.key, it.key)}
+                                                    className="flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-teal-700 hover:text-teal-800"
+                                                >
+                                                    <Plus className="w-3.5 h-3.5" /> Add dimension
+                                                </button>
+                                            </div>
+                                            <div className="space-y-2 p-3">
+                                                {it.dimensions.length === 0 && (
+                                                    <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-400">No dimensions added.</p>
+                                                )}
+                                                {it.dimensions.length > 0 && it.dimensions.some((d) => !isDimensionComplete(d)) && (
+                                                    <p className="text-[11px] text-red-500">
+                                                        Every dimension needs a type, value and unit. Custom dimensions also need a name.
+                                                    </p>
+                                                )}
+                                                {it.dimensions.map((d) => {
                                             const customDimension = isCustomDimension(d);
                                             const selectedKind = customDimension ? "Custom" : d.kind;
                                             const customKind = d.customKind ?? (d.kind === "Custom" ? "" : d.kind);
@@ -545,9 +606,14 @@ export function MaterialsBuilder({
                                                     <select
                                                         value={d.unit}
                                                         aria-label="Dimension unit"
-                                                        onChange={(e) =>
-                                                            updateDimensionRow(m.key, it.key, d.key, { unit: e.target.value })
-                                                        }
+                                                        onChange={(e) => {
+                                                            if (e.target.value === "__add_unit__") {
+                                                                setUnitTarget({ materialKey: m.key, itemKey: it.key, dimensionKey: d.key });
+                                                                setNewUnit({ name: "", abbreviation: "", category: effectiveDimensionKind(d) || "Custom" });
+                                                                return;
+                                                            }
+                                                            updateDimensionRow(m.key, it.key, d.key, { unit: e.target.value });
+                                                        }}
                                                         className="w-28 shrink-0 border border-gray-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                                                     >
                                                         <option value="">— unit —</option>
@@ -557,6 +623,7 @@ export function MaterialsBuilder({
                                                         {unitOptions.map((u) => (
                                                             <option key={u} value={u}>{u}</option>
                                                         ))}
+                                                        <option value="__add_unit__">+ Add new unit…</option>
                                                     </select>
                                                     <button
                                                         type="button"
@@ -567,13 +634,15 @@ export function MaterialsBuilder({
                                                         <X className="w-3.5 h-3.5" />
                                                     </button>
                                                 </div>
-                                            )
-                                        })}
-                                        {unitsLoadFailed && (
-                                            <p className="text-[11px] text-red-500">
-                                                Units of measurement could not be loaded from Storefront Config.
-                                            </p>
-                                        )}
+                                                    )
+                                                })}
+                                                {unitsLoadFailed && (
+                                                    <p className="text-[11px] text-red-500">
+                                                        Units of measurement could not be loaded from Storefront Config.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </section>
                                     </div>
                                 ))}
                             </div>
@@ -590,6 +659,22 @@ export function MaterialsBuilder({
                     </button>
                 )}
             </div>
+            {unitTarget && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4">
+                    <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl">
+                        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-5">
+                            <h3 className="text-base font-semibold text-gray-900">Add Unit of Measurement</h3>
+                            <button type="button" onClick={() => setUnitTarget(null)} className="text-xl text-gray-400 hover:text-gray-600">&times;</button>
+                        </div>
+                        <div className="space-y-4 p-6">
+                            <div><label className="mb-1 block text-xs font-medium text-gray-600">Unit name<span className="text-red-500">*</span></label><input value={newUnit.name} onChange={(e) => setNewUnit((current) => ({ ...current, name: e.target.value }))} placeholder="e.g. Pounds" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500" /></div>
+                            <div><label className="mb-1 block text-xs font-medium text-gray-600">Abbreviation<span className="text-red-500">*</span></label><input value={newUnit.abbreviation} onChange={(e) => setNewUnit((current) => ({ ...current, abbreviation: e.target.value }))} placeholder="e.g. lb" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500" /></div>
+                            <div><label className="mb-1 block text-xs font-medium text-gray-600">Category</label><select value={newUnit.category} onChange={(e) => setNewUnit((current) => ({ ...current, category: e.target.value }))} className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">{unitCategories.map((category) => <option key={category}>{category}</option>)}</select></div>
+                        </div>
+                        <div className="flex justify-end gap-3 border-t border-gray-100 px-6 py-4"><button type="button" onClick={() => setUnitTarget(null)} className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-700">Cancel</button><button type="button" onClick={() => void saveNewUnit()} disabled={savingUnit || !newUnit.name.trim() || !newUnit.abbreviation.trim()} className="rounded-xl bg-teal-700 px-4 py-2 text-sm text-white disabled:opacity-50">{savingUnit ? "Saving…" : "Add Unit"}</button></div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -24,6 +24,10 @@ export class MaterialsController {
     searchMaterials(@Query('q') q?: string) { return this.adminExtras.searchMaterials(q ?? ''); }
     @Post('materials/stock')
     applyMaterialStockUpdate(@Body() body: any) { return this.adminExtras.applyMaterialStockUpdate(body); }
+    @Post('materials/:id/amendment')
+    submitMaterialAmendment(@Param('id') id: string, @Body() body: any, @Req() req?: any) {
+        return this.svc.submitMaterialAmendment(id, body, this.actor(req));
+    }
     @Get('materials/:id')
     getMaterial(@Param('id') id: string) { return this.svc.findMaterial(id); }
     @Post('materials')

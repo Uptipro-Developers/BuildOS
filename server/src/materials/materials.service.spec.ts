@@ -22,7 +22,7 @@ describe('MaterialsService store-item thresholds and ledger controls', () => {
             materialRequest: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
             material: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
             systemSetting: { findUnique: jest.fn().mockResolvedValue(null) },
-            materialAmendment: { create: jest.fn() },
+            materialAmendment: { create: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(({ data }: any) => Promise.resolve({ id: 'amendment-1', ...data })) },
             auditLog: { create: jest.fn() },
         };
         prisma.$transaction = jest.fn((callback) => callback(prisma));
@@ -75,14 +75,42 @@ describe('MaterialsService store-item thresholds and ledger controls', () => {
         })).rejects.toThrow('Set a unit of measure for Switch');
     });
 
-    it('rejects direct quantity edits on established store items', async () => {
+    it('routes store quantity edits through amendment approval', async () => {
         const { prisma, service } = makeService();
         prisma.storeItem.findUniqueOrThrow.mockResolvedValue({
-            id: 'store-item-1', materialName: 'Cement', qty: 10, storeId: 'store-1',
+            id: 'store-item-1', materialName: 'Cement', unit: 'bag', qty: 10, reservedQty: 0, storeId: 'store-1',
         });
-        await expect(service.updateStoreItem('store-item-1', { qty: 9 })).rejects.toThrow(
-            'Quantity is ledger-controlled',
-        );
+        prisma.materialAmendment.create.mockResolvedValue({ id: 'amendment-1' });
+
+        await expect(service.updateStoreItem('store-item-1', { qty: 9, reason: 'Count correction' }))
+            .resolves.toEqual(expect.objectContaining({ qty: 10, amendmentId: 'amendment-1', amendmentStatus: 'pending' }));
+        expect(prisma.storeItem.update).not.toHaveBeenCalled();
+        expect(prisma.materialAmendment.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+            entityType: 'StoreItem', entityId: 'store-item-1', proposedValue: { qty: 9 }, reason: 'Count correction',
+        }) });
+    });
+
+    it('applies an approved store quantity amendment to stock, totals, and the ledger', async () => {
+        const { prisma, service } = makeService();
+        prisma.materialAmendment.findUniqueOrThrow.mockResolvedValue({
+            id: 'amendment-1', status: 'pending', entityType: 'StoreItem', entityId: 'store-item-1',
+            materialName: 'Cement', storeName: 'Main Store', oldValue: { qty: 10 },
+            proposedValue: { qty: 14 }, reason: 'Verified stock count',
+        });
+        prisma.storeItem.findUniqueOrThrow.mockResolvedValue({
+            id: 'store-item-1', materialName: 'Cement', unit: 'bag', qty: 10,
+            reservedQty: 2, storeId: 'store-1', reorderLevel: 5,
+        });
+        prisma.material.findFirst.mockResolvedValue({ id: 'material-1', name: 'Cement', totalQty: 20, availableQty: 18 });
+
+        await service.decideAmendment('amendment-1', 'approved', { userId: 'approver-1', name: 'Store Approver' });
+
+        expect(prisma.storeItem.update).toHaveBeenCalledWith({ where: { id: 'store-item-1' }, data: { qty: 14 } });
+        expect(prisma.material.update).toHaveBeenCalledWith({ where: { id: 'material-1' }, data: { totalQty: 24, availableQty: 22 } });
+        expect(prisma.stockMovement.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+            type: 'adjustment_in', qty: 4, qtyBefore: 10, qtyAfter: 14,
+            relatedType: 'MaterialAmendment', relatedId: 'amendment-1', status: 'posted',
+        }) });
     });
 
     it('removes transfer-only fields from non-transfer ledger writes', async () => {

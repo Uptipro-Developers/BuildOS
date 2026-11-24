@@ -100,6 +100,49 @@ export class MaterialsService {
         return { ...existing, amendmentId: amendment.id, amendmentStatus: 'pending' };
     }
 
+    async submitMaterialAmendment(id: string, data: any, actor?: { userId?: string; name?: string; email?: string }) {
+        const material = await this.prisma.material.findUniqueOrThrow({ where: { id } });
+        const proposedMaterial = data?.materialChanges ?? {};
+        const blocked = new Set(['id', 'totalQty', 'availableQty', 'reservedQty', 'createdAt', 'updatedAt', 'effectiveStatus']);
+        const catalogue = Object.fromEntries(Object.entries(proposedMaterial).filter(([key, value]) =>
+            !blocked.has(key) && JSON.stringify((material as any)[key]) !== JSON.stringify(value),
+        ));
+        const requestedStoreChanges = Array.isArray(data?.storeChanges) ? data.storeChanges : [];
+        const stores = requestedStoreChanges.length ? await this.prisma.store.findMany({
+            where: { id: { in: requestedStoreChanges.map((change: any) => String(change.storeId)) } },
+            select: { id: true, name: true },
+        }) : [];
+        const existingItems = requestedStoreChanges.length ? await this.prisma.storeItem.findMany({
+            where: { materialName: { equals: material.name, mode: 'insensitive' }, storeId: { in: requestedStoreChanges.map((change: any) => String(change.storeId)) } },
+        }) : [];
+        const itemByStore = new Map(existingItems.map((item: any) => [item.storeId, item]));
+        const storeById = new Map(stores.map((store: any) => [store.id, store]));
+        const storeChanges = requestedStoreChanges.map((change: any) => {
+            const qty = Number(change.qty);
+            if (!Number.isFinite(qty) || qty < 0) throw new BadRequestException('Store quantity must be zero or greater.');
+            const item: any = itemByStore.get(String(change.storeId));
+            if (item && qty < Number(item.reservedQty ?? 0)) throw new BadRequestException(`Quantity cannot be lower than the ${item.reservedQty} units currently reserved`);
+            const store: any = storeById.get(String(change.storeId));
+            if (!store) throw new BadRequestException('One of the selected stores no longer exists.');
+            return { storeId: store.id, storeName: store.name, storeItemId: item?.id ?? null, oldQty: Number(item?.qty ?? 0), qty };
+        }).filter((change: any) => change.qty !== change.oldQty);
+        if (!Object.keys(catalogue).length && !storeChanges.length) return material;
+        const reason = String(data?.reason ?? '').trim();
+        if (!reason) throw new BadRequestException('Enter a reason for the proposed changes.');
+        const amendment = await this.prisma.materialAmendment.create({ data: {
+            entityType: 'MaterialBatch', entityId: id, materialName: material.name,
+            oldValue: { catalogue: material, storeChanges: storeChanges.map((change: any) => ({ ...change, qty: change.oldQty })) } as any,
+            proposedValue: { catalogue, storeChanges } as any,
+            reason, requestedBy: actor?.name || actor?.email || 'Unknown user', requestedById: actor?.userId || null,
+        }});
+        await this.recordAudit('Material', id, 'AMENDMENT_REQUESTED', amendment.oldValue, amendment.proposedValue, actor, reason);
+        void this.notifications.dispatch('material-amendment.submitted', {
+            title: 'Material amendment awaiting approval', message: `${material.name} has a consolidated proposed change.`,
+            actionUrl: '/apps/storefront/approvals', relatedId: amendment.id, relatedType: 'MaterialAmendment', actorUserId: actor?.userId,
+        });
+        return { ...material, amendmentId: amendment.id, amendmentStatus: 'pending' };
+    }
+
     deleteMaterial(id: string) {
         return this.prisma.material.delete({ where: { id } });
     }
@@ -250,10 +293,10 @@ export class MaterialsService {
 
     async updateStoreItem(id: string, data: any, actor?: { userId?: string; name?: string; email?: string }) {
         const existing = await this.prisma.storeItem.findUniqueOrThrow({ where: { id } });
-        if (data?.qty !== undefined && Number(data.qty) !== existing.qty) {
-            throw new BadRequestException('Quantity is ledger-controlled. Use Stock Movement for an issue, receipt, return, transfer, or adjustment.');
+        if (data?.qty !== undefined && (!Number.isFinite(Number(data.qty)) || Number(data.qty) < 0)) {
+            throw new BadRequestException('Store quantity must be zero or greater.');
         }
-        const { qty: _qty, reason, ...raw } = data ?? {};
+        const { reason, ...raw } = data ?? {};
         const proposed = {
             ...raw,
             ...(raw.reorderLevel !== undefined ? { lowStockThreshold: Number(raw.reorderLevel), reorderLevel: Number(raw.reorderLevel) } : {}),
@@ -612,6 +655,7 @@ export class MaterialsService {
             unit: String(item?.unit ?? '').trim(),
             qty: Number(item?.qty),
             notes: String(item?.notes ?? '').trim() || null,
+            imageUrl: String(item?.imageUrl ?? '').trim() || null,
         }));
         if (normalized.some((item) => !item.materialName || !item.unit || !Number.isFinite(item.qty) || item.qty <= 0)) {
             throw new BadRequestException('Every material requires a name, unit, and quantity greater than zero');
@@ -619,6 +663,14 @@ export class MaterialsService {
         const keys = normalized.map((item) => item.materialName.toLowerCase());
         if (new Set(keys).size !== keys.length) {
             throw new BadRequestException('The same material cannot be added twice');
+        }
+        for (const item of normalized) {
+            if (item.imageUrl && !/^data:image\/(jpeg|png|webp);base64,/i.test(item.imageUrl)) {
+                throw new BadRequestException(`The image for ${item.materialName} must be a JPG, PNG or WebP file`);
+            }
+            if (item.imageUrl && item.imageUrl.length > 2_800_000) {
+                throw new BadRequestException(`The image for ${item.materialName} must be 2 MB or smaller`);
+            }
         }
 
         const supplied = String(data?.reference ?? '').trim();
@@ -964,12 +1016,94 @@ export class MaterialsService {
         const result = await this.prisma.$transaction(async (tx) => {
             if (decision === 'approved') {
                 const values = amendment.proposedValue as Record<string, any>;
-                if (amendment.entityType === 'Material') {
-                    const { totalQty, availableQty, reservedQty, ...safe } = values;
+                if (amendment.entityType === 'MaterialBatch') {
+                    const catalogueValues = values.catalogue ?? {};
+                    const editable = [
+                        'name', 'category', 'categoryId', 'unit', 'sku', 'dimensions', 'aliases', 'imageUrl',
+                        'kind', 'value', 'unitCost', 'reorderLevel', 'materialType', 'allocationStatus',
+                        'allocatedTo', 'allocatedProject', 'condition', 'materialGroupName', 'itemName', 'storeId', 'storeName',
+                    ];
+                    const safeCatalogue = Object.fromEntries(editable.filter((field) => catalogueValues[field] !== undefined).map((field) => [field, catalogueValues[field]]));
+                    const currentMaterial = await tx.material.findUniqueOrThrow({ where: { id: amendment.entityId } });
+                    let totalDelta = 0;
+                    for (const change of Array.isArray(values.storeChanges) ? values.storeChanges : []) {
+                        const nextQty = Number(change.qty);
+                        let item = change.storeItemId ? await tx.storeItem.findUnique({ where: { id: change.storeItemId } }) : null;
+                        if (!item) item = await tx.storeItem.findFirst({ where: { storeId: change.storeId, materialName: { equals: currentMaterial.name, mode: 'insensitive' } } });
+                        const before = Number(item?.qty ?? 0);
+                        if (item && nextQty < Number(item.reservedQty ?? 0)) throw new BadRequestException(`Quantity cannot be lower than the ${item.reservedQty} units currently reserved`);
+                        const updatedItem = item
+                            ? await tx.storeItem.update({ where: { id: item.id }, data: { qty: nextQty } })
+                            : await tx.storeItem.create({ data: {
+                                storeId: change.storeId, materialName: String(safeCatalogue.name ?? currentMaterial.name),
+                                category: String(safeCatalogue.category ?? currentMaterial.category), unit: String(safeCatalogue.unit ?? currentMaterial.unit),
+                                qty: nextQty, openingQty: nextQty, reservedQty: 0, unitCost: Number(safeCatalogue.unitCost ?? currentMaterial.unitCost),
+                                reorderLevel: Number(safeCatalogue.reorderLevel ?? currentMaterial.reorderLevel),
+                            }});
+                        const delta = nextQty - before;
+                        totalDelta += delta;
+                        if (delta !== 0) {
+                            await tx.stockMovement.create({ data: {
+                                type: delta > 0 ? 'adjustment_in' : 'adjustment_out', materialName: updatedItem.materialName,
+                                unit: updatedItem.unit, qty: Math.abs(delta), storeId: change.storeId, storeName: change.storeName,
+                                qtyBefore: before, qtyAfter: nextQty, direction: delta > 0 ? 'increase' : 'decrease', status: 'posted',
+                                relatedType: 'MaterialAmendment', relatedId: amendment.id, createdBy: reviewer,
+                                notes: amendment.reason || 'Approved consolidated material amendment',
+                            }});
+                        }
+                    }
+                    await tx.material.update({ where: { id: amendment.entityId }, data: {
+                        ...safeCatalogue,
+                        ...(totalDelta === 0 ? {} : {
+                            totalQty: Math.max(0, currentMaterial.totalQty + totalDelta),
+                            availableQty: Math.max(0, currentMaterial.availableQty + totalDelta),
+                        }),
+                    }});
+                } else if (amendment.entityType === 'Material') {
+                    // Amendments may outlive a frontend release, so never spread
+                    // arbitrary presentation fields (for example
+                    // `effectiveStatus`) into Prisma. Only real editable
+                    // Material columns may cross this approval boundary.
+                    const editable = [
+                        'name', 'category', 'categoryId', 'unit', 'sku', 'dimensions',
+                        'aliases', 'imageUrl', 'kind', 'value', 'unitCost',
+                        'reorderLevel', 'materialType', 'allocationStatus',
+                        'allocatedTo', 'allocatedProject', 'condition',
+                        'materialGroupName', 'itemName', 'storeId', 'storeName',
+                    ];
+                    const safe = Object.fromEntries(
+                        editable.filter((field) => values[field] !== undefined).map((field) => [field, values[field]]),
+                    );
                     await tx.material.update({ where: { id: amendment.entityId }, data: safe });
                 } else if (amendment.entityType === 'StoreItem') {
-                    const { qty, ...safe } = values;
-                    await tx.storeItem.update({ where: { id: amendment.entityId }, data: safe });
+                    const item = await tx.storeItem.findUniqueOrThrow({ where: { id: amendment.entityId } });
+                    const nextQty = values.qty === undefined ? item.qty : Number(values.qty);
+                    if (!Number.isFinite(nextQty) || nextQty < 0) throw new BadRequestException('Store quantity must be zero or greater.');
+                    if (nextQty < Number(item.reservedQty ?? 0)) {
+                        throw new BadRequestException(`Quantity cannot be lower than the ${item.reservedQty} units currently reserved`);
+                    }
+                    const delta = nextQty - item.qty;
+                    const updatedItem = await tx.storeItem.update({
+                        where: { id: amendment.entityId },
+                        data: { ...values, ...(values.qty === undefined ? {} : { qty: nextQty }) },
+                    });
+                    if (delta !== 0) {
+                        const material = await tx.material.findFirst({ where: { name: { equals: item.materialName, mode: 'insensitive' } } });
+                        if (material) await tx.material.update({ where: { id: material.id }, data: {
+                            totalQty: Math.max(0, material.totalQty + delta),
+                            availableQty: Math.max(0, material.availableQty + delta),
+                        }});
+                        await tx.stockMovement.create({ data: {
+                            type: delta > 0 ? 'adjustment_in' : 'adjustment_out',
+                            materialName: item.materialName, unit: item.unit, qty: Math.abs(delta),
+                            storeId: item.storeId, storeName: amendment.storeName ?? 'Store',
+                            qtyBefore: item.qty, qtyAfter: nextQty,
+                            direction: delta > 0 ? 'increase' : 'decrease', status: 'posted',
+                            relatedType: 'MaterialAmendment', relatedId: amendment.id,
+                            createdBy: reviewer, notes: amendment.reason || 'Approved store quantity amendment',
+                        }});
+                        stockAlert = { item: updatedItem, before: item.qty, storeName: amendment.storeName ?? '', movementId: amendment.id };
+                    }
                 } else if (amendment.entityType === 'StockAdjustment') {
                     const values = amendment.proposedValue as Record<string, any>;
                     const item = await tx.storeItem.findUniqueOrThrow({ where: { id: amendment.entityId } });
