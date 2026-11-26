@@ -50,6 +50,18 @@ const WEBHOOK_EVENTS = [
     value: "purchase-request.created",
     label: "purchase-request.created — a purchase request was raised",
   },
+  {
+    value: "purchase-order.created",
+    label: "purchase-order.created — a purchase order was raised",
+  },
+  {
+    value: "quote.negotiated",
+    label: "quote.negotiated — a buyer submitted a counter-offer",
+  },
+  {
+    value: "quote.agreed",
+    label: "quote.agreed — a buyer awarded the agreed supplier price",
+  },
 ] as const;
 
 export function IntegrationsPage() {

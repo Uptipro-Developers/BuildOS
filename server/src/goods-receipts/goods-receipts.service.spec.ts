@@ -1,13 +1,12 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { GoodsReceiptsService } from './goods-receipts.service';
 
 /**
- * Recording a delivery, deciding it, and what deciding it does to stock.
+ * Recording a delivery and what it posts to stock.
  *
- * Update Record only ever writes a draft (the item's pending* fields) — no
- * stock moves until Accept & Update Stock folds that draft into the
- * cumulative totals and posts it. That split, and the approver gate in
- * front of Accept, are what this file is really about.
+ * Procurement Material Request approval is the final authorisation. Recording
+ * a GRN therefore folds the accepted quantities into the cumulative totals and
+ * posts stock in the same operation.
  */
 
 interface Fixtures {
@@ -65,8 +64,10 @@ function makeService(fx: Fixtures = {}) {
 
     const tx: any = {
         goodsReceiptItem: {
-            update: jest.fn(({ data }: any) => {
+            update: jest.fn(({ where, data }: any) => {
                 writes.goodsReceiptItem.push(data);
+                const item = grn.items.find((row: any) => row.id === where.id);
+                if (item) Object.assign(item, data);
                 return Promise.resolve(data);
             }),
         },
@@ -114,7 +115,10 @@ function makeService(fx: Fixtures = {}) {
             updateMany: jest.fn(() => Promise.resolve({ count: 1 })),
         },
         goodsReceipt: {
-            update: jest.fn(({ data }: any) => Promise.resolve({ ...grn, ...data })),
+            update: jest.fn(({ data }: any) => {
+                Object.assign(grn, data);
+                return Promise.resolve({ ...grn });
+            }),
         },
         purchaseOrder: {
             update: jest.fn(({ data }: any) => {
@@ -144,7 +148,10 @@ function makeService(fx: Fixtures = {}) {
             findFirst: jest.fn(() => Promise.resolve(null)),
             findMany: jest.fn(() => Promise.resolve([grn])),
             create: jest.fn(({ data }: any) => Promise.resolve({ id: 'grn-new', ...data })),
-            update: jest.fn(({ data }: any) => Promise.resolve({ ...grn, ...data })),
+            update: jest.fn(({ data }: any) => {
+                Object.assign(grn, data);
+                return Promise.resolve({ ...grn });
+            }),
         },
         purchaseOrder: {
             findUnique: jest.fn(() =>
@@ -168,8 +175,10 @@ function makeService(fx: Fixtures = {}) {
             create: jest.fn((args: any) => Promise.resolve({ id: 'inv-1', ...args.data })),
         },
         goodsReceiptItem: {
-            update: jest.fn(({ data }: any) => {
+            update: jest.fn(({ where, data }: any) => {
                 writes.goodsReceiptItem.push(data);
+                const item = grn.items.find((row: any) => row.id === where.id);
+                if (item) Object.assign(item, data);
                 return Promise.resolve(data);
             }),
         },
@@ -213,14 +222,15 @@ const draft = {
 };
 
 describe('updating a record', () => {
-    it('writes a draft and moves to pending_approval without touching stock', async () => {
+    it('records and posts accepted stock without another approval', async () => {
         const { service, prisma, writes } = makeService();
-        await service.updateRecord('grn-1', draft);
+        const result = await service.updateRecord('grn-1', draft);
 
-        expect(writes.stockMovement).toHaveLength(0);
+        expect(writes.stockMovement).toHaveLength(1);
         expect(prisma.goodsReceipt.update).toHaveBeenCalledWith(
             expect.objectContaining({ data: expect.objectContaining({ status: 'pending_approval' }) }),
         );
+        expect(result.status).toBe('fully_received');
     });
 
     it('refuses a record with nowhere to put the goods', async () => {
@@ -306,7 +316,7 @@ describe('updating a record', () => {
             ...draft,
             items: [{ material: 'OPC Cement', unit: 'bags', received: 200, accepted: 200, rejected: 0 }],
         });
-        expect(result.status).toBe('pending_approval');
+        expect(result.status).toBe('fully_received');
     });
 });
 
@@ -429,7 +439,7 @@ describe('accepting a record', () => {
         expect(result.status).toBe('fully_received');
     });
 
-    it('lets the named approver accept', async () => {
+    it('allows a legacy pending record to be posted operationally', async () => {
         const { service } = makeService({
             grn: pendingGrn(),
             workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
@@ -439,71 +449,31 @@ describe('accepting a record', () => {
         ).resolves.toMatchObject({ status: 'fully_received' });
     });
 
-    it('refuses anyone who is not the configured approver', async () => {
+    it('does not require the legacy configured approver', async () => {
         const { service } = makeService({
             grn: pendingGrn(),
             workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
         });
         await expect(
             service.accept('grn-1', { userId: 'u-2', name: 'Someone Else' }),
-        ).rejects.toBeInstanceOf(ForbiddenException);
+        ).resolves.toMatchObject({ status: 'fully_received' });
     });
 
-    it('refuses the person who recorded the delivery from also accepting it', async () => {
+    it('allows the recorder to post a legacy pending record', async () => {
         const { service } = makeService({
             grn: pendingGrn({ grn: { receivedBy: 'Finance Manager' } }),
             workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
         });
         await expect(
             service.accept('grn-1', { userId: 'u-1', name: 'Finance Manager' }),
-        ).rejects.toBeInstanceOf(ForbiddenException);
+        ).resolves.toMatchObject({ status: 'fully_received' });
     });
 });
 
-describe('canDecide stamping', () => {
-    it('flags the named approver as able to decide a pending record', async () => {
-        const { service } = makeService({
-            grn: { status: 'pending_approval' },
-            workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
-        });
-        const [row] = await service.findAll(undefined, { userId: 'u-1', name: 'Finance Manager' });
-        expect(row.canDecide).toBe(true);
-    });
-
-    it('flags anyone who is not the configured approver as unable to decide', async () => {
-        const { service } = makeService({
-            grn: { status: 'pending_approval' },
-            workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
-        });
-        const [row] = await service.findAll(undefined, { userId: 'u-2', name: 'Someone Else' });
-        expect(row.canDecide).toBe(false);
-    });
-
-    it('flags canDecide false when there is no signed-in identity to check', async () => {
-        const { service } = makeService({
-            grn: { status: 'pending_approval' },
-            workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
-        });
+describe('legacy pending receipt actions', () => {
+    it('marks a legacy pending record as operationally postable for any editor', async () => {
+        const { service } = makeService({ grn: { status: 'pending_approval' } });
         const [row] = await service.findAll();
-        expect(row.canDecide).toBe(false);
-    });
-
-    it('flags the person who recorded the delivery as unable to decide their own record', async () => {
-        const { service } = makeService({
-            grn: { status: 'pending_approval', receivedBy: 'Finance Manager' },
-            workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
-        });
-        const row = await service.findOne('grn-1', { userId: 'u-1', name: 'Finance Manager' });
-        expect(row.canDecide).toBe(false);
-    });
-
-    it('lets a super user decide even a record they themselves recorded', async () => {
-        const { service, permissions } = makeService({
-            grn: { status: 'pending_approval', receivedBy: 'Finance Manager' },
-            workflow: { processId: 'p_goods_receipt', workflowType: 'single', approver: 'Finance Manager' },
-        });
-        permissions.resolveForUser.mockResolvedValueOnce({ isSuper: true });
-        const row = await service.findOne('grn-1', { userId: 'u-1', name: 'Finance Manager' });
         expect(row.canDecide).toBe(true);
     });
 });

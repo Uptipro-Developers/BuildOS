@@ -1282,7 +1282,9 @@ model ReceivedQuote {
   rfqRef       String?
   supplierName String
   supplierId   String?
-  /// "pending_review" | "approved" | "rejected" | "po_created".
+  /// "pending_review" | "awarded" | "rejected" | "po_created".
+  /// `awarded` means a draft PO shell exists; `po_created` is set only after
+  /// the PO wizard has been completed.
   status       String    @default("pending_review")
   items        Json      @default("[]")
   receivedDate DateTime  @default(now())

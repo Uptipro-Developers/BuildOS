@@ -309,7 +309,7 @@ function NewRFQModal({
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 PR Reference <span className="text-red-500">*</span>
               </label>
-              {/* Chosen from the approved requests, not typed. Free text here
+              {/* Chosen from active requests, not typed. Free text here
                   produced RFQs that named a request which may not exist, and
                   the reference is what groups the returning quotes for
                   comparison. */}
@@ -318,7 +318,7 @@ function NewRFQModal({
                 onChange={(e) => setPrRef(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">Select an approved request…</option>
+                <option value="">Select a purchase request…</option>
                 {prRefs.map((ref) => (
                   <option key={ref} value={ref}>
                     {ref}
@@ -327,7 +327,7 @@ function NewRFQModal({
               </select>
               {prRefs.length === 0 && (
                 <p className="text-xs text-gray-400 mt-0.5">
-                  No approved purchase requests yet.
+                  No active purchase requests yet.
                 </p>
               )}
             </div>

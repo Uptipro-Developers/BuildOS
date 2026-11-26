@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
 export interface ComposedEmail {
+    /** Recipients configured on the template itself. */
+    to: string[];
     subject: string;
     text: string;
     html: string;
@@ -189,8 +191,11 @@ export class EmailTemplateService {
             });
             const settings = (row?.value ?? {}) as Record<string, any>;
             const configs = Array.isArray(settings.emailConfigs) ? settings.emailConfigs : [];
+            const wantedTrigger = String(trigger ?? '').trim().toLowerCase();
             const config = configs.find(
-                (c: any) => c?.enabled !== false && String(c?.trigger ?? '') === trigger,
+                (c: any) =>
+                    c?.enabled !== false &&
+                    String(c?.trigger ?? '').trim().toLowerCase() === wantedTrigger,
             );
             if (!config || (!String(config.subject ?? '').trim() && !String(config.body ?? '').trim())) {
                 return null;
@@ -219,8 +224,13 @@ export class EmailTemplateService {
                 .split(/[,;]/)
                 .map((s: string) => s.trim())
                 .filter((s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+            const to = this.renderTemplate(String(config.recipients ?? ''), withUrls)
+                .split(/[,;]/)
+                .map((s: string) => s.trim())
+                .filter((s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
 
             return {
+                to,
                 subject,
                 text: button.url ? `${text}\n\n${button.label}: ${button.url}` : text,
                 html,

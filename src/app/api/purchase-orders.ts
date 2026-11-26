@@ -137,7 +137,8 @@ export function createPO(
     }).then(mapPO);
 }
 
-export function approvePurchaseOrder(id: string, actor?: string) {
+/** Releases a legacy PO left at pending_approval before PO approval was removed. */
+export function continuePurchaseOrderFulfilment(id: string, actor?: string) {
     return apiFetch<any>(`/purchase-orders/${id}/approve`, {
         method: 'POST',
         body: JSON.stringify({ actor }),

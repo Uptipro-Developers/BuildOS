@@ -84,23 +84,23 @@ export const DEFAULT_PROCESS_CATALOG: ProcessCatalogItem[] = [
         ['view', 'edit', 'approve'], 'materials', '/apps/procurement/approvals'),
     define('p_purchase_requests', 'Purchase Requests', 'procurement',
         'Requisitions to procure materials or services',
-        FULL, 'procurement-requests', '/apps/procurement/purchase-requests'),
+        MANAGED, 'procurement-requests', '/apps/procurement/purchase-requests'),
     define('p_purchase_orders', 'Purchase Orders', 'procurement',
-        'Orders raised against approved requests and sent to suppliers',
-        FULL, 'purchase-orders', '/apps/procurement/purchase-orders'),
+        'Orders raised from selected supplier quotes and sent to suppliers',
+        MANAGED, 'purchase-orders', '/apps/procurement/purchase-orders'),
     define('p_rfqs', 'Requests for Quotation', 'procurement',
         'Quotation requests dispatched to selected vendors',
         // An RFQ is sent, not authorised — no approval workflow exists.
         MANAGED, 'procurement-requests', '/apps/procurement/sent-requests'),
     define('p_supplier_quotes', 'Supplier Quotes', 'procurement',
-        'Quotations received from suppliers, and their evaluation',
-        ['view', 'create', 'edit', 'approve'], 'procurement-requests', '/apps/procurement/received-quotes'),
+        'Quotations received from suppliers, compared and awarded',
+        MANAGED, 'procurement-requests', '/apps/procurement/received-quotes'),
     define('p_goods_receipt', 'Goods Receipt', 'procurement',
         'Recording deliveries and confirming goods against the purchase order',
         // A receipt is evidence of delivery: corrected if wrong, never deleted.
-        // Accepting one — which posts to stock — is a decision the configured
-        // approver makes, not whoever recorded the delivery.
-        ['view', 'create', 'edit', 'approve'], 'goods-receipts', '/apps/procurement/goods-receipt'),
+        // Recording it posts the accepted quantities; Procurement Material
+        // Request approval is the final approval in this chain.
+        ['view', 'create', 'edit'], 'goods-receipts', '/apps/procurement/goods-receipt'),
     define('p_suppliers', 'Suppliers', 'procurement',
         'Supplier records and the materials they supply',
         MANAGED, 'suppliers', '/apps/procurement/suppliers'),

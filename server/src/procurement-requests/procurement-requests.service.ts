@@ -356,13 +356,14 @@ export class ProcurementRequestsService {
     }
     async createRFQ(data: any) {
         if (!data?.prRef) {
-            throw new BadRequestException('An RFQ must reference an approved purchase request.');
+            throw new BadRequestException('An RFQ must reference a purchase request.');
         }
         const purchaseRequest = await this.prisma.purchaseRequest.findUnique({
             where: { prRef: String(data.prRef) },
         });
-        if (!purchaseRequest || normaliseStatus(purchaseRequest.status) !== 'approved') {
-            throw new BadRequestException('The purchase request must be approved before an RFQ can be sent.');
+        const prStatus = normaliseStatus(purchaseRequest?.status);
+        if (!purchaseRequest || !['not_raised', 'raised'].includes(prStatus)) {
+            throw new BadRequestException('Only an active purchase request can be sent to suppliers.');
         }
         // From the RFQ sequence in Settings > Numbering ("RFQ-{N:4}").
         const { reference: rfqRef } = await this.numbering.allocate('RFQ');
@@ -473,23 +474,35 @@ export class ProcurementRequestsService {
     async updateQuote(id: string, data: any) {
         const existing = await this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
         const decision = normaliseStatus(data?.status);
-        if (decision === 'approved') {
+        if (decision === 'selected' || decision === 'approved') {
             if (!['received', 'pending_review'].includes(normaliseStatus(existing.status))) {
-                throw new BadRequestException('Only a quote awaiting review can be approved.');
+                throw new BadRequestException('Only a quote awaiting review can be awarded.');
             }
             if (!existing.prRef) throw new BadRequestException('The quote is not linked to a purchase request.');
             const pr = await this.prisma.purchaseRequest.findUnique({ where: { prRef: existing.prRef } });
-            if (!pr || normaliseStatus(pr.status) !== 'approved') {
-                throw new BadRequestException('The originating purchase request is not approved.');
+            if (!pr || !['raised', 'quotes_received'].includes(normaliseStatus(pr.status))) {
+                throw new BadRequestException('The originating purchase request has not been raised to suppliers.');
             }
         }
         const quote = await this.prisma.receivedQuote.update({ where: { id }, data });
 
-        // Approving a quote *is* raising the order. "Create PO" was a separate
-        // button on Received Quotes, so a quote could sit approved with no order
+        // Awarding a quote *is* raising the order. "Create PO" was a separate
+        // button on Received Quotes, so a quote could sit selected with no order
         // behind it and the two lists disagreed about what had been bought.
-        if (decision === 'approved') {
+        if (decision === 'selected' || decision === 'approved') {
             await this.raisePurchaseOrderFromQuote(quote);
+            // The buyer has awarded the supplier's latest price. Tell the
+            // supplier portal so its invoice stops showing "Negotiating" and
+            // displays the same agreed total as Procurement.
+            this.webhookService
+                .triggerWebhook('quote.agreed', {
+                    id: quote.id,
+                    supplierId: quote.supplierId,
+                    supplierName: quote.supplierName,
+                    agreedAmount: Number(quote.totalValue) || 0,
+                    status: 'accepted',
+                })
+                .catch(() => { });
             return this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
         }
         // Mirror a buyer counter-offer to the supplier's portal. Only the negotiate
@@ -514,12 +527,75 @@ export class ProcurementRequestsService {
         }
         return quote;
     }
+
+    /**
+     * Records a supplier's response to the latest buyer counter-offer.
+     *
+     * This deliberately does not approve/reject the quote itself. Those are
+     * internal Procurement decisions and may raise a purchase order. The
+     * supplier response updates the negotiation round and agreed amount, then
+     * leaves the quote pending review for the buyer's normal approval workflow.
+     */
+    async recordSupplierResponse(id: string, data: any) {
+        const decision = normaliseStatus(data?.decision);
+        if (decision !== 'accepted' && decision !== 'rejected') {
+            throw new BadRequestException('decision must be accepted or rejected.');
+        }
+
+        const quote = await this.prisma.receivedQuote.findUniqueOrThrow({ where: { id } });
+        if (!['received', 'pending_review'].includes(normaliseStatus(quote.status))) {
+            throw new BadRequestException('Only a quote under review can receive a supplier response.');
+        }
+
+        const items = Array.isArray(quote.items)
+            ? quote.items.map((item: any) => ({
+                ...item,
+                negotiations: Array.isArray(item?.negotiations)
+                    ? item.negotiations.map((round: any) => ({ ...round }))
+                    : [],
+            }))
+            : [];
+        const rounds = items.flatMap((item: any) => item.negotiations);
+        if (rounds.length === 0) {
+            throw new BadRequestException('This quote has no buyer counter-offer to respond to.');
+        }
+
+        const latestRound = Math.max(...rounds.map((round: any) => Number(round?.round) || 0));
+        let proposedAmount = 0;
+        for (const item of items) {
+            item.negotiations = item.negotiations.map((round: any) => {
+                if ((Number(round?.round) || 0) !== latestRound) return round;
+                proposedAmount = Number(round?.proposedAmount) || proposedAmount;
+                return { ...round, status: decision };
+            });
+        }
+
+        const hasRequestedTotal = data?.agreedTotal !== null && data?.agreedTotal !== undefined;
+        const requestedTotal = Number(data?.agreedTotal);
+        const agreedTotal = hasRequestedTotal && Number.isFinite(requestedTotal) && requestedTotal >= 0
+            ? requestedTotal
+            : proposedAmount;
+        const responseNote = [
+            `Supplier ${decision} buyer counter-offer via SabiQuot.`,
+            String(data?.message ?? '').trim(),
+        ].filter(Boolean).join(' ');
+
+        return this.prisma.receivedQuote.update({
+            where: { id },
+            data: {
+                items,
+                status: 'pending_review',
+                ...(decision === 'accepted' ? { totalValue: agreedTotal } : {}),
+                notes: [quote.notes, responseNote].filter(Boolean).join('\n'),
+            },
+        });
+    }
     deleteQuote(id: string) {
         return this.prisma.receivedQuote.delete({ where: { id } });
     }
 
     /**
-     * Raises the purchase order an approved quote has won.
+     * Raises the purchase order a selected quote has won.
      *
      * Written against Prisma rather than through PurchaseOrdersService on
      * purpose: that service is where "send this order to Finance" lives, and
@@ -548,7 +624,7 @@ export class ProcurementRequestsService {
 
         // An order needs a supplier row: the price is owed to somebody specific.
         // A quote recorded against a name that is not in the supplier list has
-        // nowhere to send the money, so the quote stays approved and the buyer is
+            // nowhere to send the money, so the quote stays under review and the buyer is
         // told to add the supplier.
         const supplierId =
             quote.supplierId ??
@@ -599,15 +675,16 @@ export class ProcurementRequestsService {
             include: { supplier: true, items: true },
         });
 
-        // Both ends of the award are recorded: the quote is spent, and the
-        // request it was competed for now has an order against it.
+        // Awarding creates only a draft PO shell. The quote must remain
+        // "awarded" until the buyer completes the PO wizard; otherwise Received
+        // Quotes says PO Created while Purchase Orders still says Draft.
         await this.prisma.receivedQuote.update({
             where: { id: quote.id },
-            data: { status: 'po_created' },
+            data: { status: 'awarded' },
         });
         if (quote.prRef) {
             await this.prisma.purchaseRequest
-                .updateMany({ where: { prRef: quote.prRef }, data: { status: 'po_created' } })
+                .updateMany({ where: { prRef: quote.prRef }, data: { status: 'quotes_received' } })
                 .catch(() => undefined);
             // Losing quotes for the same request are closed out, so the list does
             // not keep offering an approval for something already bought.
@@ -621,7 +698,7 @@ export class ProcurementRequestsService {
 
         this.webhookService.triggerWebhook('purchase-order.created', po).catch(() => { });
         void this.notifications.dispatch('purchase-order.created', {
-            title: 'Purchase order raised from approved quote',
+            title: 'Purchase order raised from selected quote',
             message: `${poRef} — ${po.supplier?.name ?? quote.supplierName}`,
             actionUrl: '/apps/procurement/purchase-orders',
             relatedId: po.id,

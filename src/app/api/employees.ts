@@ -189,10 +189,22 @@ export async function fetchEmployee(id: string) {
 export interface EmployeeDocument {
     id: string; employeeId: string; fileName: string; fileUrl: string; fileSize: number;
     mimeType: string; documentType: string; uploadedBy: string; uploadedAt: string;
+    description?: string | null;
 }
+export type EmployeeDocumentInput = Pick<EmployeeDocument, 'fileName' | 'fileUrl' | 'fileSize' | 'mimeType' | 'documentType'> & {
+    uploadedBy?: string;
+    description?: string | null;
+};
 export const getEmployeeDocuments = (employeeId: string) => apiFetch<EmployeeDocument[]>(`/employees/${employeeId}/documents`);
-export const addEmployeeDocument = (employeeId: string, data: Omit<EmployeeDocument, 'id' | 'employeeId' | 'uploadedAt'>) =>
+export const addEmployeeDocument = (employeeId: string, data: EmployeeDocumentInput) =>
     apiFetch<EmployeeDocument>(`/employees/${employeeId}/documents`, { method: 'POST', body: JSON.stringify(data) });
+export const updateEmployeeDocument = (
+    employeeId: string,
+    documentId: string,
+    data: Partial<EmployeeDocumentInput>,
+) => apiFetch<EmployeeDocument>(`/employees/${employeeId}/documents/${documentId}`, {
+    method: 'PATCH', body: JSON.stringify(data),
+});
 export const deleteEmployeeDocument = (employeeId: string, documentId: string) =>
     apiFetch<{ id: string; deleted: boolean }>(`/employees/${employeeId}/documents/${documentId}`, { method: 'DELETE' });
 

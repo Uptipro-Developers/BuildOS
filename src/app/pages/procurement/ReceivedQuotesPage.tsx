@@ -45,7 +45,7 @@ import {
 } from "../../utils/procurementWorkflow";
 
 type VendorDocType = "quote" | "invoice";
-type DocStatus = "pending_review" | "approved" | "po_created" | "rejected";
+type DocStatus = "pending_review" | "awarded" | "approved" | "po_created" | "rejected";
 type NegotiationStatus = "open" | "accepted" | "rejected" | "countered";
 
 interface NegotiationRound {
@@ -88,6 +88,7 @@ interface VendorDoc {
 function fromApi(r: ApiReceivedQuote): VendorDoc {
   const validStatuses: DocStatus[] = [
     "pending_review",
+    "awarded",
     "approved",
     "po_created",
     "rejected",
@@ -950,9 +951,7 @@ function CompareQuotesModal({
           >
             Close
           </button>
-          {/* Awarding the comparison is approving the winning quote — there is
-              no separate "create the order" step, because approving a quote you
-              do not intend to buy from is not a thing anyone does. */}
+          {/* Selecting the winning quote raises its purchase order immediately. */}
           {quotes
             .filter((q) => q.status === "pending_review")
             .map((q) => (
@@ -964,7 +963,7 @@ function CompareQuotesModal({
                 }}
                 className="px-4 py-2 text-sm bg-blue-700 text-white rounded-xl hover:bg-blue-800 flex items-center gap-2"
               >
-                <CheckCircle2 className="w-4 h-4" /> Approve {q.vendor}
+                <CheckCircle2 className="w-4 h-4" /> Award to {q.vendor}
               </button>
             ))}
         </div>
@@ -1016,23 +1015,24 @@ export function ReceivedQuotesPage() {
   /**
    * Records the decision on a quote.
    *
-   * Approving is the award: the server raises the purchase order, closes the
-   * losing quotes for the same request and moves the quote to `po_created`. So
-   * the response is re-read rather than assumed — an approve that lands as
-   * "PO Created" is the order having been raised, and the toast says which one.
+   * Awarding a quote raises the purchase order, closes the
+   * losing quotes for the same request and moves the quote to `awarded`. The
+   * quote reaches `po_created` only after the PO wizard is completed.
    */
-  const updateStatus = async (id: string, status: DocStatus) => {
+  const updateStatus = async (id: string, status: DocStatus | "selected") => {
     if (deciding) return;
     const previous = docs;
     setDeciding(id);
-    setDocs((p) => p.map((x) => (x.id === id ? { ...x, status } : x)));
+    if (status !== "selected") {
+      setDocs((p) => p.map((x) => (x.id === id ? { ...x, status } : x)));
+    }
     try {
       const saved = await updateReceivedQuote(id, { status });
       const settled = (saved?.status ?? status) as DocStatus;
       setDocs((p) => p.map((x) => (x.id === id ? { ...x, status: settled } : x)));
 
-      if (status === "approved") {
-        if (settled === "po_created") {
+      if (status === "selected") {
+        if (settled === "awarded") {
           // Losing quotes on the same request were closed server-side.
           const quote = previous.find((x) => x.id === id);
           setDocs((p) =>
@@ -1045,16 +1045,16 @@ export function ReceivedQuotesPage() {
                 : x,
             ),
           );
-          toast.success("Quote approved — purchase order raised.", {
+          toast.success("Quote awarded — purchase order raised.", {
             description:
-              "Find it on Purchase Orders, ready to be sent to Finance.",
+              "A draft is available on Purchase Orders. Complete it to create the PO.",
           });
         } else {
           // The approval stuck but the order did not go up, which is almost
           // always a supplier that is not on the supplier list.
-          toast.warning("Quote approved, but no purchase order was raised.", {
+          toast.warning("Quote selected, but no purchase order was raised.", {
             description:
-              "Check that the supplier exists in Suppliers, then approve again.",
+              "Check that the supplier exists in Suppliers, then award it again.",
           });
         }
       } else if (status === "rejected") {
@@ -1102,8 +1102,8 @@ export function ReceivedQuotesPage() {
   });
 
   const pending = docs.filter((d) => d.status === "pending_review").length;
-  const approved = docs.filter(
-    (d) => d.status === "approved" || d.status === "po_created",
+  const awarded = docs.filter(
+    (d) => d.status === "awarded" || d.status === "approved" || d.status === "po_created",
   ).length;
   const totalValue = docs
     .filter((d) => d.status !== "rejected")
@@ -1146,8 +1146,8 @@ export function ReceivedQuotesPage() {
           <p className="text-xs text-gray-500">Pending Review</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-2xl font-bold text-green-600">{approved}</p>
-          <p className="text-xs text-gray-500">Approved / PO Created</p>
+          <p className="text-2xl font-bold text-green-600">{awarded}</p>
+          <p className="text-xs text-gray-500">Awarded / PO Created</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-2xl font-bold text-blue-600">{fmt(totalValue)}</p>
@@ -1203,7 +1203,8 @@ export function ReceivedQuotesPage() {
         >
           <option value="all">All Statuses</option>
           <option value="pending_review">Pending Review</option>
-          <option value="approved">Approved</option>
+          <option value="awarded">Awarded · PO Draft</option>
+          <option value="approved">Awarded (Legacy)</option>
           <option value="po_created">PO Created</option>
           <option value="rejected">Rejected</option>
         </select>
@@ -1305,11 +1306,10 @@ export function ReceivedQuotesPage() {
                       <StatusBadge {...cfg} />
                     </td>
                     <td className="px-4 py-3">
-                      {/* View, Approve, Reject — nothing else. "Create PO"
+                      {/* View, Award, Reject — nothing else. "Create PO"
                           used to sit here as a fourth action, so a quote could
-                          be approved with no order behind it, or turned into an
-                          order without ever being approved. Approving is what
-                          raises the order now. */}
+                          be selected with no order behind it. Awarding raises
+                          the order now. */}
                       <RowActions>
                         <RowAction
                           icon={<Eye className="w-3.5 h-3.5" />}
@@ -1321,12 +1321,12 @@ export function ReceivedQuotesPage() {
                           <>
                             <RowAction
                               icon={<CheckCircle2 className="w-3.5 h-3.5" />}
-                              label="Approve"
+                              label="Award"
                               tone="positive"
-                              title="Approve this quote and raise the purchase order"
+                              title="Select this quote and raise the purchase order"
                               busy={deciding === d.id}
-                              busyLabel="Approving…"
-                              onClick={() => void updateStatus(d.id, "approved")}
+                              busyLabel="Awarding…"
+                              onClick={() => void updateStatus(d.id, "selected")}
                             />
                             <RowAction
                               icon={<XCircle className="w-3.5 h-3.5" />}
@@ -1337,7 +1337,7 @@ export function ReceivedQuotesPage() {
                             />
                           </>
                         )}
-                        {d.status === "po_created" && (
+                        {(d.status === "awarded" || d.status === "approved" || d.status === "po_created") && (
                           <RowAction
                             icon={<ShoppingCart className="w-3.5 h-3.5" />}
                             label="Purchase Order"
@@ -1571,7 +1571,7 @@ export function ReceivedQuotesPage() {
               onClose={() => setCompareRef(null)}
               onApprove={(doc) => {
                 setCompareRef(null);
-                void updateStatus(doc.id, "approved");
+                void updateStatus(doc.id, "selected");
               }}
             />
           );

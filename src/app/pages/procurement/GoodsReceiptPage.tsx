@@ -108,7 +108,7 @@ type RecordMode = "record" | "edit" | "remaining";
 /**
  * Records what arrived. Nothing here touches stock — Update Record, Edit
  * Record and Record Remaining Delivery all post to the same draft, decided
- * later by Accept & Update Stock.
+ * and posted to stock as part of the same operational action.
  */
 function RecordDeliveryModal({
   grn,
@@ -761,18 +761,14 @@ export function GoodsReceiptPage() {
               icon={<AlertTriangle className="w-3.5 h-3.5" />}
               label="Raise Rejection Note"
               tone="negative"
-              disabled={!grn.canDecide}
-              title={grn.canDecide ? undefined : "Only the configured Goods Receipt approver may decide this record"}
               onClick={() => setRejectNoteTarget(grn)}
             />
             <RowAction
               icon={<CheckCircle2 className="w-3.5 h-3.5" />}
-              label="Accept & Update Stock"
+              label="Post to Stock"
               tone="positive"
-              disabled={!grn.canDecide}
-              title={grn.canDecide ? undefined : "Only the configured Goods Receipt approver may decide this record"}
               busy={accepting === grn.id}
-              busyLabel="Accepting…"
+              busyLabel="Posting…"
               onClick={() => void handleAccept(grn)}
             />
           </>
@@ -1014,7 +1010,7 @@ export function GoodsReceiptPage() {
           onDone={(updated) => {
             replace(updated);
             setRecordTarget(null);
-            toast.success(`${updated.reference} recorded — awaiting a decision.`);
+            toast.success(`${updated.reference} recorded and posted to stock.`);
           }}
         />
       )}

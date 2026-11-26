@@ -34,6 +34,7 @@ import {
   Save,
   Upload,
   Trash2,
+  Eye,
 } from "lucide-react";
 import {
   fetchEmployee,
@@ -43,10 +44,12 @@ import {
   toEmployeeUpdatePayload,
   getEmployeeDocuments,
   addEmployeeDocument,
+  updateEmployeeDocument,
   deleteEmployeeDocument,
   type EmployeeDocument,
   type EmploymentTerms,
 } from "../../api/employees";
+import { ConfirmationModal } from "../../components/ConfirmationModal";
 import { fetchDepartments } from "../../api/departments";
 import { fetchProjects } from "../../api/projects";
 import { getAppRoles } from "../../api/admin-extras";
@@ -122,6 +125,21 @@ const attendanceBadge: Record<string, string> = {
   late: "bg-amber-100 text-amber-700",
 };
 
+const EMPLOYEE_DOCUMENT_TYPES = [
+  "Employment Contract",
+  "Identification",
+  "Curriculum Vitae",
+  "Academic Certificate",
+  "Professional Certificate",
+  "Medical Record",
+  "Tax Document",
+  "Pension Document",
+  "Bank Document",
+  "Performance Document",
+  "Disciplinary Document",
+  "Other",
+];
+
 export function EmployeeProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -150,6 +168,14 @@ export function EmployeeProfilePage() {
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [documentModalOpen, setDocumentModalOpen] = useState(false);
+  const [editingDocument, setEditingDocument] = useState<EmployeeDocument | null>(null);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentType, setDocumentType] = useState("");
+  const [documentDescription, setDocumentDescription] = useState("");
+  const [documentError, setDocumentError] = useState("");
+  const [deletingDocument, setDeletingDocument] = useState<EmployeeDocument | null>(null);
+  const [deletingDocumentBusy, setDeletingDocumentBusy] = useState(false);
 
   // Human-friendly display ID passed from the list page
   const displayId = searchParams.get("displayId") ?? emp?.id ?? "";
@@ -163,22 +189,71 @@ export function EmployeeProfilePage() {
   }, []);
   useEffect(() => { if (id) getEmployeeDocuments(id).then(setDocuments).catch(() => setDocuments([])); }, [id]);
 
-  async function uploadDocument(file: File) {
+  function openCreateDocument() {
+    setEditingDocument(null);
+    setDocumentFile(null);
+    setDocumentType("");
+    setDocumentDescription("");
+    setDocumentError("");
+    setDocumentModalOpen(true);
+  }
+
+  function openEditDocument(document: EmployeeDocument) {
+    setEditingDocument(document);
+    setDocumentFile(null);
+    setDocumentType(document.documentType || "");
+    setDocumentDescription(document.description || "");
+    setDocumentError("");
+    setDocumentModalOpen(true);
+  }
+
+  async function saveDocument() {
     if (!id) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error("Documents must be 5 MB or smaller."); return; }
+    if (!documentType.trim()) { setDocumentError("Select a document type."); return; }
+    if (!editingDocument && !documentFile) { setDocumentError("Select a document to upload."); return; }
+    if (documentFile && documentFile.size > 5 * 1024 * 1024) { setDocumentError("Documents must be 5 MB or smaller."); return; }
     setUploadingDocument(true);
     try {
-      const fileUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
-      const created = await addEmployeeDocument(id, { fileName: file.name, fileUrl, fileSize: file.size, mimeType: file.type || "application/octet-stream", documentType: "employee-document", uploadedBy: "HR" });
-      setDocuments((current) => [created, ...current]); toast.success("Employee document uploaded.");
+      const fileUrl = documentFile
+        ? await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(documentFile); })
+        : undefined;
+      if (editingDocument) {
+        const updated = await updateEmployeeDocument(id, editingDocument.id, {
+          documentType: documentType.trim(),
+          description: documentDescription.trim() || null,
+          ...(documentFile && fileUrl ? {
+            fileName: documentFile.name,
+            fileUrl,
+            fileSize: documentFile.size,
+            mimeType: documentFile.type || "application/octet-stream",
+          } : {}),
+        });
+        setDocuments((current) => current.map((item) => item.id === updated.id ? updated : item));
+        toast.success("Employee document updated.");
+      } else if (documentFile && fileUrl) {
+        const created = await addEmployeeDocument(id, {
+          fileName: documentFile.name,
+          fileUrl,
+          fileSize: documentFile.size,
+          mimeType: documentFile.type || "application/octet-stream",
+          documentType: documentType.trim(),
+          description: documentDescription.trim() || null,
+          uploadedBy: "HR",
+        });
+        setDocuments((current) => [created, ...current]);
+        toast.success("Employee document uploaded.");
+      }
+      setDocumentModalOpen(false);
     } catch (error) { toast.error(error instanceof Error ? error.message : "Document upload failed."); }
     finally { setUploadingDocument(false); }
   }
 
-  async function removeDocument(documentId: string) {
-    if (!id || !window.confirm("Delete this employee document?")) return;
-    try { await deleteEmployeeDocument(id, documentId); setDocuments((current) => current.filter((document) => document.id !== documentId)); toast.success("Document deleted."); }
+  async function removeDocument() {
+    if (!id || !deletingDocument) return;
+    setDeletingDocumentBusy(true);
+    try { await deleteEmployeeDocument(id, deletingDocument.id); setDocuments((current) => current.filter((document) => document.id !== deletingDocument.id)); toast.success("Document deleted."); setDeletingDocument(null); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete document."); }
+    finally { setDeletingDocumentBusy(false); }
   }
   useEffect(() => {
     getEmploymentTypes().then(setEmploymentTypes).catch(() => setEmploymentTypes([]));
@@ -687,7 +762,50 @@ export function EmployeeProfilePage() {
 
       {/* Documents */}
       {tab === "documents" && (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white"><div className="flex items-center justify-between border-b px-5 py-4"><div><h3 className="text-sm font-semibold text-gray-900">Employee Documents</h3><p className="text-xs text-gray-500">Contracts, identification and certificates · maximum 5 MB each</p></div><label className="flex cursor-pointer items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"><Upload className="h-4 w-4" />{uploadingDocument ? "Uploading…" : "Upload Document"}<input type="file" className="hidden" disabled={uploadingDocument} accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadDocument(file); event.target.value = ""; }} /></label></div>{documents.length === 0 ? <div className="p-10 text-center"><FileText className="mx-auto mb-2 h-9 w-9 text-gray-300" /><p className="text-sm text-gray-500">No documents uploaded</p></div> : <div className="divide-y">{documents.map((document) => <div key={document.id} className="flex items-center justify-between px-5 py-3"><div className="flex min-w-0 items-center gap-3"><FileText className="h-5 w-5 flex-none text-indigo-500" /><div className="min-w-0"><a href={document.fileUrl} download={document.fileName} className="block truncate text-sm font-medium text-gray-900 hover:text-indigo-600">{document.fileName}</a><p className="text-xs text-gray-400">{(document.fileSize / 1024).toFixed(1)} KB · {formatDateTimeByGeneralSettings(document.uploadedAt)}</p></div></div><button onClick={() => void removeDocument(document.id)} className="rounded p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" title="Delete document"><Trash2 className="h-4 w-4" /></button></div>)}</div>}</div>
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <div className="flex items-center justify-between border-b px-5 py-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Employee Documents</h3>
+              <p className="text-xs text-gray-500">Contracts, identification and certificates · maximum 5 MB each</p>
+            </div>
+            <button onClick={openCreateDocument} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+              <Upload className="h-4 w-4" /> Upload Document
+            </button>
+          </div>
+          {documents.length === 0 ? (
+            <div className="p-10 text-center">
+              <FileText className="mx-auto mb-2 h-9 w-9 text-gray-300" />
+              <p className="text-sm text-gray-500">No documents uploaded</p>
+              <button onClick={openCreateDocument} className="mt-2 text-sm font-medium text-indigo-600 hover:text-indigo-700">Upload the first document</button>
+            </div>
+          ) : (
+            <div className="divide-y">
+              {documents.map((document) => (
+                <div key={document.id} className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-gray-50">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="rounded-lg bg-indigo-50 p-2"><FileText className="h-5 w-5 flex-none text-indigo-600" /></div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-gray-900">{document.fileName}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700">{document.documentType}</span>
+                        <span>{(document.fileSize / 1024).toFixed(1)} KB</span>
+                        <span>·</span>
+                        <span>{formatDateTimeByGeneralSettings(document.uploadedAt)}</span>
+                      </div>
+                      {document.description && <p className="mt-1 truncate text-xs text-gray-500">{document.description}</p>}
+                    </div>
+                  </div>
+                  <div className="flex flex-none items-center gap-1">
+                    <a href={document.fileUrl} target="_blank" rel="noreferrer" className="rounded p-2 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600" title="View document"><Eye className="h-4 w-4" /></a>
+                    <a href={document.fileUrl} download={document.fileName} className="rounded p-2 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600" title="Download document"><Download className="h-4 w-4" /></a>
+                    <button onClick={() => openEditDocument(document)} className="rounded p-2 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600" title="Edit document"><Edit className="h-4 w-4" /></button>
+                    <button onClick={() => setDeletingDocument(document)} className="rounded p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" title="Delete document"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Attendance */}
@@ -852,6 +970,63 @@ export function EmployeeProfilePage() {
       )}
 
       {/* Edit Employee Modal */}
+      {documentModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b px-6 py-5">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">{editingDocument ? "Edit Document" : "Upload Document"}</h2>
+                <p className="mt-0.5 text-xs text-gray-500">Attach a type so this employee record stays organised.</p>
+              </div>
+              <button onClick={() => setDocumentModalOpen(false)} disabled={uploadingDocument} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">Document Type <span className="text-red-500">*</span></label>
+                <select value={documentType} onChange={(event) => { setDocumentType(event.target.value); setDocumentError(""); }} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="">Select document type…</option>
+                  {EMPLOYEE_DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                  {editingDocument?.documentType && !EMPLOYEE_DOCUMENT_TYPES.includes(editingDocument.documentType) && <option value={editingDocument.documentType}>{editingDocument.documentType}</option>}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">Description <span className="font-normal text-gray-400">(optional)</span></label>
+                <textarea value={documentDescription} onChange={(event) => setDocumentDescription(event.target.value)} rows={3} placeholder="Add a note about this document…" className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">{editingDocument ? "Replace File (optional)" : "File *"}</label>
+                <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-gray-300 px-4 py-4 hover:border-indigo-400 hover:bg-indigo-50/30">
+                  <div className="rounded-lg bg-indigo-50 p-2"><Upload className="h-5 w-5 text-indigo-600" /></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-gray-700">{documentFile?.name || editingDocument?.fileName || "Choose a document"}</p>
+                    <p className="text-xs text-gray-400">PDF, DOC, DOCX, JPG or PNG · maximum 5 MB</p>
+                  </div>
+                  <input type="file" className="hidden" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={(event) => { setDocumentFile(event.target.files?.[0] ?? null); setDocumentError(""); event.target.value = ""; }} />
+                </label>
+              </div>
+              {documentError && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{documentError}</p>}
+            </div>
+            <div className="flex justify-end gap-3 border-t px-6 py-4">
+              <button onClick={() => setDocumentModalOpen(false)} disabled={uploadingDocument} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+              <button onClick={() => void saveDocument()} disabled={uploadingDocument} className="flex items-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-50">
+                <Save className="h-4 w-4" /> {uploadingDocument ? "Saving…" : editingDocument ? "Save Changes" : "Upload Document"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmationModal
+        isOpen={deletingDocument !== null}
+        title="Delete employee document?"
+        description={deletingDocument ? `“${deletingDocument.fileName}” will be permanently removed from this employee's record.` : ""}
+        confirmLabel="Delete Document"
+        isDangerous
+        isLoading={deletingDocumentBusy}
+        onConfirm={() => void removeDocument()}
+        onCancel={() => setDeletingDocument(null)}
+      />
+
       {editOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">

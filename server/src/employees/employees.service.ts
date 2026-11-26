@@ -12,7 +12,7 @@ const EMPLOYEE_FIELDS = [
     'baseSalary', 'gradeLevel', 'jobRoleId', 'bankName', 'accountNumber',
     'accountHolder', 'supervisorId', 'taxId', 'pensionId', 'healthInsuranceId',
     'emergencyContact', 'emergencyPhone', 'address', 'city', 'state', 'zipCode',
-    'departmentId', 'role', 'position',
+    'departmentId', 'role', 'position', 'maritalStatus', 'nationality', 'orgUnit',
 ] as const;
 
 const DATE_FIELDS = new Set(['dateOfBirth', 'dateHired']);
@@ -183,13 +183,51 @@ export class EmployeesService {
         await this.prisma.employee.findUniqueOrThrow({ where: { id: employeeId } });
         const fileName = String(data?.fileName ?? '').trim();
         const fileUrl = String(data?.fileUrl ?? '');
+        const documentType = String(data?.documentType ?? '').trim();
         if (!fileName || !fileUrl.startsWith('data:')) throw new BadRequestException('A valid document file is required.');
+        if (!documentType) throw new BadRequestException('Document type is required.');
         return this.prisma.documentUpload.create({ data: {
             employeeId, fileName, fileUrl, fileSize: Number(data?.fileSize ?? 0),
             mimeType: String(data?.mimeType ?? 'application/octet-stream'),
-            documentType: String(data?.documentType ?? 'employee-document'),
+            documentType,
             uploadedBy: String(data?.uploadedBy ?? 'HR'), tags: Array.isArray(data?.tags) ? data.tags : [],
+            description: String(data?.description ?? '').trim() || null,
         } });
+    }
+
+    async updateDocument(employeeId: string, documentId: string, data: any) {
+        const document = await this.prisma.documentUpload.findFirst({
+            where: { id: documentId, employeeId },
+        });
+        if (!document) throw new NotFoundException('Employee document not found.');
+
+        const documentType = data?.documentType === undefined
+            ? document.documentType
+            : String(data.documentType).trim();
+        if (!documentType) throw new BadRequestException('Document type is required.');
+
+        const replacementUrl = data?.fileUrl === undefined ? undefined : String(data.fileUrl);
+        if (replacementUrl !== undefined && !replacementUrl.startsWith('data:')) {
+            throw new BadRequestException('A valid replacement document file is required.');
+        }
+
+        return this.prisma.documentUpload.update({
+            where: { id: documentId },
+            data: {
+                documentType,
+                ...(data?.description !== undefined
+                    ? { description: String(data.description).trim() || null }
+                    : {}),
+                ...(data?.fileName !== undefined
+                    ? { fileName: String(data.fileName).trim() || document.fileName }
+                    : {}),
+                ...(replacementUrl !== undefined ? { fileUrl: replacementUrl } : {}),
+                ...(data?.fileSize !== undefined ? { fileSize: Number(data.fileSize) || 0 } : {}),
+                ...(data?.mimeType !== undefined
+                    ? { mimeType: String(data.mimeType || 'application/octet-stream') }
+                    : {}),
+            },
+        });
     }
 
     async deleteDocument(employeeId: string, documentId: string) {

@@ -31,7 +31,8 @@ export class SuppliersService {
      */
     async syncFromPortal(data: {
         sabiquotProfileId: string;
-        name: string;
+        /** SabiQuote's business/company name. Never the account holder's name. */
+        companyName?: string;
         email?: string;
         phone?: string;
         contactPerson?: string;
@@ -45,10 +46,10 @@ export class SuppliersService {
         supplierId?: string;
     }) {
         const {
-            sabiquotProfileId, name, email, phone, contactPerson, city, categories, supplierId,
+            sabiquotProfileId, companyName, email, phone, contactPerson, city, categories, supplierId,
         } = data;
         if (!sabiquotProfileId) throw new Error('sabiquotProfileId is required');
-        if (!name) throw new Error('name is required');
+        const portalCompanyName = String(companyName ?? '').trim();
 
         const contactUpdates = {
             ...(email !== undefined ? { email } : {}),
@@ -62,7 +63,12 @@ export class SuppliersService {
         if (linked) {
             return this.prisma.supplier.update({
                 where: { id: linked.id },
-                data: { name, ...contactUpdates },
+                // SabiQuote's company name takes precedence when present. When
+                // it is blank, retain the company name already held by BuildOS.
+                data: {
+                    ...(portalCompanyName ? { name: portalCompanyName } : {}),
+                    ...contactUpdates,
+                },
             });
         }
 
@@ -77,8 +83,18 @@ export class SuppliersService {
         if (claimed) {
             return this.prisma.supplier.update({
                 where: { id: claimed.id },
-                data: { name, sabiquotProfileId, ...contactUpdates },
+                data: {
+                    ...(portalCompanyName ? { name: portalCompanyName } : {}),
+                    sabiquotProfileId,
+                    ...contactUpdates,
+                },
             });
+        }
+
+        if (!portalCompanyName) {
+            throw new BadRequestException(
+                'A SabiQuote company name is required when creating a new BuildOS supplier.',
+            );
         }
 
         return this.prisma.supplier.upsert({
@@ -86,7 +102,7 @@ export class SuppliersService {
             create: {
                 sabiquotProfileId,
                 source: 'sabiquot',
-                name,
+                name: portalCompanyName,
                 email: email ?? '',
                 phone: phone ?? '',
                 contactPerson: contactPerson ?? '',
@@ -94,7 +110,7 @@ export class SuppliersService {
                 categories: categories ?? [],
             },
             update: {
-                name,
+                name: portalCompanyName,
                 ...(email !== undefined ? { email } : {}),
                 ...(phone !== undefined ? { phone } : {}),
                 ...(contactPerson !== undefined ? { contactPerson } : {}),

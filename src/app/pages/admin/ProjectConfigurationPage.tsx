@@ -94,14 +94,14 @@ const PROCESS_CATALOG: ProcessCatalogItem[] = [
     label: "Create Purchase Request",
     app: "Procurement",
     description: "Initiate a request to procure materials or services",
-    requiresApproval: true,
+    requiresApproval: false,
   },
   {
     id: "pc-002",
-    label: "Approve Purchase Order",
+    label: "Create Purchase Order",
     app: "Procurement",
-    description: "Authorize a purchase order before sending to supplier",
-    requiresApproval: true,
+    description: "Create a purchase order from the selected supplier quote",
+    requiresApproval: false,
   },
   {
     id: "pc-003",

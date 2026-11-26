@@ -55,12 +55,7 @@ export interface GoodsReceipt {
     stockPostedAt?: string | null;
     items: GoodsReceiptItem[];
     purchaseOrder?: GoodsReceiptPO | null;
-    /**
-     * Whether the signed-in user is the Goods Receipt workflow's configured
-     * approver for this record — stamped by the server, so Accept & Update
-     * Stock and Raise Rejection Note can be disabled for anyone else instead
-     * of failing only after they click.
-     */
+    /** Legacy compatibility field; GRNs no longer require approval. */
     canDecide?: boolean;
 }
 
@@ -85,14 +80,14 @@ export const getGoodsReceipts = (status?: string) =>
 
 export const getGoodsReceipt = (id: string) => apiFetch<GoodsReceipt>(`/goods-receipts/${id}`);
 
-/** Update Record / Edit Record / Record Remaining Delivery — all write a draft only. */
+/** Records the delivery and immediately posts its accepted quantities to stock. */
 export const updateGoodsReceiptRecord = (id: string, payload: UpdateRecordPayload) =>
     apiFetch<GoodsReceipt>(`/goods-receipts/${id}/update-record`, {
         method: 'POST',
         body: JSON.stringify(payload),
     });
 
-/** Accept & Update Stock — gated server-side to the configured approver. */
+/** Posts a legacy receipt that was left pending before automatic posting. */
 export const acceptGoodsReceipt = (id: string) =>
     apiFetch<GoodsReceipt>(`/goods-receipts/${id}/accept`, { method: 'POST' });
 

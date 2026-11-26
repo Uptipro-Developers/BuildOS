@@ -62,7 +62,7 @@ export class PurchaseOrdersController {
     }
 
     @Post(':id/approve')
-    @RequiresProcess('p_purchase_orders', 'approve')
+    @RequiresProcess('p_purchase_orders', 'edit')
     approvePO(@Param('id') id: string, @Body() body: any) {
         return this.purchaseOrdersService.approvePO(id, body?.actor);
     }

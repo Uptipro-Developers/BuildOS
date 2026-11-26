@@ -47,6 +47,15 @@ export class EmployeesController {
     @Post(':id/documents')
     addDocument(@Param('id') id: string, @Body() body: any) { return this.employeesService.addDocument(id, body); }
 
+    @Patch(':id/documents/:documentId')
+    updateDocument(
+        @Param('id') id: string,
+        @Param('documentId') documentId: string,
+        @Body() body: any,
+    ) {
+        return this.employeesService.updateDocument(id, documentId, body);
+    }
+
     @Delete(':id/documents/:documentId')
     deleteDocument(@Param('id') id: string, @Param('documentId') documentId: string) {
         return this.employeesService.deleteDocument(id, documentId);

@@ -48,16 +48,15 @@ export class GoodsReceiptsController {
         return this.goodsReceipts.updateRecord(id, body ?? {});
     }
 
-    // Accept & Update Stock — gated inside the service to the Goods Receipt
-    // workflow's configured approver.
+    // Posts a legacy pending receipt. New records post during update-record.
     @Post(':id/accept')
-    @RequiresProcess('p_goods_receipt', 'approve')
+    @RequiresProcess('p_goods_receipt', 'edit')
     accept(@Param('id') id: string, @Req() req: Request) {
         return this.goodsReceipts.accept(id, this.identity(req));
     }
 
     @Post(':id/raise-rejection-note')
-    @RequiresProcess('p_goods_receipt', 'approve')
+    @RequiresProcess('p_goods_receipt', 'edit')
     raiseRejectionNote(@Param('id') id: string, @Body() body: any, @Req() req: Request) {
         return this.goodsReceipts.raiseRejectionNote(id, body?.reason, this.identity(req));
     }
