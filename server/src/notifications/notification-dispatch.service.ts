@@ -7,6 +7,22 @@ import { HrSetupService } from '../hr-extras/hr-setup.service';
 
 const ADMIN_SETTINGS_KEY = 'admin-settings';
 
+/** Stable event keys are translated once; display-title capitalisation is not an API. */
+const EMAIL_TRIGGER_BY_EVENT: Record<string, string> = {
+    'expense.submitted': 'Expense Claim Submitted',
+    'expense.approved': 'Expense Claim Approved',
+    'purchase-request.created': 'Purchase Request Submitted',
+    'rfq.sent': 'Send RFQ to Supplier',
+    'purchase-order.approved': 'Purchase Order Approved',
+    'purchase-order.sent-to-finance': 'Request Payment Confirmation',
+    'purchase-invoice.paid': 'Payment Processed',
+    'goods-receipt.opened': 'Invoice Received',
+    'stock.low': 'Low Stock Alert',
+    'stock.out': 'Low Stock Alert',
+    'stock.restored': 'Low Stock Alert',
+    'material-amendment.submitted': 'Stock Adjustment Made',
+};
+
 /** What a rule from Admin › Notifications looks like once stored. */
 interface StoredNotificationRule {
     id: string;
@@ -34,6 +50,8 @@ export interface NotificationEventContext {
     actorUserId?: string;
     /** Substitutions available to a configured email template. */
     vars?: Record<string, unknown>;
+    /** Keep an event in the in-app rule system while a domain service sends its own email. */
+    suppressEmail?: boolean;
 }
 
 /**
@@ -72,10 +90,9 @@ export class NotificationDispatchService {
             const rules = (await this.rulesFor(event)).filter(
                 (rule) => rule.enabled !== false,
             );
-            if (rules.length === 0) return;
-
             // The HR Setup email block, resolved once per event.
             const mail = await this.hrMailRouting(event);
+            const emailRecipients = new Map<string, { id: string; email: string; name: string }>();
 
             for (const rule of rules) {
                 const recipients = await this.resolveRecipients(rule, context);
@@ -86,7 +103,9 @@ export class NotificationDispatchService {
                     await this.createInAppNotifications(recipients, event, context);
                 }
                 if (channels.includes('Email')) {
-                    await this.sendEmails(recipients, event, context, mail);
+                    for (const recipient of recipients) {
+                        emailRecipients.set(recipient.email.toLowerCase(), recipient);
+                    }
                 }
                 // SMS has no provider configured; saying so beats silently
                 // dropping the channel.
@@ -95,6 +114,14 @@ export class NotificationDispatchService {
                         `Rule "${rule.name}" requests SMS for ${event}, but no SMS provider is configured.`,
                     );
                 }
+            }
+
+            // A configured Email Configuration is itself an email route. This is
+            // intentionally composed even when no Notification Rule exists: the
+            // Recipients field on that screen must not be decorative. Rule-based
+            // email recipients are merged and de-duplicated with it below.
+            if (!context.suppressEmail) {
+                await this.sendEmails([...emailRecipients.values()], event, context, mail);
             }
         } catch (error) {
             this.logger.error(
@@ -282,32 +309,30 @@ export class NotificationDispatchService {
         context: NotificationEventContext,
         mail: { from?: string; cc: string[]; extraTo: string[] },
     ): Promise<void> {
-        const to = Array.from(
-            new Set(
-                [...recipients.map((r) => r.email), ...mail.extraTo]
-                    .map((e) => e.trim())
-                    .filter(Boolean),
-            ),
-        );
-        if (to.length === 0) return;
-
-        const trigger = event === 'stock.low' || event === 'stock.out' || event === 'stock.restored'
-            ? 'Low Stock Alert'
-            : event === 'material-amendment.submitted'
-              ? 'Stock Adjustment Made'
-              : context.title;
+        const trigger = EMAIL_TRIGGER_BY_EVENT[event] ?? context.title;
         const composed = await this.emailTemplates.compose(trigger, {
             ...(context.vars ?? {}),
             title: context.title,
             message: context.message,
         });
 
+        // Do not send merely because HR Setup contains a team mailbox. There must
+        // be either an Email notification rule or an enabled email configuration.
+        if (recipients.length === 0 && !composed?.to.length) return;
+
+        const mergedTo = Array.from(
+            new Set([
+                ...recipients.map((r) => r.email),
+                ...(composed?.to ?? []),
+                ...mail.extraTo,
+            ].map((email) => email.trim().toLowerCase()).filter(Boolean)),
+        );
         const cc = Array.from(
             new Set([...(composed?.cc ?? []), ...mail.cc].filter(Boolean)),
         );
 
         await this.mailQueue.enqueueEmail({
-            to,
+            to: mergedTo,
             from: mail.from,
             subject: composed?.subject || context.title,
             text: composed?.text || context.message,

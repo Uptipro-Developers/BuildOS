@@ -40,13 +40,13 @@ function makeService() {
         purchaseRequest: {
             ...record('purchaseRequest'),
             findUnique: jest.fn(() =>
-                Promise.resolve({ prRef: 'PR-0019', mrRef: 'MR-0007', daysToDeliver: 10, status: 'approved' }),
+                Promise.resolve({ prRef: 'PR-0019', mrRef: 'MR-0007', daysToDeliver: 10, status: 'raised' }),
             ),
             findUniqueOrThrow: jest.fn(() =>
-                Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved' }),
+                Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'raised' }),
             ),
             update: jest.fn(({ data }: any) =>
-                Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved', ...data }),
+                Promise.resolve({ id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'raised', ...data }),
             ),
             updateMany: jest.fn((args: any) => {
                 purchaseRequestUpdates.push(args);
@@ -145,6 +145,7 @@ function makeService() {
         purchaseOrderUpdates,
         purchaseRequestUpdates,
         quoteUpdates,
+        webhooks,
         prisma,
     };
 }
@@ -240,10 +241,10 @@ describe('updating a purchase request material-request status', () => {
     it('updates only unfinished procurement-routed siblings', async () => {
         const { service, prisma, materialRequestUpdates } = makeService();
         prisma.purchaseRequest.findUniqueOrThrow.mockResolvedValue({
-            id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'pending_approval',
+            id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'not_raised',
         });
         prisma.purchaseRequest.update.mockResolvedValue({
-            id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'approved',
+            id: 'pr-1', prRef: 'PR-0019', mrRef: 'MR-0007', status: 'raised',
         });
         prisma.materialRequest.findMany.mockResolvedValue([
             { id: 'stock-line', status: 'fulfilled_via_storefront', fulfillmentStatus: 'fulfilled_via_storefront', fulfillmentMethod: 'stock_movement', fulfillmentPlan: { procurementQty: 0 } },
@@ -251,7 +252,7 @@ describe('updating a purchase request material-request status', () => {
             { id: 'completed-procurement-line', status: 'fulfilled_via_procurement', fulfillmentStatus: 'fulfilled_via_procurement', fulfillmentMethod: 'procurement', fulfillmentPlan: { procurementQty: 2 } },
         ]);
 
-        await service.updatePR('pr-1', { status: 'approved' });
+        await service.updatePR('pr-1', { status: 'raised' });
 
         expect(materialRequestUpdates).toEqual([{
             where: { id: { in: ['procurement-line'] } },
@@ -278,10 +279,10 @@ describe('creating an RFQ', () => {
         expect(created.sentRFQ[0].rfqRef).toBe('RFQ-0011');
     });
 
-    it('rejects an RFQ with no approved purchase request behind it', async () => {
+    it('rejects an RFQ with no purchase request behind it', async () => {
         const { service } = makeService();
         await expect(service.createRFQ({ supplierName: 'CemCo', items: [] })).rejects.toThrow(
-            'An RFQ must reference an approved purchase request.',
+            'An RFQ must reference a purchase request.',
         );
     });
 });
@@ -361,6 +362,33 @@ describe('recording a supplier quote', () => {
  * bought.
  */
 describe('approving a supplier quote', () => {
+    it('marks the quote awarded and leaves PO Created for completion of the PO wizard', async () => {
+        const { service, quoteUpdates, purchaseRequestUpdates } = makeService();
+        await service.updateQuote('quote-1', { status: 'selected' });
+
+        expect(quoteUpdates).toContainEqual({
+            where: { id: 'quote-1' },
+            data: { status: 'awarded' },
+        });
+        expect(purchaseRequestUpdates).toContainEqual({
+            where: { prRef: 'PR-0019' },
+            data: { status: 'quotes_received' },
+        });
+    });
+
+    it('tells SabiQuote the final agreed price', async () => {
+        const { service, webhooks } = makeService();
+        await service.updateQuote('quote-1', { status: 'approved' });
+
+        expect(webhooks.triggerWebhook).toHaveBeenCalledWith('quote.agreed', {
+            id: 'quote-1',
+            supplierId: 'sup-1',
+            supplierName: 'Dangote Cement',
+            agreedAmount: 4_250_000,
+            status: 'accepted',
+        });
+    });
+
     it('raises the purchase order the quote won', async () => {
         const { service, purchaseOrders } = makeService();
         await service.updateQuote('quote-1', { status: 'approved' });
@@ -440,6 +468,60 @@ describe('approving a supplier quote', () => {
         await service.updateQuote('quote-1', { status: 'rejected' });
 
         expect(purchaseOrders).toHaveLength(0);
+    });
+});
+
+describe('recording a supplier response to a buyer counter-offer', () => {
+    const quoteWithCounter = {
+        ...quoteRow,
+        status: 'pending_review',
+        notes: 'Initial quote',
+        items: [
+            {
+                ...quoteRow.items[0],
+                negotiations: [
+                    { round: 1, proposedAmount: 4_000_000, status: 'open', comment: 'Buyer counter' },
+                ],
+            },
+        ],
+    };
+
+    it('records acceptance without approving the quote or raising an order', async () => {
+        const { service, prisma, quoteUpdates, purchaseOrders } = makeService();
+        prisma.receivedQuote.findUniqueOrThrow = jest.fn(() => Promise.resolve(quoteWithCounter));
+
+        await service.recordSupplierResponse('quote-1', {
+            decision: 'accepted',
+            agreedTotal: 4_000_000,
+            message: 'Agreed',
+        });
+
+        expect(quoteUpdates[0].data).toMatchObject({
+            status: 'pending_review',
+            totalValue: 4_000_000,
+        });
+        expect(quoteUpdates[0].data.items[0].negotiations[0].status).toBe('accepted');
+        expect(quoteUpdates[0].data.notes).toContain('Supplier accepted');
+        expect(purchaseOrders).toHaveLength(0);
+    });
+
+    it('records rejection without administratively rejecting the quote', async () => {
+        const { service, prisma, quoteUpdates } = makeService();
+        prisma.receivedQuote.findUniqueOrThrow = jest.fn(() => Promise.resolve(quoteWithCounter));
+
+        await service.recordSupplierResponse('quote-1', { decision: 'rejected' });
+
+        expect(quoteUpdates[0].data.status).toBe('pending_review');
+        expect(quoteUpdates[0].data).not.toHaveProperty('totalValue');
+        expect(quoteUpdates[0].data.items[0].negotiations[0].status).toBe('rejected');
+    });
+
+    it('rejects a response when there is no buyer counter-offer', async () => {
+        const { service } = makeService();
+
+        await expect(
+            service.recordSupplierResponse('quote-1', { decision: 'accepted' }),
+        ).rejects.toThrow('no buyer counter-offer');
     });
 });
 

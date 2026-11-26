@@ -9,6 +9,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LeaveBalanceService } from './leave-balance.service';
 import { WorkflowEngineService } from '../workflows/workflow-engine.service';
 import { NotificationDispatchService } from '../notifications/notification-dispatch.service';
+import { MailQueueService } from '../queue/mail-queue.service';
+
+const ADMIN_SETTINGS_KEY = 'admin-settings';
 
 /**
  * Columns a client may set. Everything else is dropped — the request body used to
@@ -59,6 +62,7 @@ export class LeaveRequestsService {
         private leaveBalance: LeaveBalanceService,
         private workflowEngine: WorkflowEngineService,
         private notifications: NotificationDispatchService,
+        private mailQueue: MailQueueService,
     ) { }
 
     findAll(status?: string, employeeId?: string) {
@@ -109,7 +113,7 @@ export class LeaveRequestsService {
         }
         const handoverEmployee = await this.prisma.employee.findFirst({
             where: { id: clean.handoverEmployeeId, status: 'active' },
-            select: { firstName: true, lastName: true },
+            select: { firstName: true, lastName: true, email: true },
         });
         if (!handoverEmployee) throw new BadRequestException('The selected handover employee is not active');
         clean.handoverEmployeeName = `${handoverEmployee.firstName} ${handoverEmployee.lastName}`.trim();
@@ -170,13 +174,27 @@ export class LeaveRequestsService {
         // Open the approval process. A failure here must not lose the request, so
         // it degrades to a warning the UI can surface.
         let workflowWarning: string | undefined;
+        let workflowInstanceId: string | undefined;
         try {
-            await this.openApprovalProcess(request.id, request.employeeId, leaveType);
+            const instance = await this.openApprovalProcess(request.id, request.employeeId, leaveType);
+            workflowInstanceId = instance.id;
         } catch (error) {
             workflowWarning = 'Request submitted, but the approval process could not be started: ' +
                 (error instanceof Error ? error.message : 'unknown error');
             this.logger.warn(workflowWarning);
         }
+
+        // Leave submission uses two purpose-built messages rather than the
+        // generic Email Configuration template. The handover recipient needs an
+        // operational notice; the approver needs an actionable approval notice.
+        // They are deliberately separate messages, even when both roles happen
+        // to resolve to the same address.
+        void this.sendSubmissionEmails(request, handoverEmployee, workflowInstanceId).catch((error) => {
+            this.logger.warn(
+                `Leave submission email routing failed for ${request.refId}: ` +
+                (error instanceof Error ? error.message : String(error)),
+            );
+        });
 
         void this.notifications.dispatch('leave-request.submitted', {
             title: 'Leave request submitted',
@@ -186,6 +204,7 @@ export class LeaveRequestsService {
             actionUrl: '/apps/hr/leave-requests',
             relatedId: request.id,
             relatedType: 'LeaveRequest',
+            suppressEmail: true,
             vars: {
                 reference: request.refId,
                 leaveType: request.leaveType?.name ?? '',
@@ -215,13 +234,134 @@ export class LeaveRequestsService {
         leaveType: { id: string; name: string; approvalsRequired: number },
     ) {
         const workflow = await this.resolveLeaveWorkflow(leaveType);
-        await this.workflowEngine.createWorkflowInstance(
+        return this.workflowEngine.createWorkflowInstance(
             workflow.id,
             'LeaveRequest',
             requestId,
             employeeId,
             { leaveType: leaveType.name },
         );
+    }
+
+    private async sendSubmissionEmails(
+        request: any,
+        handoverEmployee: { firstName: string; lastName: string; email: string },
+        workflowInstanceId?: string,
+    ): Promise<void> {
+        const requesterName = `${request.employee?.firstName ?? ''} ${request.employee?.lastName ?? ''}`.trim();
+        const leaveName = request.leaveType?.name ?? 'Leave';
+        const date = (value: Date | string) => new Date(value).toISOString().slice(0, 10);
+        const summary =
+            `Reference: ${request.refId}\n` +
+            `Employee: ${requesterName}\n` +
+            `Leave type: ${leaveName}\n` +
+            `Period: ${date(request.startDate)} to ${date(request.endDate)}\n` +
+            `Working days: ${request.days}`;
+        const appBaseUrl = String(
+            process.env.FRONTEND_URL || process.env.APP_WEB_URL || process.env.WEB_URL ||
+            (process.env.NODE_ENV === 'production'
+                ? 'https://build-os-delta.vercel.app'
+                : 'http://localhost:5173'),
+        ).replace(/\/$/, '');
+
+        const jobs: Promise<unknown>[] = [];
+        if (handoverEmployee.email) {
+            const handoverName = `${handoverEmployee.firstName} ${handoverEmployee.lastName}`.trim();
+            jobs.push(this.mailQueue.enqueueEmail({
+                to: handoverEmployee.email,
+                subject: `Leave handover assigned — ${request.refId}`,
+                text:
+                    `Hello ${handoverName},\n\n` +
+                    `${requesterName} selected you as the handover employee for this leave request.\n\n` +
+                    `${summary}\n\nPlease coordinate the handover arrangements with ${requesterName}.`,
+            }));
+        }
+
+        const approvers = await this.resolveLeaveEmailApprovers(workflowInstanceId);
+        for (const approver of approvers) {
+            if (approver.email) {
+                jobs.push(this.mailQueue.enqueueEmail({
+                    to: approver.email,
+                    subject: `Leave request awaiting your approval — ${request.refId}`,
+                    text:
+                        `Hello ${approver.name},\n\n` +
+                        `${requesterName} submitted a leave request that requires your approval.\n\n` +
+                        `${summary}\n\nReview it in BuildOS: ${appBaseUrl}/apps/hr/leave-requests`,
+                }));
+            }
+        }
+
+        const results = await Promise.allSettled(jobs);
+        results.forEach((result) => {
+            if (result.status === 'rejected') {
+                this.logger.warn(`Leave submission email failed: ${String(result.reason)}`);
+            }
+        });
+    }
+
+    /**
+     * The Process Workflow configured at Admin › Project Configuration is the
+     * authority for who approves Leave Requests. Group workflows notify every
+     * configured member; tier workflows notify the first level only. The engine's
+     * pending ApprovalRequest remains a compatibility fallback for installations
+     * that have not configured p_leave_requests yet.
+     */
+    private async resolveLeaveEmailApprovers(
+        workflowInstanceId?: string,
+    ): Promise<Array<{ id: string; email: string; name: string }>> {
+        const settingsRow = await this.prisma.systemSetting.findUnique({
+            where: { key: ADMIN_SETTINGS_KEY },
+        }).catch(() => null);
+        const settings = (settingsRow?.value ?? {}) as Record<string, any>;
+        const workflow = (Array.isArray(settings.processWorkflows)
+            ? settings.processWorkflows
+            : []).find((item: any) => String(item?.processId ?? '') === 'p_leave_requests');
+
+        let configured: string[] = [];
+        if (workflow?.workflowType === 'single' && workflow.approver) {
+            configured = [String(workflow.approver)];
+        } else if (workflow?.workflowType === 'group') {
+            configured = Array.isArray(workflow.groupApprovers)
+                ? workflow.groupApprovers.map(String)
+                : [];
+        } else if (workflow?.workflowType === 'tier' && Array.isArray(workflow.tierLevels)) {
+            const first = [...workflow.tierLevels]
+                .sort((a: any, b: any) => Number(a?.level ?? 0) - Number(b?.level ?? 0))[0];
+            if (first?.approver) configured = [String(first.approver)];
+        }
+
+        if (configured.length > 0) {
+            const wanted = new Set(
+                configured.map((value) => value.trim().toLowerCase()).filter(Boolean),
+            );
+            const users = await this.prisma.user.findMany({
+                where: { status: { notIn: ['Inactive', 'inactive'] } },
+                select: { id: true, email: true, name: true, role: true },
+            });
+            const matched = users.filter((user) =>
+                [user.id, user.email, user.name, user.role]
+                    .some((value) => wanted.has(String(value ?? '').trim().toLowerCase())),
+            );
+            if (matched.length > 0) {
+                return matched.map(({ id, email, name }) => ({ id, email, name }));
+            }
+            this.logger.warn(
+                `Leave approver configuration did not resolve to an active user: ${configured.join(', ')}`,
+            );
+        }
+
+        if (!workflowInstanceId) return [];
+        const pending = await this.prisma.approvalRequest.findFirst({
+            where: { workflowInstanceId, status: 'pending' },
+            orderBy: { nodeSequence: 'asc' },
+            select: { approverId: true },
+        });
+        if (!pending) return [];
+        const fallback = await this.prisma.user.findUnique({
+            where: { id: pending.approverId },
+            select: { id: true, email: true, name: true },
+        });
+        return fallback ? [fallback] : [];
     }
 
     /** The configured 'leave' workflow, provisioning a default one if absent. */

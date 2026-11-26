@@ -63,6 +63,42 @@ export const NOTIFICATION_EVENTS: NotificationEventDef[] = [
         description: 'A purchase order has been created.',
     },
     {
+        key: 'purchase-order.approved',
+        label: 'Purchase order approved',
+        app: 'procurement',
+        description: 'A purchase order has completed approval.',
+    },
+    {
+        key: 'purchase-order.sent-to-finance',
+        label: 'Purchase order sent to Finance',
+        app: 'finance',
+        description: 'A purchase order invoice has been forwarded to Finance.',
+    },
+    {
+        key: 'purchase-invoice.approved',
+        label: 'Purchase invoice approved',
+        app: 'finance',
+        description: 'Finance has approved a purchase invoice.',
+    },
+    {
+        key: 'purchase-invoice.rejected',
+        label: 'Purchase invoice rejected',
+        app: 'finance',
+        description: 'Finance has rejected a purchase invoice.',
+    },
+    {
+        key: 'purchase-invoice.paid',
+        label: 'Purchase invoice paid',
+        app: 'finance',
+        description: 'Payment has been recorded for a purchase invoice.',
+    },
+    {
+        key: 'goods-receipt.opened',
+        label: 'Goods receipt opened',
+        app: 'procurement',
+        description: 'A goods receipt has been opened for an expected delivery.',
+    },
+    {
         key: 'stock.low',
         label: 'Low stock',
         app: 'storefront',

@@ -5,8 +5,7 @@ import {
   createPurchaseOrder,
   sendPOToFinance,
   createPO,
-  approvePurchaseOrder,
-  rejectPurchaseOrder,
+  continuePurchaseOrderFulfilment,
   cancelPurchaseOrder,
   type MappedPurchaseOrder,
 } from "../../api/purchase-orders";
@@ -39,8 +38,8 @@ import {
   Trash2,
   DownloadCloud,
   ChevronRight,
-  CheckCircle,
   FileText,
+  CheckCircle,
   Send,
 } from "lucide-react";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -1146,7 +1145,6 @@ export function PurchaseOrdersPage() {
   /** Id of the order currently mid-transition, so an action can't double-fire. */
   const [working, setWorking] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<PurchaseOrder | null>(null);
-  const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null);
   const [viewPO, setViewPO] = useState<PurchaseOrder | null>(null);
   /** The order the file icon was clicked on — the read-only PurchaseOrderPaper view. */
   const [previewPO, setPreviewPO] = useState<PurchaseOrder | null>(null);
@@ -1271,7 +1269,7 @@ export function PurchaseOrdersPage() {
         performedBy: "Current User",
       });
       toast.success(`${po.poRef} created.`, {
-        description: "The purchase order is awaiting approval.",
+        description: "The purchase order is ready for fulfilment.",
       });
       return true;
     } catch (e) {
@@ -1298,26 +1296,13 @@ export function PurchaseOrdersPage() {
     );
   }
 
-  async function handleApprove(po: PurchaseOrder) {
+  async function continueLegacyPO(po: PurchaseOrder) {
     return step(
       po,
-      () => approvePurchaseOrder(po.id, getAuthUserName() || undefined),
-      "Approved",
-      `PO ${po.poRef} approved`,
-      `${po.poRef} approved. Supplier fulfilment and Goods Receipt are now available.`,
-    );
-  }
-
-  async function confirmReject() {
-    const po = rejectTarget;
-    if (!po) return;
-    setRejectTarget(null);
-    await step(
-      po,
-      () => rejectPurchaseOrder(po.id, "Returned for correction.", getAuthUserName() || undefined),
-      "Rejected",
-      `PO ${po.poRef} returned for correction`,
-      `${po.poRef} returned to draft.`,
+      () => continuePurchaseOrderFulfilment(po.id, getAuthUserName() || undefined),
+      "Ready for fulfilment",
+      `PO ${po.poRef} continued without approval`,
+      `${po.poRef} is ready for fulfilment.`,
     );
   }
 
@@ -1397,12 +1382,6 @@ export function PurchaseOrdersPage() {
       render: (po) => (
         <div className="space-y-1">
           <StatusBadge {...statusDef(PURCHASE_ORDER_STATUS, po.status)} />
-          {po.approvalStatus === "pending_approval" && (
-            <p className="text-xs font-medium text-amber-700">Awaiting PO approval</p>
-          )}
-          {po.approvalStatus === "rejected" && (
-            <p className="text-xs font-medium text-red-600">Returned: {po.rejectionReason}</p>
-          )}
           {po.financeRef && (
             <p className="text-xs text-gray-400 font-mono">{po.financeRef}</p>
           )}
@@ -1449,24 +1428,14 @@ export function PurchaseOrdersPage() {
         if (po.status === "cancelled") return null;
         if (po.approvalStatus === "pending_approval") {
           return (
-            <div className="flex items-center justify-end gap-1">
-              <button
-                type="button"
-                disabled={working === po.id}
-                onClick={(e) => { e.stopPropagation(); void handleApprove(po); }}
-                className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 disabled:opacity-50"
-              >
-                <CheckCircle className="w-3 h-3" /> Approve
-              </button>
-              <button
-                type="button"
-                disabled={working === po.id}
-                onClick={(e) => { e.stopPropagation(); setRejectTarget(po); }}
-                className="px-2 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50"
-              >
-                Reject
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={working === po.id}
+              onClick={(e) => { e.stopPropagation(); void continueLegacyPO(po); }}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 disabled:opacity-50"
+            >
+              <CheckCircle className="w-3 h-3" /> Continue Fulfilment
+            </button>
           );
         }
         const created = po.status !== "draft" && po.status !== "finance_declined";
@@ -1890,16 +1859,6 @@ export function PurchaseOrdersPage() {
       {/* Cancelled, not deleted: deleting an order takes the quote it was
           awarded from, the invoice Finance raised for it and the payment with
           it. */}
-      <ConfirmationModal
-        isOpen={rejectTarget !== null}
-        title="Return Purchase Order?"
-        description={rejectTarget ? `${rejectTarget.poRef} will return to draft for correction and cannot proceed to Finance or Goods Receipt.` : ""}
-        confirmLabel="Return to Draft"
-        isDangerous
-        onConfirm={confirmReject}
-        onCancel={() => setRejectTarget(null)}
-      />
-
       <ConfirmationModal
         isOpen={Boolean(cancelTarget)}
         title="Cancel purchase order"

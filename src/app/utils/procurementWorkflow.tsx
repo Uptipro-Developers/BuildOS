@@ -33,7 +33,7 @@ import {
  *   Material Request → approved → Purchase Request (not raised)
  *   Purchase Request → raised → Sent Requests (RFQ per supplier)
  *   Sent Request → supplier responds → Received Quote
- *   Received Quote → approved → Purchase Order
+ *   Received Quote → awarded → Purchase Order
  *   Purchase Order → sent to finance → accepted → paid → confirmed
  *   Purchase Order (confirmed) → Goods Receipt → stock
  */
@@ -64,7 +64,7 @@ export const MATERIAL_REQUEST_STATUS: Record<MaterialRequestStatus, StatusDef> =
     icon: <Clock className={ICON} />,
   },
   approved: {
-    label: "Approved",
+    label: "Awarded (Legacy)",
     badge: "bg-green-100 text-green-700",
     icon: <CheckCircle2 className={ICON} />,
   },
@@ -188,6 +188,7 @@ export const SENT_REQUEST_STATUS: Record<SentRequestStatus, StatusDef> = {
 
 export type ReceivedQuoteStatus =
   | "pending_review"
+  | "awarded"
   | "approved"
   | "po_created"
   | "rejected";
@@ -197,6 +198,11 @@ export const RECEIVED_QUOTE_STATUS: Record<ReceivedQuoteStatus, StatusDef> = {
     label: "Pending Review",
     badge: "bg-amber-100 text-amber-700",
     icon: <Clock className={ICON} />,
+  },
+  awarded: {
+    label: "Awarded · PO Draft",
+    badge: "bg-green-100 text-green-700",
+    icon: <ThumbsUp className={ICON} />,
   },
   approved: {
     label: "Approved",
@@ -364,11 +370,10 @@ export const PURCHASE_INVOICE_STATUS: Record<PurchaseInvoiceStatus, StatusDef> =
 // ── Goods Receipts ───────────────────────────────────────────────────────────
 
 /**
- * `pending` — nothing recorded yet. `pending_approval` ("Pending Inspection")
- * — a delivery has been keyed in and is awaiting the configured approver's
- * decision; nothing has touched stock. The rest are what accepting one
- * settles into: rejection outranks quantity (`partial_delivery`), then it's a
- * straight comparison of received to ordered.
+ * `pending` — nothing recorded yet. New recordings post immediately. The
+ * `pending_approval` value is retained only for records created before that
+ * change and is presented as pending posting. Terminal classification uses
+ * rejection first, then compares received with ordered quantities.
  */
 export type GoodsReceiptStatus =
   | "pending"
@@ -386,7 +391,7 @@ export const GOODS_RECEIPT_STATUS: Record<GoodsReceiptStatus, StatusDef> = {
     icon: <Clock className={ICON} />,
   },
   pending_approval: {
-    label: "Pending Inspection",
+    label: "Pending Stock Posting",
     badge: "bg-amber-100 text-amber-700",
     icon: <MailOpen className={ICON} />,
   },

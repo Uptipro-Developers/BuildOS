@@ -48,9 +48,7 @@ export class GoodsReceiptsService {
             include: GRN_INCLUDE,
             orderBy: { receivedDate: 'desc' },
         });
-        if (!forUser) return rows.map((r) => ({ ...r, canDecide: false }));
-        const ctx = await this.approverContext(forUser);
-        return rows.map((r) => ({ ...r, canDecide: this.canDecideRow(ctx, r.receivedBy) }));
+        return rows.map((r) => ({ ...r, canDecide: r.status === 'pending_approval' }));
     }
 
     async findOne(id: string, forUser?: { userId?: string; name?: string; email?: string; role?: string }) {
@@ -58,9 +56,7 @@ export class GoodsReceiptsService {
             where: { id },
             include: { items: true, purchaseOrder: { include: { supplier: true } } },
         });
-        if (!forUser) return { ...row, canDecide: false };
-        const ctx = await this.approverContext(forUser);
-        return { ...row, canDecide: this.canDecideRow(ctx, row.receivedBy) };
+        return { ...row, canDecide: row.status === 'pending_approval' };
     }
 
     /**
@@ -335,7 +331,7 @@ export class GoodsReceiptsService {
             ),
         );
 
-        return this.prisma.goodsReceipt.update({
+        await this.prisma.goodsReceipt.update({
             where: { id },
             data: {
                 status: 'pending_approval',
@@ -347,6 +343,10 @@ export class GoodsReceiptsService {
             },
             include: { items: true },
         });
+        // Procurement Material Request approval is the last authorisation in
+        // this chain. Recording a delivery is an operational confirmation, so
+        // immediately fold the accepted quantities into stock.
+        return this.accept(id);
     }
 
     /** Classifies the delivery from its cumulative totals. Rejection outranks quantity. */
@@ -363,9 +363,9 @@ export class GoodsReceiptsService {
      * reclassifies the delivery. This is the only place stock actually moves —
      * `updateRecord` only ever wrote a draft.
      *
-     * Only the Goods Receipt workflow's configured approver may call this,
-     * whether from this page's own button or from the generic Approvals page
-     * (AdminExtrasService.updateApproval delegates here) — one gate either way.
+     * This is an operational posting step, not an approval. New records call it
+     * directly from updateRecord; the public endpoint remains so legacy records
+     * left at pending_approval can also be posted.
      */
     async accept(id: string, forUser?: { userId?: string; name?: string; email?: string; role?: string }) {
         const grn = await this.prisma.goodsReceipt.findUnique({
@@ -376,8 +376,6 @@ export class GoodsReceiptsService {
         if (grn.status !== 'pending_approval') {
             throw new BadRequestException(`${grn.reference} is not awaiting a decision.`);
         }
-        await this.assertMayDecide(forUser, grn.receivedBy);
-
         const now = new Date();
         const po = grn.purchaseOrder;
 
@@ -548,7 +546,6 @@ export class GoodsReceiptsService {
         if (grn.status !== 'pending_approval') {
             throw new BadRequestException(`${grn.reference} is not awaiting a decision.`);
         }
-        await this.assertMayDecide(forUser, grn.receivedBy);
         return this.prisma.goodsReceipt.update({
             where: { id },
             data: {

@@ -853,12 +853,29 @@ export class AdminExtrasService {
         const settings = await this.readAdminSettings();
         // The legacy Incoming Store Requests workflow duplicated Material
         // Request Approval. Keep only the canonical p_material_requests entry.
-        return settings.processWorkflows.filter((item: any) => item.processId !== 'p_store_requests');
+        const nonApprovalProcesses = new Set([
+            'p_purchase_requests',
+            'p_supplier_quotes',
+            'p_purchase_orders',
+            'p_goods_receipt',
+        ]);
+        return settings.processWorkflows.filter((item: any) =>
+            item.processId !== 'p_store_requests' && !nonApprovalProcesses.has(item.processId),
+        );
     }
 
     async createProcessWorkflow(data: any) {
         const settings = await this.readAdminSettings();
         const next = this.normalizeProcessWorkflowItem(data);
+
+        if (['p_purchase_requests', 'p_supplier_quotes', 'p_purchase_orders', 'p_goods_receipt'].includes(next.processId)) {
+            throw new BadRequestException('This process does not require an approval workflow.');
+        }
+        const process = settings.processCatalog.find((item: any) => item.id === next.processId)
+            ?? this.defaultProcessCatalog.find((item: any) => item.id === next.processId);
+        if (!process || process.requiresApproval === false || !process.actions?.includes('approve')) {
+            throw new BadRequestException('This process does not require an approval workflow.');
+        }
 
         if (settings.processWorkflows.some((item: any) => item.id === next.id)) {
             throw new ConflictException('Workflow id already exists');
@@ -1323,8 +1340,11 @@ export class AdminExtrasService {
     /** Catalog process ids that support an `approve` action. */
     private async approvableProcessCatalogIds(): Promise<string[]> {
         const ids = new Set<string>();
+        const operationalProcurement = new Set([
+            'p_purchase_requests', 'p_supplier_quotes', 'p_purchase_orders', 'p_goods_receipt',
+        ]);
         for (const proc of DEFAULT_PROCESS_CATALOG) {
-            if ((proc.actions as string[] | undefined)?.includes('approve')) {
+            if (!operationalProcurement.has(proc.id) && (proc.actions as string[] | undefined)?.includes('approve')) {
                 ids.add(proc.id);
             }
         }
@@ -1333,7 +1353,7 @@ export class AdminExtrasService {
             const custom = Array.isArray(settings.processCatalog) ? settings.processCatalog : [];
             for (const item of custom) {
                 const id = String(item?.id ?? '').trim();
-                if (!id || id === 'p_store_requests') continue;
+                if (!id || id === 'p_store_requests' || operationalProcurement.has(id)) continue;
                 const actions = Array.isArray(item?.actions)
                     ? item.actions.map((a: unknown) => String(a).trim().toLowerCase())
                     : ['approve'];
@@ -1512,13 +1532,6 @@ export class AdminExtrasService {
         }
 
         if (target === 'all' || target === 'procurement') {
-            const [purchaseRequests, purchaseOrders] = await Promise.all([
-                this.prisma.purchaseRequest.findMany({ orderBy: { createdAt: 'desc' } }),
-                this.prisma.purchaseOrder.findMany({
-                    include: { supplier: true },
-                    orderBy: { createdAt: 'desc' },
-                }),
-            ]);
             const materialRequests = await this.prisma.materialRequest.findMany({
                 where: { fulfillmentMethod: { in: ['procurement', 'mixed'] } },
                 orderBy: { createdAt: 'desc' },
@@ -1547,57 +1560,6 @@ export class AdminExtrasService {
                 description: r.purpose ?? r.notes ?? '',
                 approvalFlow: flowForType('Material Request'),
             }); }));
-            rows.push(...purchaseRequests.map((r) => ({
-                id: r.id,
-                module: 'procurement',
-                type: 'Purchase Request',
-                title: r.title,
-                project: r.projectName ?? 'Procurement',
-                requestedBy: r.requestedBy,
-                date: r.createdAt,
-                status: this.normalizeApprovalStatus(r.status),
-                urgency: String(r.priority).toLowerCase().includes('urgent') ? 'urgent' : 'normal',
-                description: r.notes ?? '',
-                approvalFlow: flowForType('Purchase Request'),
-            })));
-            rows.push(...purchaseOrders.map((o) => ({
-                id: o.id,
-                module: 'procurement',
-                type: 'Purchase Order',
-                title: `${o.supplier.name} — ${o.prRef ?? o.id}`,
-                project: o.mrRef ?? o.prRef ?? 'Procurement',
-                requestedBy: o.createdBy,
-                date: o.createdDate,
-                amount: o.totalValue,
-                status: this.normalizeApprovalStatus(o.status),
-                urgency: 'normal',
-                description: `Expected ${o.expectedDate.toISOString().slice(0, 10)}`,
-                approvalFlow: flowForType('Purchase Order'),
-            })));
-
-            // A GRN still at "pending" has not been recorded yet — nothing for an
-            // approver to decide, same reasoning as excluding Pending Review
-            // invoices above.
-            const goodsReceipts = await this.prisma.goodsReceipt.findMany({
-                where: { NOT: { status: 'pending' } },
-                orderBy: { receivedDate: 'desc' },
-            });
-            rows.push(...goodsReceipts.map((g) => ({
-                id: g.id,
-                module: 'procurement',
-                type: 'Goods Receipt',
-                title: `${g.reference} — ${g.supplierName}`,
-                project: g.poRef ?? 'Procurement',
-                requestedBy: g.receivedBy,
-                date: g.receivedDate,
-                // Its terminal states (partial_delivery, over_supply, ...) don't
-                // contain "approve"/"paid"/"complete", so normalizeApprovalStatus
-                // would misread every one of them as still pending.
-                status: g.status === 'rejected' ? 'rejected' : g.status === 'pending_approval' ? 'pending' : 'approved',
-                urgency: 'normal',
-                description: g.mrRef ? `PO ${g.poRef ?? ''} · MR ${g.mrRef}` : `PO ${g.poRef ?? ''}`,
-                approvalFlow: flowForType('Goods Receipt'),
-            })));
         }
 
         // Pending-invite users are deliberately NOT surfaced here.

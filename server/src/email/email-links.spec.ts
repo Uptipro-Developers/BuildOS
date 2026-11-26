@@ -116,3 +116,34 @@ describe('renderButton', () => {
         expect(render('Open', '{{missing_var}}').html).toBe('');
     });
 });
+
+describe('compose', () => {
+    it('matches trigger names case-insensitively and renders configured recipients', async () => {
+        const prisma = {
+            systemSetting: {
+                findUnique: jest.fn().mockResolvedValue({
+                    value: {
+                        emailConfigs: [{
+                            trigger: 'Purchase Request Submitted',
+                            enabled: true,
+                            subject: 'Request {{reference}}',
+                            body: 'Please review {{reference}}',
+                            recipients: 'buyer@example.com; {{owner_email}}',
+                            cc: 'audit@example.com',
+                        }],
+                    },
+                }),
+            },
+        };
+        const service = new EmailTemplateService(prisma as any);
+
+        const result = await service.compose('purchase request submitted', {
+            reference: 'PR-100',
+            owner_email: 'owner@example.com',
+        });
+
+        expect(result?.subject).toBe('Request PR-100');
+        expect(result?.to).toEqual(['buyer@example.com', 'owner@example.com']);
+        expect(result?.cc).toEqual(['audit@example.com']);
+    });
+});

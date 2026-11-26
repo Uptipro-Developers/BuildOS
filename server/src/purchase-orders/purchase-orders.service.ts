@@ -168,9 +168,6 @@ export class PurchaseOrdersService {
             include: { supplier: true, items: true },
         });
         if (!po) throw new NotFoundException('Purchase order not found');
-        if (po.approvalStatus !== 'approved') {
-            throw new BadRequestException('The purchase order must be approved before it can be sent to Finance.');
-        }
         this.assertTransition(po.status, 'sent_to_finance');
 
         const { reference: invoiceNo } = await this.numbering.allocate('PurchaseInvoice');
@@ -235,9 +232,9 @@ export class PurchaseOrdersService {
      * `confirmed` (Finance approved, supplier confirmed the payment landed),
      * which meant a post-delivery order needed its own separate skip-finance
      * path just to become receivable. Opening the receipt here instead, the
-     * Approval is now a separate gate. Completing the document submits it for
-     * approval; supplier email and goods-receipt availability only happen once
-     * an authorised approver accepts it.
+     * Procurement Material Request approval is the final authorisation in the
+     * chain. Completing this document therefore makes it operational at once:
+     * the supplier receives it and its goods receipt becomes available.
      */
     async createPO(
         id: string,
@@ -255,7 +252,7 @@ export class PurchaseOrdersService {
             where: { id },
             data: {
                 status: 'po_created',
-                approvalStatus: 'pending_approval',
+                approvalStatus: 'not_required',
                 approvedBy: null,
                 approvedAt: null,
                 rejectionReason: null,
@@ -268,6 +265,22 @@ export class PurchaseOrdersService {
             },
             include: { supplier: true, items: true },
         });
+        // This is the point at which a draft order becomes a completed PO.
+        // Keep the originating quote and PR aligned with the PO page.
+        if (po.quoteRef) {
+            await this.prisma.receivedQuote.updateMany({
+                where: { id: po.quoteRef },
+                data: { status: 'po_created' },
+            });
+        }
+        if (po.prRef) {
+            await this.prisma.purchaseRequest.updateMany({
+                where: { prRef: po.prRef },
+                data: { status: 'po_created' },
+            });
+        }
+        await this.goodsReceipts.openForOrder(id).catch(() => undefined);
+        this.emailPurchaseOrderToSupplier(updated).catch(() => undefined);
         return updated;
     }
 
@@ -283,22 +296,22 @@ export class PurchaseOrdersService {
         const updated = await this.prisma.purchaseOrder.update({
             where: { id },
             data: {
-                approvalStatus: 'approved',
-                approvedBy: actor || 'Current User',
-                approvedAt: new Date(),
+                approvalStatus: 'not_required',
+                approvedBy: null,
+                approvedAt: null,
                 rejectionReason: null,
             },
             include: { supplier: true, items: true },
         });
         await this.goodsReceipts.openForOrder(id).catch(() => undefined);
         this.emailPurchaseOrderToSupplier(updated).catch(() => undefined);
-        void this.notifications.dispatch('purchase-order.approved', {
-            title: 'Purchase order approved',
-            message: `${updated.poRef ?? updated.id} is approved and ready for fulfilment.`,
+        void this.notifications.dispatch('purchase-order.created', {
+            title: 'Purchase order ready for fulfilment',
+            message: `${updated.poRef ?? updated.id} is ready for fulfilment.`,
             actionUrl: '/apps/procurement/purchase-orders',
             relatedId: updated.id,
             relatedType: 'PurchaseOrder',
-            vars: { reference: updated.poRef ?? updated.id, approver: actor ?? '' },
+            vars: { reference: updated.poRef ?? updated.id },
         });
         return updated;
     }

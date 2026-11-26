@@ -51,6 +51,15 @@ function makeService(po: any = {}) {
             findUnique: jest.fn(() => Promise.resolve(null)),
             update: jest.fn(),
         },
+        companyProfile: {
+            findUnique: jest.fn(() => Promise.resolve({ id: 'singleton', name: 'BuildOS' })),
+        },
+        receivedQuote: {
+            updateMany: jest.fn(() => Promise.resolve({ count: 1 })),
+        },
+        purchaseRequest: {
+            updateMany: jest.fn(() => Promise.resolve({ count: 1 })),
+        },
     };
     prisma.$transaction = jest.fn((run: any) => run(prisma));
 
@@ -214,20 +223,25 @@ describe('creating a purchase order', () => {
         );
     });
 
-    it('submits a completed document for approval before fulfilment starts', async () => {
-        const { service, updates, goodsReceipts, mailQueue } = makeService({ status: 'draft', approvalStatus: 'not_submitted' });
+    it('makes a completed document operational without another approval', async () => {
+        const { service, prisma, updates, goodsReceipts, mailQueue } = makeService({
+            status: 'draft',
+            approvalStatus: 'not_submitted',
+            quoteRef: 'quote-1',
+            prRef: 'PR-0019',
+        });
         await service.createPO('po-1', { paymentTermId: 'term-1', deliverySplit: 'post_delivery' });
 
-        expect(updates[0]).toMatchObject({ status: 'po_created', approvalStatus: 'pending_approval' });
-        expect(goodsReceipts.openForOrder).not.toHaveBeenCalled();
-        expect(mailQueue.enqueueEmail).not.toHaveBeenCalled();
-    });
-
-    it('opens fulfilment only after an authorised approval action', async () => {
-        const { service, goodsReceipts } = makeService({ status: 'po_created', approvalStatus: 'pending_approval' });
-        const approved = await service.approvePO('po-1', 'Procurement Manager');
-
-        expect(approved.approvalStatus).toBe('approved');
+        expect(updates[0]).toMatchObject({ status: 'po_created', approvalStatus: 'not_required' });
+        expect(prisma.receivedQuote.updateMany).toHaveBeenCalledWith({
+            where: { id: 'quote-1' },
+            data: { status: 'po_created' },
+        });
+        expect(prisma.purchaseRequest.updateMany).toHaveBeenCalledWith({
+            where: { prRef: 'PR-0019' },
+            data: { status: 'po_created' },
+        });
         expect(goodsReceipts.openForOrder).toHaveBeenCalledWith('po-1');
+        expect(mailQueue.enqueueEmail).toHaveBeenCalled();
     });
 });
